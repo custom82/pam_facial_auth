@@ -4,6 +4,9 @@ A pluggable authentication module that relies on facial recognition to
 verify the user attempting to gain access. Looks for a match between
 username and label associated with the recognized face.
 
+WORK IN PROGRESS
+do not use for production environment
+
 **Please don't use facial recognition as a serious form of authentication.
 This was literally written to be exploited in a CTF**
 
