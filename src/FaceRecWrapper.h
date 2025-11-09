@@ -1,29 +1,26 @@
+#ifndef FACERECWRAPPER_H
+#define FACERECWRAPPER_H
+
 #include <opencv2/opencv.hpp>
-#include <opencv2/face.hpp>  // Required for FaceRecognizer
+#include <opencv2/face.hpp>
+#include <vector>
+#include <string>
 
 class FaceRecWrapper {
 public:
-    FaceRecWrapper();
-    FaceRecWrapper(const std::string &techniqueName, const std::string &pathCascade);
-
-    void Train(const std::vector<cv::Mat> &images, const std::vector<int> &labels);
-    void Predict(const cv::Mat &im, int &label, double &confidence);
-    void Save(const std::string &path);
+    FaceRecWrapper(const std::string &modelPath, const std::string &name);
     void Load(const std::string &path);
+    void Train(const std::vector<cv::Mat> &images, const std::vector<int> &labels);
+    int Predict(const cv::Mat &image, int &prediction, double &confidence);
 
-    void SetLabelNames(const std::vector<std::string> &names);  // Declare SetLabelNames
-    std::string GetLabelName(int index);  // Declare GetLabelName
+    // Aggiunta delle funzioni per la gestione delle etichette
+    void SetLabelNames(const std::vector<std::string> &names);
+    std::string GetLabelName(int index);
 
 private:
     cv::Ptr<cv::face::FaceRecognizer> fr;
-    cv::CascadeClassifier cascade;
-    std::vector<std::string> labelNames;  // Store the label names
-
-    bool SetTechnique(const std::string &t);
-    bool LoadCascade(const std::string &filepath);
-    bool CropFace(const cv::Mat &image, cv::Mat &cropped);
-
-    std::string pathCascade;
-    int sizeFace;
-    std::string technique;
+    std::vector<std::string> labelNames;  // Aggiunto per memorizzare le etichette
+    std::string modelPath;
 };
+
+#endif // FACERECWRAPPER_H
