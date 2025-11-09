@@ -1,6 +1,4 @@
 #include "FaceRecWrapper.h"
-#include "Utils.h"  // Aggiunto per risolvere il problema con Utils
-
 #include <fstream>  // Aggiunto per risolvere il problema con ifstream e ofstream
 
 FaceRecWrapper::FaceRecWrapper() :
@@ -72,7 +70,7 @@ void FaceRecWrapper::Load(const std::string & path) {
 	SetTechnique(model["technique"]);
 
 	LoadCascade(path + "-cascade.xml");
-	fr->read(path + "-facerec.xml");  // Usa 'read' invece di 'load'
+	fr->read(path + "-facerec.xml");  // Usa il metodo 'read' per caricare il modello
 }
 
 void FaceRecWrapper::SetLabelNames(const std::vector<std::string> & names) {
@@ -87,14 +85,14 @@ std::string FaceRecWrapper::GetLabelName(int index) {
 
 bool FaceRecWrapper::SetTechnique(const std::string & t) {
 	if (t == "eigen") {
-		fr = cv::face::EigenFaceRecognizer::create(10);  // Modifica con 'create'
+		fr = cv::face::EigenFaceRecognizer::create(10);
 	} else if (t == "fisher") {
-		fr = cv::face::FisherFaceRecognizer::create();  // Modifica con 'create'
+		fr = cv::face::FisherFaceRecognizer::create();
 	} else if (t == "lbph") {
-		fr = cv::face::LBPHFaceRecognizer::create();  // Modifica con 'create'
+		fr = cv::face::LBPHFaceRecognizer::create();
 	} else {
 		std::cerr << "Invalid technique: " << t << ", defaulting to eigenfaces." << std::endl;
-		fr = cv::face::EigenFaceRecognizer::create(10);  // Modifica con 'create'
+		fr = cv::face::EigenFaceRecognizer::create(10);
 		technique = "eigen";
 		return false;
 	}
@@ -103,21 +101,21 @@ bool FaceRecWrapper::SetTechnique(const std::string & t) {
 	return true;
 }
 
-bool FaceRecWrapper::LoadCascade(const std::string &filepath) {
+bool FaceRecWrapper::LoadCascade(const std::string & filepath) {
 	pathCascade = filepath;
 
 	// Set up face detector
 	if (!cascade.load(pathCascade)) {
 		std::cerr << "Could not load haar cascade classifier." << std::endl;
-		return false;  // Aggiungi questa linea per restituire un valore booleano
+		return false;
 	}
-	return true;  // Aggiungi questa linea per restituire true se il caricamento è riuscito
+	return true;
 }
 
 bool FaceRecWrapper::CropFace(const cv::Mat & image, cv::Mat & cropped) {
 	// Detect face
 	std::vector<cv::Rect> faces;
-	cascade.detectMultiScale(image, faces, 1.05, 8, 0 | cv::CASCADE_SCALE_IMAGE, cv::Size(40, 40));  // Modificato 'CV_HAAR_SCALE_IMAGE' con 'cv::CASCADE_SCALE_IMAGE'
+	cascade.detectMultiScale(image, faces, 1.05, 8, 0 | cv::CASCADE_SCALE_IMAGE, cv::Size(40, 40)); // Corretto con cv::CASCADE_SCALE_IMAGE
 	if (!faces.size()) {
 		return false;
 	}
