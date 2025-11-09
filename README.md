@@ -9,7 +9,7 @@ This was literally written to be exploited in a CTF**
 
 Requirements
 ------------
-- OpenCV 3.0+ including extra modules (opencv_contrib)
+- OpenCV 4+ including extra modules (opencv_contrib)
 - PAM development packages (libpam0g and libpam0g-dev on ubuntu)
 - dirent.h available in PATH (already installed on ubuntu)
 
@@ -17,7 +17,7 @@ Quickstart
 ----------
 Clone this repository
 ```
-git clone https://github.com/devinaconley/pam-facial-auth.git
+git clone https://github.com/custom82/pam_facial_auth.git
 ```
 Build and install facial auth module
 ```
@@ -26,7 +26,7 @@ chmod +x setup.sh
 ```
 Train facial recognition model
 ```
-./run_training [data_dir] [algorithm (optional) haar_cascade(optional)]
+./facial_training [data_dir] [algorithm (optional) haar_cascade(optional)]
 ```
 Where the data directory is expected to be of the following structure
 ```
@@ -58,7 +58,7 @@ chmod +x configure.sh
 
 Run test application
 ```
-./run_test
+./facial_test
 ```
 
 Credit
