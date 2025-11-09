@@ -1,5 +1,6 @@
 #include "FaceRecWrapper.h"
 #include <fstream>  // Aggiunto per risolvere il problema con ifstream e ofstream
+#include "Utils.h"  // Aggiunto per risolvere l'errore di Utils non dichiarato
 
 FaceRecWrapper::FaceRecWrapper() : sizeFace(96) {}
 
@@ -107,23 +108,3 @@ bool FaceRecWrapper::LoadCascade(const std::string &filepath) {
 
 	// Set up face detector
 	if (!cascade.load(pathCascade)) {
-		std::cerr << "Could not load haar cascade classifier." << std::endl;
-		return false;
-	}
-	return true;
-}
-
-bool FaceRecWrapper::CropFace(const cv::Mat &image, cv::Mat &cropped) {
-	// Detect face
-	std::vector<cv::Rect> faces;
-	cascade.detectMultiScale(image, faces, 1.05, 8, 0 | cv::CASCADE_SCALE_IMAGE, cv::Size(40, 40));
-	if (faces.empty()) {
-		return false;
-	}
-
-	// Crop and resize
-	cropped = image(faces[0]);
-	cv::resize(cropped, cropped, cv::Size(sizeFace, sizeFace));
-
-	return true;
-}
