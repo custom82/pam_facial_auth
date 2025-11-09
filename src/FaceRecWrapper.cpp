@@ -1,17 +1,21 @@
 #include "FaceRecWrapper.h"
-#include <fstream>  // Aggiunto per risolvere il problema con ifstream e ofstream
+#include <fstream>
+#include <opencv2/opencv.hpp>
+#include <opencv2/face.hpp>  // For face recognition
+
+// Assuming Utils is a custom utility class, it needs to be defined or included
 #include "Utils.h"
 
 FaceRecWrapper::FaceRecWrapper() :
 sizeFace(96) {}
 
-FaceRecWrapper::FaceRecWrapper(const std::string & techniqueName, const std::string & pathCascade) :
+FaceRecWrapper::FaceRecWrapper(const std::string &techniqueName, const std::string &pathCascade) :
 sizeFace(96) {
 	SetTechnique(techniqueName);
 	LoadCascade(pathCascade);
 }
 
-void FaceRecWrapper::Train(const std::vector<cv::Mat> & images, const std::vector<int> & labels) {
+void FaceRecWrapper::Train(const std::vector<cv::Mat> &images, const std::vector<int> &labels) {
 	if (!images.size()) {
 		std::cerr << "Empty vector of training images" << std::endl;
 		return;
@@ -31,7 +35,7 @@ void FaceRecWrapper::Train(const std::vector<cv::Mat> & images, const std::vecto
 	fr->train(imagesCropped, labelsCropped);
 }
 
-void FaceRecWrapper::Predict(const cv::Mat & im, int & label, double & confidence) {
+void FaceRecWrapper::Predict(const cv::Mat &im, int &label, double &confidence) {
 	cv::Mat cropped;
 	if (!CropFace(im, cropped)) {
 		label = -1;
@@ -42,28 +46,27 @@ void FaceRecWrapper::Predict(const cv::Mat & im, int & label, double & confidenc
 	fr->predict(cropped, label, confidence);
 }
 
-void FaceRecWrapper::Save(const std::string & path) {
-	// Apre il file in modalità binaria
+void FaceRecWrapper::Save(const std::string &path) {
 	std::ifstream orig(pathCascade, std::ios::binary);
 	if (!orig) {
-		std::cerr << "Errore nell'aprire il file: " << pathCascade << std::endl;
+		std::cerr << "Error opening file: " << pathCascade << std::endl;
 		return;
 	}
-	std::ofstream cpy(path + "-cascade.xml", std::ios::binary);
-	cpy << orig.rdbuf();  // Copia il contenuto del file di origine nel nuovo file
 
-	// Salva il modello
+	std::ofstream cpy(path + "-cascade.xml", std::ios::binary);
+	cpy << orig.rdbuf();
+
 	fr->save(path + "-facerec.xml");
 
-	// Scrive alcune informazioni aggiuntive sul modello
-	FILE * pModel;
+	// Write additional information to the model file
+	FILE *pModel;
 	pModel = fopen(path.c_str(), "w");
 	fprintf(pModel, "technique=%s\n", technique.c_str());
 	fprintf(pModel, "sizeFace=%d\n", (int)sizeFace);
 	fclose(pModel);
 }
 
-void FaceRecWrapper::Load(const std::string & path) {
+void FaceRecWrapper::Load(const std::string &path) {
 	std::map<std::string, std::string> model;
 	Utils::GetConfig(path, model);
 
@@ -71,10 +74,10 @@ void FaceRecWrapper::Load(const std::string & path) {
 	SetTechnique(model["technique"]);
 
 	LoadCascade(path + "-cascade.xml");
-	fr->read(path + "-facerec.xml");  // Usa il metodo 'read' per caricare il modello
+	fr->load(path + "-facerec.xml");
 }
 
-void FaceRecWrapper::SetLabelNames(const std::vector<std::string> & names) {
+void FaceRecWrapper::SetLabelNames(const std::vector<std::string> &names) {
 	for (std::size_t i = 0; i < names.size(); ++i) {
 		fr->setLabelInfo(i, names[i]);
 	}
@@ -84,7 +87,7 @@ std::string FaceRecWrapper::GetLabelName(int index) {
 	return fr->getLabelInfo(index);
 }
 
-bool FaceRecWrapper::SetTechnique(const std::string & t) {
+bool FaceRecWrapper::SetTechnique(const std::string &t) {
 	if (t == "eigen") {
 		fr = cv::face::EigenFaceRecognizer::create(10);
 	} else if (t == "fisher") {
@@ -102,10 +105,9 @@ bool FaceRecWrapper::SetTechnique(const std::string & t) {
 	return true;
 }
 
-bool FaceRecWrapper::LoadCascade(const std::string & filepath) {
+bool FaceRecWrapper::LoadCascade(const std::string &filepath) {
 	pathCascade = filepath;
 
-	// Set up face detector
 	if (!cascade.load(pathCascade)) {
 		std::cerr << "Could not load haar cascade classifier." << std::endl;
 		return false;
@@ -113,15 +115,13 @@ bool FaceRecWrapper::LoadCascade(const std::string & filepath) {
 	return true;
 }
 
-bool FaceRecWrapper::CropFace(const cv::Mat & image, cv::Mat & cropped) {
-	// Detect face
+bool FaceRecWrapper::CropFace(const cv::Mat &image, cv::Mat &cropped) {
 	std::vector<cv::Rect> faces;
-	cascade.detectMultiScale(image, faces, 1.05, 8, 0 | cv::CASCADE_SCALE_IMAGE, cv::Size(40, 40)); // Corretto con cv::CASCADE_SCALE_IMAGE
-	if (!faces.size()) {
+	cascade.detectMultiScale(image, faces, 1.05, 8, 0, cv::Size(40, 40));
+	if (faces.empty()) {
 		return false;
 	}
 
-	// Crop and resize
 	cropped = image(faces[0]);
 	cv::resize(cropped, cropped, cv::Size(sizeFace, sizeFace));
 
