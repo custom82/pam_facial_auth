@@ -1,0 +1,37 @@
+.\" Manpage for facial_test
+.TH FACIAL_TEST 8 "October 2023" "1.0" "PAM Facial Authentication"
+.SH NAME
+facial_test \- Riconoscimento facciale per l'autenticazione PAM
+.SH SYNOPSIS
+.B facial_test
+.RI [options] <image_path>
+.SH DESCRIPTION
+**facial_test** è un'applicazione che esegue il riconoscimento facciale utilizzando un modello addestrato per identificare una persona sulla base di un'immagine fornita. Utilizza il modello precedentemente creato con il comando **`facial_training`**.
+
+.PP
+Quando esegui il comando, viene caricata un'immagine specificata nel parametro **`image_path`** e il modello di riconoscimento facciale viene utilizzato per predire l'identità dell'individuo nell'immagine.
+
+.PP
+Il programma restituirà il **label** (identificativo dell'utente) e la **confidence** (confidenza della previsione).
+
+.SH OPTIONS
+.TP
+.B <image_path>
+Il percorso dell'immagine che deve essere testata. L'immagine deve essere in formato **.jpg** o **.png** e deve essere in bianco e nero (grayscale). L'immagine verrà letta e utilizzata per il riconoscimento facciale.
+
+.SH EXAMPLES
+.TP
+Esegui il riconoscimento facciale su un'immagine:
+.RS
+.B facial_test /path/to/face_image.jpg
+.RE
+
+.TP
+Esegui il riconoscimento facciale su un'immagine con un modello personalizzato:
+.RS
+.B facial_test /path/to/face_image.jpg
+.RE
+
+.SH SEE ALSO
+.B facial_training(8)
+

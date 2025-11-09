@@ -1,0 +1,43 @@
+.B facial_training
+.RI [ options ] <data_dir> [--user <username>]
+The **facial_training** command is used to train the facial recognition model.
+
+.PP
+Options:
+.TP
+.B <data_dir>
+The path to the directory containing user images. The directory should be organized with subdirectories for each user. Each subdirectory should contain images of the user's face.
+
+.TP
+.B --technique <technique>
+Select the face recognition technique to use. Options are:
+  - eigen (default)
+  - fisher
+  - lbph
+
+.TP
+.B --haar-cascade <path>
+Path to the Haar cascade XML file used for face detection (optional). Default: `etc/haarcascade_frontalface_default.xml`.
+
+.TP
+.B --user <username>
+If specified, the training will be performed only for the given username.
+
+.TP
+Example usage:
+.RS
+.B facial_training /path/to/data_dir
+.RE
+
+.TP
+Example with technique and custom Haar cascade:
+.RS
+.B facial_training /path/to/data_dir fisher /path/to/haarcascade_frontalface_default.xml
+.RE
+
+.TP
+Example with user specified:
+.RS
+.B facial_training /path/to/data_dir --user john_doe
+.RE
+

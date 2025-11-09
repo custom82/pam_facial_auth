@@ -1,0 +1,19 @@
+.\" Manpage for pam_facial_auth
+.TH PAM_FACIAL_AUTH 8 "October 2023" "1.0" "PAM Facial Authentication"
+.SH NAME
+pam_facial_auth \- Modulo PAM per l'autenticazione facciale
+.SH SYNOPSIS
+.B auth required pam_facial_auth.so
+.SH DESCRIPTION
+Il modulo **pam_facial_auth** consente di utilizzare il riconoscimento facciale come metodo di autenticazione tramite il sistema PAM (Pluggable Authentication Module). Utilizza il modello addestrato creato con il comando **`facial_training`** per confrontare l'immagine fornita dalla fotocamera con il modello e determinare se l'utente è autenticato.
+
+.PP
+Questo modulo si integra con il sistema PAM per fornire un'alternativa all'autenticazione tramite password, utilizzando un'immagine del viso dell'utente.
+
+.SH CONFIGURATION
+Il modulo **pam_facial_auth** viene configurato tramite il file di configurazione **`pam-facial-auth.conf`**, che deve essere posizionato nella directory **`/etc/pam.d/`**.
+
+.PP
+Un esempio di configurazione in **`/etc/pam.d/system-auth`** potrebbe essere il seguente:
+
+
