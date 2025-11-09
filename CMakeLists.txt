@@ -25,11 +25,11 @@ include_directories(${CMAKE_SOURCE_DIR}/src)  # Aggiungi la directory src
 add_definitions(${PAM_CFLAGS})
 
 # Creazione dell'eseguibile per l'addestramento del modello (rinominato)
-add_executable(facial_training src/facial_training.cpp src/FaceRecWrapper.cpp)
+add_executable(facial_training facial_training.cpp src/FaceRecWrapper.cpp)
 target_link_libraries(facial_training ${OpenCV_LIBS} ${PAM_LIBRARIES} -lpam_misc)
 
 # Creazione dell'eseguibile per il test del riconoscimento facciale (rinominato)
-add_executable(facial_test src/facial_test.cpp)
+add_executable(facial_test facial_test.cpp)
 target_link_libraries(facial_test ${OpenCV_LIBS} ${PAM_LIBRARIES} -lpam_misc)
 
 # Creazione della libreria condivisa (per il modulo PAM)
@@ -47,9 +47,3 @@ install(TARGETS facial_training facial_test DESTINATION ${CMAKE_INSTALL_BINDIR})
 
 # Definizione del percorso di installazione
 set(CMAKE_INSTALL_PREFIX /usr)  # Modifica qui per usare /usr
-
-# Aggiunta di eventuali file di configurazione PAM se necessario
-install(FILES src/pam-facial-auth.conf DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/pam.d)
-
-# Impostazioni per la libreria PAM
-install(CODE "execute_process(COMMAND ldconfig)")
