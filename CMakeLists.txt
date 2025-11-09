@@ -22,11 +22,11 @@ link_directories(${PAM_LIBRARY_DIRS})
 add_definitions(${PAM_CFLAGS})
 
 # Creazione dell'eseguibile per l'addestramento del modello (rinominato)
-add_executable(facial_training run_training.cpp src/FaceRecWrapper.cpp)
+add_executable(facial_training facial_training.cpp src/FaceRecWrapper.cpp)
 target_link_libraries(facial_training ${OpenCV_LIBS} ${PAM_LIBRARIES} -lpam_misc)  # Aggiungi -lpam_misc
 
 # Creazione dell'eseguibile per il test del riconoscimento facciale (rinominato)
-add_executable(facial_test run_test.cpp)
+add_executable(facial_test facial_test.cpp)
 target_link_libraries(facial_test ${OpenCV_LIBS} ${PAM_LIBRARIES} -lpam_misc)  # Aggiungi -lpam_misc
 
 # Creazione della libreria condivisa (per il modulo PAM)
