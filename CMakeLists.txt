@@ -38,3 +38,18 @@ option(COMPILE_SHARED_LIB "Compile PAM facial authentication module as a shared 
 if(COMPILE_SHARED_LIB)
     add_library(pam_facial_auth SHARED src/FacialAuth.cpp src/FaceRecWrapper.cpp)
     target_link_libraries(pam_facial_auth ${OpenCV_LIBS} ${PAM_LIBRARIES} -lpam_misc)
+    set_target_properties(pam_facial_auth PROPERTIES PREFIX "")  # Il prefisso PAM è rimosso per essere solo "pam_facial_auth.so"
+    install(TARGETS pam_facial_auth LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
+endif()  # Corretto il blocco if
+
+# Installazione degli eseguibili (opzionale)
+install(TARGETS facial_training facial_test DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+# Definizione del percorso di installazione
+set(CMAKE_INSTALL_PREFIX /usr)  # Modifica qui per usare /usr
+
+# Aggiunta di eventuali file di configurazione PAM se necessario
+install(FILES src/pam-facial-auth.conf DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/pam.d)
+
+# Impostazioni per la libreria PAM
+install(CODE "execute_process(COMMAND ldconfig)")
