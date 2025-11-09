@@ -72,7 +72,7 @@ void FaceRecWrapper::Load(const std::string & path) {
 	SetTechnique(model["technique"]);
 
 	LoadCascade(path + "-cascade.xml");
-	fr->load(path + "-facerec.xml");
+	fr->read(path + "-facerec.xml");  // Usa 'read' invece di 'load'
 }
 
 void FaceRecWrapper::SetLabelNames(const std::vector<std::string> & names) {
@@ -87,14 +87,14 @@ std::string FaceRecWrapper::GetLabelName(int index) {
 
 bool FaceRecWrapper::SetTechnique(const std::string & t) {
 	if (t == "eigen") {
-		fr = cv::face::createEigenFaceRecognizer(10);
+		fr = cv::face::EigenFaceRecognizer::create(10);  // Modifica con 'create'
 	} else if (t == "fisher") {
-		fr = cv::face::createFisherFaceRecognizer();
+		fr = cv::face::FisherFaceRecognizer::create();  // Modifica con 'create'
 	} else if (t == "lbph") {
-		fr = cv::face::createLBPHFaceRecognizer();
+		fr = cv::face::LBPHFaceRecognizer::create();  // Modifica con 'create'
 	} else {
 		std::cerr << "Invalid technique: " << t << ", defaulting to eigenfaces." << std::endl;
-		fr = cv::face::createEigenFaceRecognizer(10);
+		fr = cv::face::EigenFaceRecognizer::create(10);  // Modifica con 'create'
 		technique = "eigen";
 		return false;
 	}
@@ -117,7 +117,7 @@ bool FaceRecWrapper::LoadCascade(const std::string &filepath) {
 bool FaceRecWrapper::CropFace(const cv::Mat & image, cv::Mat & cropped) {
 	// Detect face
 	std::vector<cv::Rect> faces;
-	cascade.detectMultiScale(image, faces, 1.05, 8, 0 | CV_HAAR_SCALE_IMAGE, cv::Size(40, 40));
+	cascade.detectMultiScale(image, faces, 1.05, 8, 0 | cv::CASCADE_SCALE_IMAGE, cv::Size(40, 40));  // Modificato 'CV_HAAR_SCALE_IMAGE' con 'cv::CASCADE_SCALE_IMAGE'
 	if (!faces.size()) {
 		return false;
 	}
