@@ -1,17 +1,16 @@
 #include "FaceRecWrapper.h"
 #include <fstream>  // Aggiunto per risolvere il problema con ifstream e ofstream
 
-FaceRecWrapper::FaceRecWrapper() :
-sizeFace(96) {}
+FaceRecWrapper::FaceRecWrapper() : sizeFace(96) {}
 
-FaceRecWrapper::FaceRecWrapper(const std::string & techniqueName, const std::string & pathCascade) :
+FaceRecWrapper::FaceRecWrapper(const std::string &techniqueName, const std::string &pathCascade) :
 sizeFace(96) {
 	SetTechnique(techniqueName);
 	LoadCascade(pathCascade);
 }
 
-void FaceRecWrapper::Train(const std::vector<cv::Mat> & images, const std::vector<int> & labels) {
-	if (!images.size()) {
+void FaceRecWrapper::Train(const std::vector<cv::Mat> &images, const std::vector<int> &labels) {
+	if (images.empty()) {
 		std::cerr << "Empty vector of training images" << std::endl;
 		return;
 	}
@@ -30,7 +29,7 @@ void FaceRecWrapper::Train(const std::vector<cv::Mat> & images, const std::vecto
 	fr->train(imagesCropped, labelsCropped);
 }
 
-void FaceRecWrapper::Predict(const cv::Mat & im, int & label, double & confidence) {
+void FaceRecWrapper::Predict(const cv::Mat &im, int &label, double &confidence) {
 	cv::Mat cropped;
 	if (!CropFace(im, cropped)) {
 		label = -1;
@@ -41,7 +40,7 @@ void FaceRecWrapper::Predict(const cv::Mat & im, int & label, double & confidenc
 	fr->predict(cropped, label, confidence);
 }
 
-void FaceRecWrapper::Save(const std::string & path) {
+void FaceRecWrapper::Save(const std::string &path) {
 	// Apre il file in modalità binaria
 	std::ifstream orig(pathCascade, std::ios::binary);
 	if (!orig) {
@@ -55,14 +54,14 @@ void FaceRecWrapper::Save(const std::string & path) {
 	fr->save(path + "-facerec.xml");
 
 	// Scrive alcune informazioni aggiuntive sul modello
-	FILE * pModel;
+	FILE *pModel;
 	pModel = fopen(path.c_str(), "w");
 	fprintf(pModel, "technique=%s\n", technique.c_str());
 	fprintf(pModel, "sizeFace=%d\n", (int)sizeFace);
 	fclose(pModel);
 }
 
-void FaceRecWrapper::Load(const std::string & path) {
+void FaceRecWrapper::Load(const std::string &path) {
 	std::map<std::string, std::string> model;
 	Utils::GetConfig(path, model);
 
@@ -70,10 +69,12 @@ void FaceRecWrapper::Load(const std::string & path) {
 	SetTechnique(model["technique"]);
 
 	LoadCascade(path + "-cascade.xml");
-	fr->load(path + "-facerec.xml");
+
+	// Usa read invece di load per OpenCV 4.x
+	fr->read(path + "-facerec.xml");
 }
 
-void FaceRecWrapper::SetLabelNames(const std::vector<std::string> & names) {
+void FaceRecWrapper::SetLabelNames(const std::vector<std::string> &names) {
 	for (std::size_t i = 0; i < names.size(); ++i) {
 		fr->setLabelInfo(i, names[i]);
 	}
@@ -83,16 +84,16 @@ std::string FaceRecWrapper::GetLabelName(int index) {
 	return fr->getLabelInfo(index);
 }
 
-bool FaceRecWrapper::SetTechnique(const std::string & t) {
+bool FaceRecWrapper::SetTechnique(const std::string &t) {
 	if (t == "eigen") {
-		fr = cv::face::createEigenFaceRecognizer(10);
+		fr = cv::face::EigenFaceRecognizer::create();
 	} else if (t == "fisher") {
-		fr = cv::face::createFisherFaceRecognizer();
+		fr = cv::face::FisherFaceRecognizer::create();
 	} else if (t == "lbph") {
-		fr = cv::face::createLBPHFaceRecognizer();
+		fr = cv::face::LBPHFaceRecognizer::create();
 	} else {
 		std::cerr << "Invalid technique: " << t << ", defaulting to eigenfaces." << std::endl;
-		fr = cv::face::createEigenFaceRecognizer(10);
+		fr = cv::face::EigenFaceRecognizer::create();
 		technique = "eigen";
 		return false;
 	}
@@ -101,7 +102,7 @@ bool FaceRecWrapper::SetTechnique(const std::string & t) {
 	return true;
 }
 
-bool FaceRecWrapper::LoadCascade(const std::string & filepath) {
+bool FaceRecWrapper::LoadCascade(const std::string &filepath) {
 	pathCascade = filepath;
 
 	// Set up face detector
@@ -112,11 +113,11 @@ bool FaceRecWrapper::LoadCascade(const std::string & filepath) {
 	return true;
 }
 
-bool FaceRecWrapper::CropFace(const cv::Mat & image, cv::Mat & cropped) {
+bool FaceRecWrapper::CropFace(const cv::Mat &image, cv::Mat &cropped) {
 	// Detect face
 	std::vector<cv::Rect> faces;
-	cascade.detectMultiScale(image, faces, 1.05, 8, 0 | CV_HAAR_SCALE_IMAGE, cv::Size(40, 40));
-	if (!faces.size()) {
+	cascade.detectMultiScale(image, faces, 1.05, 8, 0 | cv::CASCADE_SCALE_IMAGE, cv::Size(40, 40));
+	if (faces.empty()) {
 		return false;
 	}
 
