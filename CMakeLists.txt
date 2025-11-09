@@ -38,15 +38,3 @@ if(COMPILE_SHARED_LIB)
     set_target_properties(pam_facial_auth PROPERTIES PREFIX "")  # Il prefisso PAM è rimosso per essere solo "pam_facial_auth.so"
     install(TARGETS pam_facial_auth LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
 endif()  # Assicurati che la parentesi chiusa del blocco if sia presente qui
-
-# Installazione degli eseguibili (opzionale)
-install(TARGETS facial_training facial_test DESTINATION ${CMAKE_INSTALL_BINDIR})
-
-# Definizione del percorso di installazione
-set(CMAKE_INSTALL_PREFIX /usr/local)
-
-# Aggiunta di eventuali file di configurazione PAM se necessario
-install(FILES src/pam-facial-auth.conf DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/pam.d)
-
-# Impostazioni per la libreria PAM
-install(CODE "execute_process(COMMAND ldconfig)")
