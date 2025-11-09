@@ -1,38 +1,56 @@
-#ifndef PAM_FACIAL_AUTH_FACERECWRAPPER_H
-#define PAM_FACIAL_AUTH_FACERECWRAPPER_H
+cmake_minimum_required(VERSION 3.10)
+project(pam-facial-auth)
 
-#include <opencv2/opencv.hpp>
-#include <opencv2/face.hpp>
-#include "Utils.h"
+# Impostazione della versione del C++ a C++20
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)  # Disabilita estensioni del compilatore
 
-class FaceRecWrapper
-{
-public:
-	// Constructor
-	FaceRecWrapper();
-	FaceRecWrapper(const std::string & techniqueName, const std::string & pathCascade);
+# Ricerca di OpenCV
+find_package(OpenCV REQUIRED)
+include_directories(${OpenCV_INCLUDE_DIRS})
 
-	// Exposed methods
-	void Train(const std::vector<cv::Mat> & images, const std::vector<int> & labels);
-	void Predict(const cv::Mat & images, int & label, double & confidence);
-	void Save(const std::string & path);
-	void Load(const std::string & path);
-	void SetLabelNames(const std::vector<std::string> & names);
-	std::string GetLabelName(int index);
+# Usare pkg-config per trovare PAM
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(PAM REQUIRED pam)
 
-private:
-	// Helper methods
-	bool SetTechnique(const std::string & t);
-	bool CropFace(const cv::Mat & image, cv::Mat & cropped);
-	bool LoadCascade(const std::string & pathCascade);
+# Aggiungere le directory di include e libreria trovate con pkg-config
+include_directories(${PAM_INCLUDE_DIRS} /usr/include/pam)  # Aggiungi manualmente il percorso degli header di PAM
+link_directories(${PAM_LIBRARY_DIRS})
 
-	// Data
-	cv::Ptr<cv::face::FaceRecognizer> fr;
-	cv::CascadeClassifier             cascade;
-	std::size_t                       sizeFace;
-	std::string                       technique;
-	std::string                       pathCascade;
-};
+# Aggiungere il percorso per i file sorgente locali (incluso FaceRecWrapper.h)
+include_directories(${CMAKE_SOURCE_DIR}/src)  # Aggiungi la directory src
 
-#endif //PAM_FACIAL_AUTH_FACERECWRAPPER_H
+# Aggiungere i flag di compilazione e link con le librerie trovate da pkg-config
+add_definitions(${PAM_CFLAGS})
+
+# Creazione dell'eseguibile per l'addestramento del modello (rinominato)
+add_executable(facial_training run_training.cpp src/FaceRecWrapper.cpp)
+target_link_libraries(facial_training ${OpenCV_LIBS} ${PAM_LIBRARIES} -lpam_misc)
+
+# Creazione dell'eseguibile per il test del riconoscimento facciale (rinominato)
+add_executable(facial_test run_test.cpp)
+target_link_libraries(facial_test ${OpenCV_LIBS} ${PAM_LIBRARIES} -lpam_misc)
+
+# Creazione della libreria condivisa (per il modulo PAM)
+option(COMPILE_SHARED_LIB "Compile PAM facial authentication module as a shared library" ON)
+
+if(COMPILE_SHARED_LIB)
+    add_library(pam_facial_auth SHARED src/FacialAuth.cpp src/FaceRecWrapper.cpp)
+    target_link_libraries(pam_facial_auth ${OpenCV_LIBS} ${PAM_LIBRARIES} -lpam_misc)
+    set_target_properties(pam_facial_auth PROPERTIES PREFIX "")  # Il prefisso PAM è rimosso per essere solo "pam_facial_auth.so"
+    install(TARGETS pam_facial_auth LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
+endif()
+
+# Installazione degli eseguibili (opzionale)
+install(TARGETS facial_training facial_test DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+# Definizione del percorso di installazione
+set(CMAKE_INSTALL_PREFIX /usr/local)
+
+# Aggiunta di eventuali file di configurazione PAM se necessario
+install(FILES src/pam-facial-auth.conf DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/pam.d)
+
+# Impostazioni per la libreria PAM
+install(CODE "execute_process(COMMAND ldconfig)")
 
