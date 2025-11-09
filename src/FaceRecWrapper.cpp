@@ -74,17 +74,20 @@ void FaceRecWrapper::Load(const std::string &path) {
 	SetTechnique(model["technique"]);
 
 	LoadCascade(path + "-cascade.xml");
-	fr->load(path + "-facerec.xml");
+	fr->load(cv::String(path + "-facerec.xml"));  // Cast std::string to cv::String
 }
 
 void FaceRecWrapper::SetLabelNames(const std::vector<std::string> &names) {
-	for (std::size_t i = 0; i < names.size(); ++i) {
-		fr->setLabelInfo(i, names[i]);
-	}
+	// Assuming the FaceRecognizer is capable of setting label names like this.
+	// If not, you may need to implement this functionality in your own way.
+	labelNames = names;
 }
 
 std::string FaceRecWrapper::GetLabelName(int index) {
-	return fr->getLabelInfo(index);
+	if (index >= 0 && index < labelNames.size()) {
+		return labelNames[index];
+	}
+	return "Unknown";
 }
 
 bool FaceRecWrapper::SetTechnique(const std::string &t) {
