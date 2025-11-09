@@ -1,5 +1,6 @@
 #include "FaceRecWrapper.h"
 #include <fstream>  // Aggiunto per risolvere il problema con ifstream e ofstream
+#include "Utils.h"
 
 FaceRecWrapper::FaceRecWrapper() :
 sizeFace(96) {}
