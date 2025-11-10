@@ -19,6 +19,7 @@ void trainModel(const std::string &trainingDataDir,
 
 	std::cout << "[DEBUG] Scanning directory: " << trainingDataDir << std::endl;
 
+	// Verifica la presenza di immagini nella directory dell'utente
 	for (const auto &entry : fs::directory_iterator(trainingDataDir))
 	{
 		if (entry.is_regular_file())
@@ -125,12 +126,15 @@ int main(int argc, char **argv)
 		std::cout << "[INFO] No output specified, defaulting to: " << outputFile << std::endl;
 	}
 
+	// Directory dell'utente
+	std::string userDataDir = "/etc/pam_facial_auth/" + user;
+
 	std::cout << "[INFO] User: " << user << std::endl;
 	std::cout << "[INFO] Method: " << method << std::endl;
-	std::cout << "[INFO] Training data: " << trainingDataDir << std::endl;
+	std::cout << "[INFO] Training data: " << userDataDir << std::endl;
 	std::cout << "[INFO] Output file: " << outputFile << std::endl;
 
-	trainModel(trainingDataDir, outputFile, method);
+	trainModel(userDataDir, outputFile, method);
 
 	return 0;
 }
