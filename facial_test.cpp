@@ -2,7 +2,9 @@
 #include <opencv2/face.hpp>
 #include <iostream>
 #include <unistd.h>
-#include <pwd.h>
+#include <filesystem>
+
+namespace fs = std::filesystem;
 
 void print_help() {
 	std::cout << "Uso: facial_test <image_path> <username>\n";

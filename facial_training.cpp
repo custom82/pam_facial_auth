@@ -1,9 +1,9 @@
 #include <opencv2/opencv.hpp>
+#include <opencv2/face.hpp>
 #include <iostream>
 #include <filesystem>
 #include <vector>
 #include <unistd.h>
-#include <pwd.h>
 
 namespace fs = std::filesystem;
 
