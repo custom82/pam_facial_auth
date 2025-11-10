@@ -1,4 +1,3 @@
-# CMakeLists.txt
 cmake_minimum_required(VERSION 3.10)
 
 # Impostare il nome del progetto
@@ -14,12 +13,16 @@ include_directories(${OpenCV_INCLUDE_DIRS})
 include_directories(${PAM_INCLUDE_DIRS})
 include_directories(${CMAKE_SOURCE_DIR}/src)  # Aggiungi la tua directory di sorgenti
 
+# Forzare l'uso di C++20
+set(CMAKE_CXX_STANDARD 20)  # Forza l'uso di C++20
+set(CMAKE_CXX_STANDARD_REQUIRED ON)  # Rende obbligatorio C++20
+
 # Aggiungi la libreria di utilità
 add_library(Utils STATIC ${CMAKE_SOURCE_DIR}/src/Utils.cpp)
 
 # Creazione del modulo PAM come libreria condivisa
 add_library(pam_facial_auth MODULE
-    src/pam_facial_auth.c    # Modificato il nome del file da .cpp a .c
+    src/pam_facial_auth.c    # Usa il file C++ modificato
     src/FaceRecWrapper.cpp
 )
 
