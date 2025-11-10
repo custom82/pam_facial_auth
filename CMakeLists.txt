@@ -9,8 +9,6 @@ include_directories(${OpenCV_INCLUDE_DIRS})
 include_directories(${PAM_INCLUDE_DIRS})
 include_directories(${CMAKE_SOURCE_DIR}/src)  # Directory di sorgenti
 
-# Aggiungi la libreria di utilità
-add_library(Utils STATIC src/Utils.cpp)
 
 # Compila il modulo PAM
 add_library(pam_facial_auth MODULE
@@ -46,7 +44,3 @@ target_link_libraries(facial_training
     Utils
 )
 
-# Impostare l'output dei binari (opzionale)
-set_target_properties(facial_auth facial_training pam_facial_auth PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
-)
