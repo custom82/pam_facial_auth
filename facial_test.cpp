@@ -2,90 +2,47 @@
 #include <opencv2/face.hpp>
 #include <iostream>
 #include <string>
-#include <filesystem>
 
-namespace fs = std::filesystem;
-using namespace cv;
-using namespace cv::face;
-
-enum ClassifierType { LBPH, FISHER, EIGEN };
-
-Ptr<FaceRecognizer> loadModel(const std::string& modelPath, ClassifierType classifierType) {
-	Ptr<FaceRecognizer> model;
-
-	switch (classifierType) {
-		case LBPH:
-			model = LBPHFaceRecognizer::create();
-			model->read(modelPath);
-			break;
-		case FISHER:
-			model = FisherFaceRecognizer::create();
-			model->read(modelPath);
-			break;
-		case EIGEN:
-			model = EigenFaceRecognizer::create();
-			model->read(modelPath);
-			break;
-	}
-	return model;
-}
-
-// Funzione di test del modello
-bool test_model(const std::string& imagePath, const std::string& modelType) {
-	Mat testImage = imread(imagePath, IMREAD_GRAYSCALE);
-	if (testImage.empty()) {
-		std::cerr << "Immagine non trovata!" << std::endl;
+bool test_model(const std::string& model_path, const std::string& test_image_path) {
+	// Verifica se il file del modello esiste
+	if (!fs::exists(model_path)) {
+		std::cerr << "Model not found!" << std::endl;
 		return false;
 	}
 
-	ClassifierType classifier = LBPH; // Default
+	// Carica il modello (ad esempio, LBPH)
+	cv::Ptr<cv::face::LBPHFaceRecognizer> model = cv::face::LBPHFaceRecognizer::create();
+	model->read(model_path);
 
-	// Seleziona il classificatore in base all'input
-	if (modelType == "fisher") {
-		classifier = FISHER;
-	} else if (modelType == "eigen") {
-		classifier = EIGEN;
+	// Carica l'immagine di test
+	cv::Mat test_image = cv::imread(test_image_path, cv::IMREAD_GRAYSCALE);
+	if (test_image.empty()) {
+		std::cerr << "Failed to load test image" << std::endl;
+		return false;
 	}
 
-	// Carica il modello e fai il riconoscimento
-	Ptr<FaceRecognizer> model = loadModel("face_model.xml", classifier);
-
+	// Esegui il riconoscimento
 	int label = -1;
 	double confidence = 0.0;
-	model->predict(testImage, label, confidence);
+	model->predict(test_image, label, confidence);
 
-	std::cout << "Predizione completata. Utente: " << label << ", Confidenza: " << confidence << std::endl;
+	// Output dei risultati
+	std::cout << "Predicted label: " << label << ", Confidence: " << confidence << std::endl;
 	return true;
 }
 
-int main(int argc, char** argv) {
-	bool noGui = false;
-	std::string classifier = "lbph"; // Default classifier
-
-	if (argc < 3) {
-		std::cerr << "Uso: " << argv[0] << " <test> <image_path> [--no-gui] [--classifier lbph|fisher|eigen]" << std::endl;
-		return 1;
+int main(int argc, char **argv) {
+	if (argc != 3) {
+		std::cerr << "Usage: " << argv[0] << " <model_path> <test_image_path>" << std::endl;
+		return -1;
 	}
 
-	// Parsing degli argomenti della linea di comando
-	for (int i = 1; i < argc; ++i) {
-		if (std::string(argv[i]) == "--no-gui") {
-			noGui = true;
-		} else if (std::string(argv[i]) == "--classifier") {
-			if (i + 1 < argc) {
-				classifier = argv[++i];
-			}
-		}
+	std::string model_path = argv[1];
+	std::string test_image_path = argv[2];
+
+	if (!test_model(model_path, test_image_path)) {
+		return -1;
 	}
 
-	if (std::string(argv[1]) == "test") {
-		if (argc < 4) {
-			std::cerr << "Per testare, specifica il percorso dell'immagine!" << std::endl;
-			return 1;
-		}
-		return test_model(argv[2], classifier);
-	} else {
-		std::cerr << "Comando non valido!" << std::endl;
-		return 1;
-	}
+	return 0;
 }
