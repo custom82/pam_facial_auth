@@ -28,7 +28,7 @@ target_link_libraries(pam_facial_auth
 add_executable(facial_test facial_test.cpp src/FaceRecWrapper.cpp)
 
 # Link con le librerie necessarie per facial_auth
-target_link_libraries(facial_auth
+target_link_libraries(facial_test
     PRIVATE
     ${OpenCV_LIBS}
     Utils
