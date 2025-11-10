@@ -27,11 +27,22 @@ include_directories(
     /usr/include/pam
 )
 
-# Sources
-set(SOURCES
+# Sources for pam_facial_auth
+set(PAM_FACIAL_AUTH_SOURCES
     src/FacialAuth.cpp
     src/FaceRecWrapper.cpp
+)
+
+# Sources for facial_test
+set(FACIAL_TEST_SOURCES
     facial_test.cpp
+    src/FaceRecWrapper.cpp
+)
+
+# Sources for facial_training
+set(FACIAL_TRAINING_SOURCES
+    facial_training.cpp
+    src/FaceRecWrapper.cpp
 )
 
 # Headers
@@ -40,17 +51,35 @@ set(HEADERS
     src/FaceRecWrapper.h
 )
 
-# Define the executable
-add_executable(pam_facial_auth ${SOURCES} ${HEADERS})
+# Define the executable for pam_facial_auth
+add_executable(pam_facial_auth ${PAM_FACIAL_AUTH_SOURCES} ${HEADERS})
 
-# Link libraries
+# Define the executable for facial_test
+add_executable(facial_test ${FACIAL_TEST_SOURCES} ${HEADERS})
+
+# Define the executable for facial_training
+add_executable(facial_training ${FACIAL_TRAINING_SOURCES} ${HEADERS})
+
+# Link libraries for pam_facial_auth
 target_link_libraries(pam_facial_auth
     ${OpenCV_LIBS}
     ${PAM_LIBRARIES}
 )
 
-# Install target
-install(TARGETS pam_facial_auth DESTINATION ${CMAKE_INSTALL_PREFIX}/bin)
+# Link libraries for facial_test
+target_link_libraries(facial_test
+    ${OpenCV_LIBS}
+    ${PAM_LIBRARIES}
+)
+
+# Link libraries for facial_training
+target_link_libraries(facial_training
+    ${OpenCV_LIBS}
+    ${PAM_LIBRARIES}
+)
+
+# Install targets
+install(TARGETS pam_facial_auth facial_test facial_training DESTINATION ${CMAKE_INSTALL_PREFIX}/bin)
 
 # Add tests if necessary
 enable_testing()
