@@ -136,4 +136,10 @@ PAM_EXTERN int pam_sm_authenticate( pam_handle_t * pamh, int flags, int argc, co
 
 		if ( confidence < threshold && frw.GetLabelName( prediction ) == username )
 		{
-			return PAM_SUCCESS_
+			return PAM_SUCCESS; // Corrected from PAM_SUCCESS_
+		}
+	}
+
+	printf( "Timeout on face authentication... \n" );
+	return PAM_AUTH_ERR;
+}
