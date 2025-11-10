@@ -3,9 +3,6 @@ cmake_minimum_required(VERSION 3.10)
 # Impostare il nome del progetto
 project(pam_facial_auth)
 
-# Specificare la versione di CMake necessaria
-cmake_minimum_required(VERSION 3.10)
-
 # Aggiungi OpenCV e PAM come dipendenze
 find_package(OpenCV REQUIRED)
 find_package(PkgConfig REQUIRED)
@@ -21,16 +18,14 @@ add_library(Utils STATIC ${CMAKE_SOURCE_DIR}/src/Utils.cpp)
 
 # Creazione del modulo PAM come libreria condivisa
 add_library(pam_facial_auth MODULE
-    src/pam_facial_auth.cpp  # Usa pam_facial_auth.cpp invece di pam_facial_auth.c
-    src/FacialAuth.cpp
-    src/FaceRecWrapper.cpp
+    ${CMAKE_SOURCE_DIR}/src/pam_facial_auth.cpp  # Specifica il percorso corretto del file
+    ${CMAKE_SOURCE_DIR}/src/FaceRecWrapper.cpp
 )
 
 # Imposta il nome del modulo come pam_facial_auth.so
 set_target_properties(pam_facial_auth PROPERTIES
     PREFIX ""
     SUFFIX ".so"
-    COMPILE_FLAGS "-std=c++11"  # Abilita il supporto per C++11
 )
 
 # Link con le librerie necessarie per PAM e OpenCV
@@ -48,8 +43,8 @@ set_target_properties(pam_facial_auth PROPERTIES
 
 # Compila il binario facial_test
 add_executable(facial_test
-    src/facial_test.cpp
-    src/FaceRecWrapper.cpp
+    ${CMAKE_SOURCE_DIR}/src/facial_test.cpp  # Specifica il percorso corretto del file
+    ${CMAKE_SOURCE_DIR}/src/FaceRecWrapper.cpp
 )
 
 # Link con le librerie necessarie per facial_test
@@ -61,8 +56,8 @@ target_link_libraries(facial_test
 
 # Compila il binario facial_training
 add_executable(facial_training
-    src/facial_training.cpp
-    src/FaceRecWrapper.cpp
+    ${CMAKE_SOURCE_DIR}/src/facial_training.cpp  # Specifica il percorso corretto del file
+    ${CMAKE_SOURCE_DIR}/src/FaceRecWrapper.cpp
 )
 
 # Link con le librerie necessarie per facial_training
@@ -75,4 +70,27 @@ target_link_libraries(facial_training
 # Impostare l'output dei binari
 set_target_properties(facial_test facial_training pam_facial_auth PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+)
+
+# Impostare l'output delle man pages
+install(FILES man/facial_test.1 man/facial_training.1 man/pam_facial_auth.1 DESTINATION ${CMAKE_INSTALL_PREFIX}/share/man/man1)
+
+# Installazione dei binari
+install(TARGETS facial_test facial_training pam_facial_auth
+    DESTINATION /usr/sbin
+)
+
+# Installazione della libreria
+install(TARGETS pam_facial_auth
+    DESTINATION /usr/lib64/security
+)
+
+# Installazione della libreria Utils
+install(TARGETS Utils
+    DESTINATION /usr/lib64
+)
+
+# Installazione dei file XML
+install(FILES etc/haarcascade_frontalface_alt.xml etc/haarcascade_frontalface_default.xml
+    DESTINATION /etc/pam_facial_auth
 )
