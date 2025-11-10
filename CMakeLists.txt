@@ -10,7 +10,7 @@ project(pam_facial_auth)
 # Aggiungi OpenCV e PAM come dipendenze
 find_package(OpenCV REQUIRED)
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(PAM REQUIRED libpam)
+pkg_check_modules(PAM REQUIRED pam)  # Usa 'pam' per pkg-config
 
 # Aggiungi le directory di inclusione per PAM e OpenCV
 include_directories(${OpenCV_INCLUDE_DIRS})
@@ -29,7 +29,7 @@ add_library(pam_facial_auth MODULE
 # Link con le librerie necessarie per pam_facial_auth
 target_link_libraries(pam_facial_auth
     PRIVATE
-    ${PAM_LIBRARIES}
+    ${PAM_LIBRARIES}  # Usa ${PAM_LIBRARIES} per il linking di PAM
     ${OpenCV_LIBS}
     Utils
 )
