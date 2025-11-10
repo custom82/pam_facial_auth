@@ -14,15 +14,13 @@ endif()
 # Aggiungi le directory di inclusione per OpenCV
 include_directories(${OpenCV_INCLUDE_DIRS})
 
-# Aggiungi le directory di inclusione per C (solo per i file C)
-include_directories(/usr/include)
-
 # Aggiungi la libreria di utilità
 add_library(Utils STATIC src/Utils.cpp)
 
 # Creazione del modulo PAM come libreria condivisa
+# Rinomina pam_facial_auth.c in pam_facial_auth.cpp
 add_library(pam_facial_auth MODULE
-    src/pam_facial_auth.c  # Usa pam_facial_auth.c, non pam_facial_auth.cpp
+    src/pam_facial_auth.cpp  # Usa pam_facial_auth.cpp
     src/FaceRecWrapper.cpp
 )
 
@@ -64,11 +62,11 @@ set_target_properties(pam_facial_auth PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
 )
 
-# Forza l'uso di C++20 solo per i file C++ (es. .cpp)
+# Forza l'uso di C++20 per i file C++
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Compila pam_facial_auth.c come file C
+# Compila pam_facial_auth.cpp come file C++ (ora è rinominato)
 set_target_properties(pam_facial_auth PROPERTIES
-    COMPILE_FLAGS "-std=c99"
+    COMPILE_FLAGS "-std=c++20"
 )
