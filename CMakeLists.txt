@@ -18,7 +18,7 @@ add_library(Utils STATIC ${CMAKE_SOURCE_DIR}/src/Utils.cpp)
 
 # Creazione del modulo PAM come libreria condivisa
 add_library(pam_facial_auth MODULE
-    ${CMAKE_SOURCE_DIR}/src/pam_facial_auth.cpp  # Specifica il percorso corretto del file
+    ${CMAKE_SOURCE_DIR}/src/pam_facial_auth.cpp  # Assicurati che il file sia presente
     ${CMAKE_SOURCE_DIR}/src/FaceRecWrapper.cpp
 )
 
@@ -43,7 +43,7 @@ set_target_properties(pam_facial_auth PROPERTIES
 
 # Compila il binario facial_test
 add_executable(facial_test
-    ${CMAKE_SOURCE_DIR}/src/facial_test.cpp  # Specifica il percorso corretto del file
+    ${CMAKE_SOURCE_DIR}/src/facial_test.cpp  # Assicurati che il file sia presente
     ${CMAKE_SOURCE_DIR}/src/FaceRecWrapper.cpp
 )
 
@@ -56,7 +56,7 @@ target_link_libraries(facial_test
 
 # Compila il binario facial_training
 add_executable(facial_training
-    ${CMAKE_SOURCE_DIR}/src/facial_training.cpp  # Specifica il percorso corretto del file
+    ${CMAKE_SOURCE_DIR}/src/facial_training.cpp  # Assicurati che il file sia presente
     ${CMAKE_SOURCE_DIR}/src/FaceRecWrapper.cpp
 )
 
@@ -72,10 +72,7 @@ set_target_properties(facial_test facial_training pam_facial_auth PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
 )
 
-# Impostare l'output delle man pages
-install(FILES man/facial_test.1 man/facial_training.1 man/pam_facial_auth.1 DESTINATION ${CMAKE_INSTALL_PREFIX}/share/man/man1)
-
-# Installazione dei binari
+# Installazione dei file
 install(TARGETS facial_test facial_training pam_facial_auth
     DESTINATION /usr/sbin
 )
