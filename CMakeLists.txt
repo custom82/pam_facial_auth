@@ -25,7 +25,7 @@ target_link_libraries(pam_facial_auth
 )
 
 # Compila il binario facial_auth
-add_executable(facial_auth facial_auth.cpp src/FaceRecWrapper.cpp)
+add_executable(facial_test facial_test.cpp src/FaceRecWrapper.cpp)
 
 # Link con le librerie necessarie per facial_auth
 target_link_libraries(facial_auth
