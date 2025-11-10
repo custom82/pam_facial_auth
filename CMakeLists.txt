@@ -41,7 +41,7 @@ target_link_libraries(pam_facial_auth
 
 # Impostare l'output della libreria
 set_target_properties(pam_facial_auth PROPERTIES
-    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
+    LIBRARY_OUTPUT_DIRECTORY /usr/lib64/security/
 )
 
 # Compila il binario facial_test
