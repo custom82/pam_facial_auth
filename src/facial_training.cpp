@@ -1,25 +1,24 @@
 #include <iostream>
 #include <string>
-#include <filesystem>
-#include <opencv2/opencv.hpp>  // Assicurati di includere OpenCV se necessario
+#include <filesystem> // Inclusione necessaria per std::filesystem
+#include <opencv2/opencv.hpp>  // Inclusione per OpenCV
 
-namespace fs = std::filesystem;
+namespace fs = std::filesystem;  // Dichiara il namespace per filesystem
 
 bool train_model(const std::string& data_dir, const std::string& user_name) {
 	fs::path user_dir = fs::path(data_dir) / user_name;
 
-	// Verifica se la directory dell'utente esiste
 	if (!fs::exists(user_dir)) {
 		std::cerr << "User directory " << user_dir << " does not exist!" << std::endl;
 		return false;
 	}
 
-	// Aggiungi la logica per il training del modello
 	std::cout << "Training model for user: " << user_name << std::endl;
 
-	// Creazione e salvataggio del modello (assicurati che la logica del modello sia corretta)
+	// Modifica per usare il riconoscimento facciale di OpenCV
 	cv::Ptr<cv::face::LBPHFaceRecognizer> model = cv::face::LBPHFaceRecognizer::create();
-	model->train(/* immagini, etichette */);
+	// Qui inserisci la logica per addestrare il modello, ad esempio:
+	// model->train(imagens, labels);
 	model->save(user_dir / "face_model.xml");
 
 	return true;
