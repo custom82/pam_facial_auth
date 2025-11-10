@@ -1,43 +1,38 @@
+.TH FACIAL_TRAINING 1 "November 2025" "1.0" "Facial Authentication"
+.SH NAME
+facial_training \- Allena il modello di riconoscimento facciale
+.SH SYNOPSIS
 .B facial_training
-.RI [ options ] <data_dir> [--user <username>]
-The **facial_training** command is used to train the facial recognition model.
+[\fIoptions\fR] \fItrain\fR \fIdata_dir\fR
 
-.PP
-Options:
-.TP
-.B <data_dir>
-The path to the directory containing user images. The directory should be organized with subdirectories for each user. Each subdirectory should contain images of the user's face.
+.SH DESCRIPTION
+Questo comando allena un modello di riconoscimento facciale usando le immagini presenti nella directory dei dati. Le immagini devono essere etichettate correttamente e contenere volti di utenti diversi. Supporta diversi classificatori (LBPH, Fisherfaces, Eigenfaces).
 
-.TP
-.B --technique <technique>
-Select the face recognition technique to use. Options are:
-  - eigen (default)
-  - fisher
-  - lbph
+.SH OPTIONS
+.B \-\-no\-gui
+Non apre una finestra grafica durante l'allenamento. Utile quando il comando è eseguito in ambienti senza display grafico.
 
-.TP
-.B --haar-cascade <path>
-Path to the Haar cascade XML file used for face detection (optional). Default: `etc/haarcascade_frontalface_default.xml`.
+.B \-\-classifier lbph|fisher|eigen
+Specifica il tipo di classificatore da utilizzare per l'allenamento del modello.
+- lbph: Local Binary Patterns Histograms (default)
+- fisher: Fisherfaces
+- eigen: Eigenfaces
 
-.TP
-.B --user <username>
-If specified, the training will be performed only for the given username.
+.SH ARGOMENTI
+\fIdata_dir\fR
+Il percorso alla directory contenente le immagini da utilizzare per l'allenamento. Le immagini devono essere etichettate correttamente con il nome del file nel formato `ID_Utente_XX.jpg`.
 
-.TP
-Example usage:
-.RS
-.B facial_training /path/to/data_dir
-.RE
+.SH ESEMPIO
+Allenare un modello utilizzando il classificatore Fisherfaces:
+.B facial_training train /path/to/data/directory --classifier fisher
 
-.TP
-Example with technique and custom Haar cascade:
-.RS
-.B facial_training /path/to/data_dir fisher /path/to/haarcascade_frontalface_default.xml
-.RE
+Allenare un modello senza GUI:
+.B facial_training train /path/to/data/directory --no-gui
 
-.TP
-Example with user specified:
-.RS
-.B facial_training /path/to/data_dir --user john_doe
-.RE
+.SH FILES
+face_model.xml
+Il modello di riconoscimento facciale salvato dopo l'allenamento.
+
+.SH AUTHOR
+Sviluppato da [Il Tuo Nome].
 

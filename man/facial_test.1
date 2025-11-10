@@ -1,37 +1,37 @@
-.\" Manpage for facial_test
-.TH FACIAL_TEST 8 "October 2023" "1.0" "PAM Facial Authentication"
+.TH FACIAL_TEST 1 "November 2025" "1.0" "Facial Authentication"
 .SH NAME
-facial_test \- Riconoscimento facciale per l'autenticazione PAM
+facial_test \- Test del modello di riconoscimento facciale
 .SH SYNOPSIS
 .B facial_test
-.RI [options] <image_path>
+[\fIoptions\fR] \fItest\fR \fIimage_path\fR
+
 .SH DESCRIPTION
-**facial_test** è un'applicazione che esegue il riconoscimento facciale utilizzando un modello addestrato per identificare una persona sulla base di un'immagine fornita. Utilizza il modello precedentemente creato con il comando **`facial_training`**.
-
-.PP
-Quando esegui il comando, viene caricata un'immagine specificata nel parametro **`image_path`** e il modello di riconoscimento facciale viene utilizzato per predire l'identità dell'individuo nell'immagine.
-
-.PP
-Il programma restituirà il **label** (identificativo dell'utente) e la **confidence** (confidenza della previsione).
+Questo comando permette di testare un'immagine usando il modello di riconoscimento facciale addestrato. Può essere eseguito in modalità grafica o tramite console.
 
 .SH OPTIONS
-.TP
-.B <image_path>
-Il percorso dell'immagine che deve essere testata. L'immagine deve essere in formato **.jpg** o **.png** e deve essere in bianco e nero (grayscale). L'immagine verrà letta e utilizzata per il riconoscimento facciale.
+.B \-\-no\-gui
+Non apre una finestra grafica durante il test del riconoscimento facciale. Utile quando il comando è eseguito in ambienti senza display grafico.
 
-.SH EXAMPLES
-.TP
-Esegui il riconoscimento facciale su un'immagine:
-.RS
-.B facial_test /path/to/face_image.jpg
-.RE
+.B \-\-classifier lbph|fisher|eigen
+Specifica il tipo di classificatore da utilizzare per il riconoscimento facciale.
+- lbph: Local Binary Patterns Histograms (default)
+- fisher: Fisherfaces
+- eigen: Eigenfaces
 
-.TP
-Esegui il riconoscimento facciale su un'immagine con un modello personalizzato:
-.RS
-.B facial_test /path/to/face_image.jpg
-.RE
+.SH ARGOMENTI
+\fIimage_path\fR
+Il percorso dell'immagine da testare. L'immagine deve essere un'immagine JPEG contenente un volto.
 
-.SH SEE ALSO
-.B facial_training(8)
+.SH ESEMPIO
+Testare un'immagine con il classificatore Fisher:
+.B facial_test test /path/to/image.jpg --classifier fisher
 
+Testare un'immagine senza GUI:
+.B facial_test test /path/to/image.jpg --no-gui
+
+.SH FILES
+face_model.xml
+Il modello salvato dopo l'allenamento, utilizzato per il riconoscimento facciale.
+
+.SH AUTHOR
+Sviluppato da [Il Tuo Nome].
