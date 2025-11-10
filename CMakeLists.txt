@@ -64,11 +64,11 @@ set_target_properties(pam_facial_auth PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
 )
 
-# Impostare l'output della libreria statico (Utils)
-set_target_properties(Utils PROPERTIES
-    ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
-)
-
 # Forza l'uso di C++20 solo per i file C++ (es. .cpp)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# Compila pam_facial_auth.c come file C
+set_target_properties(pam_facial_auth PROPERTIES
+    COMPILE_FLAGS "-std=c99"
+)
