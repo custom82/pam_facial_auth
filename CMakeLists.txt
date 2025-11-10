@@ -1,86 +1,58 @@
-# CMake minimum version
 cmake_minimum_required(VERSION 3.10)
+project(pam_facial_auth)
 
-# Project definition
-project(pam_facial_auth VERSION 1.0)
-
-# Set the C++ standard
+# C++ standard
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Set the installation prefix
-set(CMAKE_INSTALL_PREFIX /usr)
-
-# Find OpenCV
+# Aggiungi OpenCV e PAM come dipendenze
 find_package(OpenCV REQUIRED)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(PAM REQUIRED libpam)
 
-# Find PAM library (set it manually if it's in a non-standard location)
-find_library(PAM_LIBRARIES NAMES pam REQUIRED)
+# Aggiungi le directory di inclusione per PAM e OpenCV
+include_directories(${OpenCV_INCLUDE_DIRS})
+include_directories(${PAM_INCLUDE_DIRS})
+include_directories(${CMAKE_SOURCE_DIR}/src)  # Aggiungi la tua directory di sorgenti
 
-if(NOT PAM_LIBRARIES)
-  message(FATAL_ERROR "Could not find the PAM library. Please install PAM or specify the correct path.")
-endif()
+# Aggiungi la libreria di utilità
+add_library(Utils STATIC ${CMAKE_SOURCE_DIR}/src/Utils.cpp)
 
-# Include directories
-include_directories(
-    ${OpenCV_INCLUDE_DIRS}
-    /usr/include/pam
-)
-
-# Sources for pam_facial_auth
-set(PAM_FACIAL_AUTH_SOURCES
+# Compila il modulo PAM
+add_library(pam_facial_auth MODULE
     src/FacialAuth.cpp
     src/FaceRecWrapper.cpp
 )
 
-# Sources for facial_test
-set(FACIAL_TEST_SOURCES
-    facial_test.cpp
-    src/FaceRecWrapper.cpp
-)
-
-# Sources for facial_training
-set(FACIAL_TRAINING_SOURCES
-    facial_training.cpp
-    src/FaceRecWrapper.cpp
-)
-
-# Headers
-set(HEADERS
-    src/FacialAuth.h
-    src/FaceRecWrapper.h
-)
-
-# Define the executable for pam_facial_auth
-add_executable(pam_facial_auth ${PAM_FACIAL_AUTH_SOURCES} ${HEADERS})
-
-# Define the executable for facial_test
-add_executable(facial_test ${FACIAL_TEST_SOURCES} ${HEADERS})
-
-# Define the executable for facial_training
-add_executable(facial_training ${FACIAL_TRAINING_SOURCES} ${HEADERS})
-
-# Link libraries for pam_facial_auth
+# Link con le librerie necessarie
 target_link_libraries(pam_facial_auth
-    ${OpenCV_LIBS}
+    PRIVATE
     ${PAM_LIBRARIES}
+    ${OpenCV_LIBS}
+    Utils
 )
 
-# Link libraries for facial_test
-target_link_libraries(facial_test
+# Compila il binario facial_auth
+add_executable(facial_auth src/facial_auth.cpp src/FaceRecWrapper.cpp)
+
+# Link con le librerie necessarie per facial_auth
+target_link_libraries(facial_auth
+    PRIVATE
     ${OpenCV_LIBS}
-    ${PAM_LIBRARIES}
+    Utils
 )
 
-# Link libraries for facial_training
+# Compila il binario facial_training
+add_executable(facial_training src/facial_training.cpp src/FaceRecWrapper.cpp)
+
+# Link con le librerie necessarie per facial_training
 target_link_libraries(facial_training
+    PRIVATE
     ${OpenCV_LIBS}
-    ${PAM_LIBRARIES}
+    Utils
 )
 
-# Install targets
-install(TARGETS pam_facial_auth facial_test facial_training DESTINATION ${CMAKE_INSTALL_PREFIX}/bin)
-
-# Add tests if necessary
-enable_testing()
-add_test(NAME FacialAuthTest COMMAND pam_facial_auth)
+# Impostare l'output dei binari (opzionale)
+set_target_properties(facial_auth facial_training pam_facial_auth PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+)
