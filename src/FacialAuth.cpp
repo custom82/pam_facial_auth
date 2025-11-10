@@ -1,60 +1,81 @@
-PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, const char **argv) {
-	// Prima verifica se possiamo ottenere l'username
+#include <stdio.h>
+#include <stdlib.h>
+#include <string>
+#include <algorithm>
+#include <map>
+#include <security/pam_appl.h>
+#include <security/pam_modules.h>
+#include <opencv2/opencv.hpp>
+#include <ctime>
+
+#include "Utils.h"
+#include "FaceRecWrapper.h"
+
+// hook richiesti da PAM
+PAM_EXTERN int pam_sm_setcred( pam_handle_t * pamh, int flags, int argc, const char ** argv )
+{
+	return PAM_SUCCESS;
+}
+
+PAM_EXTERN int pam_sm_acct_mgmt( pam_handle_t * pamh, int flags, int argc, const char ** argv )
+{
+	return PAM_SUCCESS;
+}
+
+// Funzione principale di autenticazione
+PAM_EXTERN int pam_sm_authenticate( pam_handle_t * pamh, int flags, int argc, const char ** argv )
+{
 	const char * user;
-	int ret = pam_get_user(pamh, &user, "Username: ");
-	if (ret != PAM_SUCCESS) {
+	int ret = pam_get_user( pamh, &user, "Username: " );
+	if ( ret != PAM_SUCCESS )
+	{
 		return ret;
 	}
-	std::string username(user);
+	std::string username( user );
 
-	// Carica la configurazione
+	// Configurazione
 	std::map<std::string, std::string> config;
-	Utils::GetConfig("/etc/pam-facial-auth/config", config);
+	Utils::GetConfig( "/etc/pam-facial-auth/config", config );
 
-	// Imposta i parametri dal file di configurazione
-	std::time_t timeout = std::stoi(config["timeout"]);
-	double threshold = std::stod(config["threshold"]);
-	bool imCapture = config["imageCapture"] == "true";
+	std::time_t timeout   = std::stoi( config["timeout"] );
+	double      threshold = std::stod( config["threshold"] );
+	bool        imCapture = config["imageCapture"] == "true";
 
-	// Crea un oggetto FaceRecWrapper passando il percorso del modello e il nome della tecnica
-	FaceRecWrapper frw("/etc/pam-facial-auth/model", "eigen");
+	FaceRecWrapper frw("/etc/pam-facial-auth/model", "user_model");
 
-	// Setup / controllo del ciclo
-	std::time_t start = std::time(nullptr);
+	std::time_t start = std::time( NULL );
 	std::string imagePathLast;
 	cv::VideoCapture vc;
+
 	if (imCapture && !vc.open(0)) {
-		std::cout << "Could not open camera." << std::endl;
+		printf("Could not open camera.\n");
 		return PAM_AUTH_ERR;
 	}
-	std::cout << "Starting facial recognition for " << username << "..." << std::endl;
+	printf("Starting facial recognition for %s...\n", username.c_str());
 
-	while (std::time(nullptr) - start < timeout) {
+	while (std::time(NULL) - start < timeout)
+	{
 		cv::Mat im;
-
-		if (imCapture) {  // Cattura l'immagine attivamente
+		if (imCapture) {
 			vc.read(im);
-			cv::cvtColor(im, im, cv::COLOR_BGR2GRAY);
-		} else {  // Controlla la directory per un flusso di immagini
-			// Get most recent image path logic here...
+			cv::cvtColor(im, im, CV_BGR2GRAY);
 		}
-
-		if (im.empty()) {
-			continue;
+		else {
+			// Logica per caricare le immagini dalla directory
 		}
+		if (im.empty()) continue;
 
-		// Effettua la predizione
-		double confidence = 0.0;
 		int prediction = -1;
+		double confidence = 0.0;
 		frw.Predict(im, prediction, confidence);
 
-		std::cout << "Predicted: " << prediction << ", " << frw.GetLabelName(prediction) << " (" << confidence << ")" << std::endl;
+		printf("Predicted: %d, %s (%f)\n", prediction, frw.GetLabelName(prediction).c_str(), confidence);
 
 		if (confidence < threshold && frw.GetLabelName(prediction) == username) {
 			return PAM_SUCCESS;
 		}
 	}
 
-	std::cout << "Timeout on face authentication..." << std::endl;
+	printf("Timeout on face authentication... \n");
 	return PAM_AUTH_ERR;
 }

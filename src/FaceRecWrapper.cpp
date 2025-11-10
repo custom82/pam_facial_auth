@@ -12,7 +12,7 @@ FaceRecWrapper::FaceRecWrapper(const std::string &modelPath, const std::string &
 
 // Funzione per caricare il modello
 void FaceRecWrapper::Load(const std::string &path) {
-	// Inizializza il riconoscitore facciale
+	// Inizializza il riconoscitore facciale con la versione corretta per OpenCV 4.x
 	fr = cv::face::EigenFaceRecognizer::create();  // Usa EigenFaces come esempio
 	fr->read(path + "-facerec.xml"); // Carica il modello da un file XML
 	std::cout << "Model loaded from: " << path << std::endl;
@@ -29,7 +29,8 @@ void FaceRecWrapper::Train(const std::vector<cv::Mat> &images, const std::vector
 
 // Funzione per fare la predizione dell'etichetta di una faccia in un'immagine
 int FaceRecWrapper::Predict(const cv::Mat &image, int &prediction, double &confidence) {
-	return fr->predict(image, prediction, confidence); // Predice l'etichetta
+	fr->predict(image, prediction, confidence); // Predice l'etichetta
+	return prediction;  // Restituisce il valore di predizione
 }
 
 // Funzione per impostare i nomi delle etichette
@@ -48,3 +49,4 @@ std::string FaceRecWrapper::GetLabelName(int index) {
 	}
 	return "Unknown";  // Se l'indice non è valido
 }
+
