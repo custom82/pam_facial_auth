@@ -7,8 +7,8 @@
 #include <opencv2/opencv.hpp>
 #include <opencv2/face.hpp>
 #include <ctime>
-
 #include "FaceRecWrapper.h"
+#include "Utils.h"
 
 // expected hook
 PAM_EXTERN int pam_sm_setcred(pam_handle_t *pamh, int flags, int argc, const char **argv) {
@@ -55,8 +55,8 @@ PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, cons
 			vc.read(im);
 			cv::cvtColor(im, im, cv::COLOR_BGR2GRAY);
 		} else {
-			// Add image directory walking logic
-			// (Assuming `imagePath` is assigned with the correct image)
+			// Example: load the image from a directory, replace with the correct image path
+			std::string imagePath = config["imageDir"] + "/image_name.jpg"; // Change this with actual logic
 			im = cv::imread(imagePath, cv::IMREAD_GRAYSCALE);
 		}
 
