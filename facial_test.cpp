@@ -1,65 +1,91 @@
 #include <opencv2/opencv.hpp>
 #include <opencv2/face.hpp>
 #include <iostream>
-#include <unistd.h>
+#include <string>
 #include <filesystem>
 
 namespace fs = std::filesystem;
+using namespace cv;
+using namespace cv::face;
 
-void print_help() {
-	std::cout << "Uso: facial_test <image_path> <username>\n";
-	std::cout << "<image_path> : Percorso all'immagine da testare con il modello.\n";
-	std::cout << "<username> : Nome dell'utente per il quale eseguire il riconoscimento facciale.\n";
+enum ClassifierType { LBPH, FISHER, EIGEN };
+
+Ptr<FaceRecognizer> loadModel(const std::string& modelPath, ClassifierType classifierType) {
+	Ptr<FaceRecognizer> model;
+
+	switch (classifierType) {
+		case LBPH:
+			model = LBPHFaceRecognizer::create();
+			model->read(modelPath);
+			break;
+		case FISHER:
+			model = FisherFaceRecognizer::create();
+			model->read(modelPath);
+			break;
+		case EIGEN:
+			model = EigenFaceRecognizer::create();
+			model->read(modelPath);
+			break;
+	}
+	return model;
 }
 
-bool is_root() {
-	return getuid() == 0;  // Verifica se l'utente è root
-}
-
-bool test_model(const std::string& image_path, const std::string& username) {
-	// Carica il modello pre-addestrato
-	cv::Ptr<cv::face::LBPHFaceRecognizer> model = cv::face::LBPHFaceRecognizer::create();
-	std::string model_path = "/var/lib/facial_auth/" + username + "/face_model.xml";
-
-	// Verifica che il modello esista
-	if (!fs::exists(model_path)) {
-		std::cerr << "Il modello per l'utente " << username << " non esiste.\n";
+// Funzione di test del modello
+bool test_model(const std::string& imagePath, const std::string& modelType) {
+	Mat testImage = imread(imagePath, IMREAD_GRAYSCALE);
+	if (testImage.empty()) {
+		std::cerr << "Immagine non trovata!" << std::endl;
 		return false;
 	}
 
-	model->read(model_path);
+	ClassifierType classifier = LBPH; // Default
 
-	// Carica l'immagine di test
-	cv::Mat test_image = cv::imread(image_path, cv::IMREAD_GRAYSCALE);
-	if (test_image.empty()) {
-		std::cerr << "Immagine non trovata o non valida: " << image_path << std::endl;
-		return false;
+	// Seleziona il classificatore in base all'input
+	if (modelType == "fisher") {
+		classifier = FISHER;
+	} else if (modelType == "eigen") {
+		classifier = EIGEN;
 	}
 
-	// Riconoscimento facciale
-	int predicted_label;
-	double confidence;
-	model->predict(test_image, predicted_label, confidence);
+	// Carica il modello e fai il riconoscimento
+	Ptr<FaceRecognizer> model = loadModel("face_model.xml", classifier);
 
-	std::cout << "Risultato del test per l'utente " << username << ": etichetta prevista = "
-	<< predicted_label << ", confidenza = " << confidence << "\n";
+	int label = -1;
+	double confidence = 0.0;
+	model->predict(testImage, label, confidence);
 
+	std::cout << "Predizione completata. Utente: " << label << ", Confidenza: " << confidence << std::endl;
 	return true;
 }
 
 int main(int argc, char** argv) {
-	if (argc != 3) {
-		print_help();
-		return -1;
+	bool noGui = false;
+	std::string classifier = "lbph"; // Default classifier
+
+	if (argc < 3) {
+		std::cerr << "Uso: " << argv[0] << " <test> <image_path> [--no-gui] [--classifier lbph|fisher|eigen]" << std::endl;
+		return 1;
 	}
 
-	if (!is_root()) {
-		std::cerr << "Questo programma deve essere eseguito come root.\n";
-		return -1;
+	// Parsing degli argomenti della linea di comando
+	for (int i = 1; i < argc; ++i) {
+		if (std::string(argv[i]) == "--no-gui") {
+			noGui = true;
+		} else if (std::string(argv[i]) == "--classifier") {
+			if (i + 1 < argc) {
+				classifier = argv[++i];
+			}
+		}
 	}
 
-	std::string image_path = argv[1];
-	std::string username = argv[2];
-
-	return test_model(image_path, username) ? 0 : -1;
+	if (std::string(argv[1]) == "test") {
+		if (argc < 4) {
+			std::cerr << "Per testare, specifica il percorso dell'immagine!" << std::endl;
+			return 1;
+		}
+		return test_model(argv[2], classifier);
+	} else {
+		std::cerr << "Comando non valido!" << std::endl;
+		return 1;
+	}
 }
