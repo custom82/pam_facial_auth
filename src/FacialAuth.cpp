@@ -6,6 +6,7 @@
 #include <opencv2/highgui.hpp>
 #include <opencv2/core.hpp>
 #include <iostream>
+#include "Utils.h"
 
 int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, const char **argv) {
 	// Inizializzazione delle variabili per la configurazione
