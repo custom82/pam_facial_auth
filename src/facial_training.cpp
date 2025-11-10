@@ -1,42 +1,61 @@
+#include <opencv2/opencv.hpp>
+#include <opencv2/face.hpp>  // Include il modulo face
 #include <iostream>
-#include <string>
-#include <filesystem> // Inclusione necessaria per std::filesystem
-#include <opencv2/opencv.hpp>  // Inclusione per OpenCV
+#include <filesystem>
+#include <vector>
 
-namespace fs = std::filesystem;  // Dichiara il namespace per filesystem
+namespace fs = std::filesystem;
 
-bool train_model(const std::string& data_dir, const std::string& user_name) {
-	fs::path user_dir = fs::path(data_dir) / user_name;
+// Funzione per addestrare il modello
+bool train_model(const std::string& data_dir, const std::string& user_dir) {
+	// Carica le immagini da addestrare
+	std::vector<cv::Mat> images;
+	std::vector<int> labels;
 
-	if (!fs::exists(user_dir)) {
-		std::cerr << "User directory " << user_dir << " does not exist!" << std::endl;
+	// Funzione per caricare le immagini da un dato percorso
+	for (const auto& entry : fs::directory_iterator(data_dir)) {
+		// Assicurati che il file sia un'immagine
+		if (entry.is_regular_file() && entry.path().extension() == ".jpg") {
+			cv::Mat img = cv::imread(entry.path().string(), cv::IMREAD_GRAYSCALE);  // Legge in scala di grigi
+			if (!img.empty()) {
+				images.push_back(img);
+				labels.push_back(std::stoi(entry.path().stem().string()));  // Supponiamo che il nome del file contenga l'etichetta
+			}
+		}
+	}
+
+	if (images.empty()) {
+		std::cerr << "No images found for training!" << std::endl;
 		return false;
 	}
 
-	std::cout << "Training model for user: " << user_name << std::endl;
-
-	// Modifica per usare il riconoscimento facciale di OpenCV
+	// Aggiungi il modello LBPH
 	cv::Ptr<cv::face::LBPHFaceRecognizer> model = cv::face::LBPHFaceRecognizer::create();
-	// Qui inserisci la logica per addestrare il modello, ad esempio:
-	// model->train(imagens, labels);
-	model->save(user_dir / "face_model.xml");
 
+	// Addestra il modello
+	model->train(images, labels);
+
+	// Salva il modello addestrato nella directory dell'utente
+	model->save(user_dir + "/face_model.xml");
+
+	std::cout << "Model trained and saved to " << user_dir + "/face_model.xml" << std::endl;
 	return true;
 }
 
-int main(int argc, char* argv[]) {
+int main(int argc, char** argv) {
 	if (argc != 3) {
-		std::cerr << "Usage: " << argv[0] << " <data_dir> <user_name>" << std::endl;
-		return 1;
+		std::cerr << "Usage: " << argv[0] << " <data_directory> <user_model_directory>" << std::endl;
+		return -1;
 	}
 
 	std::string data_dir = argv[1];
-	std::string user_name = argv[2];
+	std::string user_dir = argv[2];
 
-	if (!train_model(data_dir, user_name)) {
-		return 1;
+	if (train_model(data_dir, user_dir)) {
+		std::cout << "Training successful!" << std::endl;
+		return 0;
+	} else {
+		std::cerr << "Training failed!" << std::endl;
+		return -1;
 	}
-
-	std::cout << "Training for user " << user_name << " completed!" << std::endl;
-	return 0;
 }
