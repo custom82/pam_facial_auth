@@ -10,7 +10,7 @@ include_directories(${PAM_INCLUDE_DIRS})
 include_directories(${CMAKE_SOURCE_DIR}/src)  # Directory di sorgenti
 
 # Aggiungi la libreria di utilità
-add_library(Utils STATIC ${CMAKE_SOURCE_DIR}/src/Utils.cpp)
+add_library(Utils STATIC src/Utils.cpp)
 
 # Compila il modulo PAM
 add_library(pam_facial_auth MODULE
