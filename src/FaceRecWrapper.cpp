@@ -1,155 +1,50 @@
-// =======================================================================
-// pam-facial-auth
-// FaceRecWrapper
-//
-// Created by Devin Conley
-// =======================================================================
-
 #include "FaceRecWrapper.h"
-#include <opencv2/opencv.hpp>
 #include <opencv2/face.hpp>
+#include <opencv2/opencv.hpp>
+#include <iostream>
 
-FaceRecWrapper::FaceRecWrapper() :
-sizeFace(96)
-{}
-
-FaceRecWrapper::FaceRecWrapper(const std::string& techniqueName, const std::string& pathCascade) :
-sizeFace(96)
-{
-	SetTechnique(techniqueName);
-	LoadCascade(pathCascade);
+FaceRecWrapper::FaceRecWrapper(const std::string &modelPath, const std::string &name)
+: modelPath(modelPath) {
+	// Se il modello esiste, carica il riconoscitore facciale
+	Load(modelPath);
 }
 
-void FaceRecWrapper::Train(const std::vector<cv::Mat>& images, const std::vector<int>& labels)
-{
-	if (!images.size())
-	{
-		printf("Empty vector of training images\n");
-		return;
-	}
-
-	std::vector<cv::Mat> imagesCropped;
-	std::vector<int> labelsCropped;
-
-	for (size_t i = 0; i < images.size(); ++i)
-	{
-		cv::Mat crop;
-		if (CropFace(images[i], crop))
-		{
-			labelsCropped.push_back(labels[i]);
-			imagesCropped.push_back(crop);
-		}
-	}
-
-	fr->train(imagesCropped, labelsCropped);
-}
-
-void FaceRecWrapper::Predict(const cv::Mat& im, int& label, double& confidence)
-{
-	cv::Mat cropped;
-	if (!CropFace(im, cropped))
-	{
-		label = -1;
-		confidence = 10000;
-		return;
-	}
-
-	fr->predict(cropped, label, confidence);
-}
-
-void FaceRecWrapper::Save(const std::string& path)
-{
-	// Write additional wrapper info
-	FILE* pModel;
-	pModel = fopen(path.c_str(), "w");
-	fprintf(pModel, "technique=%s\n", technique.c_str());
-	fprintf(pModel, "sizeFace=%d\n", (int)sizeFace);
-	fclose(pModel);
-
-	// Save actual model and classifier
-	fr->save(path + "-facerec.xml");
-	std::ifstream orig(pathCascade, std::ios::binary);
-	std::ofstream cpy(path + "-cascade.xml", std::ios::binary);
-	cpy << orig.rdbuf();
-}
-
-void FaceRecWrapper::Load(const std::string& path)
-{
-	std::map<std::string, std::string> model;
-	Utils::GetConfig(path, model);
-
-	sizeFace = std::stoi(model["sizeFace"]);
-	SetTechnique(model["technique"]);
-
-	LoadCascade(path + "-cascade.xml");
+// Carica il modello e la tecnica
+void FaceRecWrapper::Load(const std::string &path) {
+	// Carica il riconoscitore facciale (modifica in base alla tecnica scelta)
+	fr = cv::face::createEigenFaceRecognizer(); // Per esempio, usa EigenFaces
 	fr->read(path + "-facerec.xml");
+	// Altre operazioni di caricamento del modello
+	std::cout << "Model loaded from: " << path << std::endl;
 }
 
-void FaceRecWrapper::SetLabelNames(const std::vector<std::string>& names)
-{
-	for (std::size_t i = 0; i < names.size(); ++i)
-	{
-		fr->setLabelInfo(i, names[i]);
+// Allena il riconoscitore facciale con immagini e etichette
+void FaceRecWrapper::Train(const std::vector<cv::Mat> &images, const std::vector<int> &labels) {
+	if (images.empty()) {
+		std::cerr << "Error: No images provided for training!" << std::endl;
+		return;
+	}
+	fr->train(images, labels);
+}
+
+// Predice l'etichetta di una faccia in un'immagine
+int FaceRecWrapper::Predict(const cv::Mat &image, int &prediction, double &confidence) {
+	return fr->predict(image, prediction, confidence);
+}
+
+// Imposta i nomi delle etichette
+void FaceRecWrapper::SetLabelNames(const std::vector<std::string> &names) {
+	labelNames = names;
+	// Aggiungi i nomi delle etichette al riconoscitore
+	for (int i = 0; i < labelNames.size(); ++i) {
+		fr->setLabelInfo(i, labelNames[i]);
 	}
 }
 
-std::string FaceRecWrapper::GetLabelName(int index)
-{
-	return fr->getLabelInfo(index);
-}
-
-bool FaceRecWrapper::SetTechnique(const std::string& t)
-{
-	if (t == "eigen")
-	{
-		fr = cv::face::EigenFaceRecognizer::create(10);
+// Restituisce il nome dell'etichetta per un dato indice
+std::string FaceRecWrapper::GetLabelName(int index) {
+	if (index >= 0 && index < labelNames.size()) {
+		return labelNames[index];
 	}
-	else if (t == "fisher")
-	{
-		fr = cv::face::FisherFaceRecognizer::create();
-	}
-	else if (t == "lbph")
-	{
-		fr = cv::face::LBPHFaceRecognizer::create();
-	}
-	else
-	{
-		printf("Invalid technique: %s, defaulting to eigenfaces.\n", technique.c_str());
-		fr = cv::face::EigenFaceRecognizer::create(10);
-		technique = "eigen";
-		return false;
-	}
-
-	technique = t;
-	return true;
-}
-
-bool FaceRecWrapper::LoadCascade(const std::string& filepath)
-{
-	pathCascade = filepath;
-
-	// Set up face detector
-	if (!cascade.load(pathCascade))
-	{
-		printf("Could not load haar cascade classifier.\n");
-		return false;
-	}
-	return true;
-}
-
-bool FaceRecWrapper::CropFace(const cv::Mat& image, cv::Mat& cropped)
-{
-	// Detect face
-	std::vector<cv::Rect> faces;
-	cascade.detectMultiScale(image, faces, 1.05, 8, 0 | cv::CASCADE_SCALE_IMAGE, cv::Size(40, 40));
-	if (faces.empty())
-	{
-		return false;
-	}
-
-	// Crop and resize
-	cropped = image(faces[0]);
-	cv::resize(cropped, cropped, cv::Size(sizeFace, sizeFace));
-
-	return true;
+	return "Unknown";  // Se l'indice non è valido
 }
