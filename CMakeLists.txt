@@ -3,10 +3,10 @@ cmake_minimum_required(VERSION 3.10)
 # Impostare il nome del progetto
 project(pam_facial_auth)
 
-# Aggiungi OpenCV come dipendenza, assicurandoti che OpenCV sia trovato correttamente
+# Aggiungi OpenCV come dipendenza
 find_package(OpenCV REQUIRED)
 
-# Verifica che il modulo contrib sia abilitato in OpenCV
+# Verifica che OpenCV sia trovato
 if (NOT OpenCV_FOUND)
     message(FATAL_ERROR "OpenCV not found!")
 endif()
@@ -14,8 +14,8 @@ endif()
 # Aggiungi le directory di inclusione per OpenCV
 include_directories(${OpenCV_INCLUDE_DIRS})
 
-# Aggiungi le directory di inclusione per C++
-include_directories(/usr/include/c++/X.Y.Z)  # Aggiungi qui la directory corretta di C++
+# Aggiungi le directory di inclusione per C (solo per i file C)
+include_directories(/usr/include)
 
 # Aggiungi la libreria di utilità
 add_library(Utils STATIC src/Utils.cpp)
@@ -69,6 +69,6 @@ set_target_properties(Utils PROPERTIES
     ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
 )
 
-# Forza l'uso di C++20
+# Forza l'uso di C++20 solo per i file C++ (es. .cpp)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
