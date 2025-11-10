@@ -1,3 +1,4 @@
+cmake_minimum_required(VERSION 4.1)
 # Aggiungi OpenCV e PAM come dipendenze
 find_package(OpenCV REQUIRED)
 find_package(PkgConfig REQUIRED)
