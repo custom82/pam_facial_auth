@@ -1,7 +1,7 @@
 # Aggiungi OpenCV e PAM come dipendenze
 find_package(OpenCV REQUIRED)
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(PAM REQUIRED libpam)
+pkg_check_modules(PAM REQUIRED pam)
 
 # Aggiungi le directory di inclusione per PAM e OpenCV
 include_directories(${OpenCV_INCLUDE_DIRS})
