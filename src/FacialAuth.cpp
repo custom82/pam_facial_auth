@@ -7,6 +7,8 @@
 #include <opencv2/core.hpp>
 #include <iostream>
 #include "Utils.h"
+#include <security/pam_appl.h>  // Per pam_handle_t e le funzioni PAM
+#include <security/pam_misc.h>  // Se usi PAM Misc, altrimenti puoi eliminarlo
 
 int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, const char **argv) {
 	// Inizializzazione delle variabili per la configurazione
