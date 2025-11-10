@@ -7,16 +7,16 @@
 #include <filesystem>
 #include <vector>
 #include <string>
-#include <cstdlib>
 
 namespace fs = std::filesystem;
 
 void print_usage() {
-	std::cout << "Usage: facial_training -u <user> -m <method> <training_data_directory> [--output|-o <output_file>] [--verbose|-v]\n";
+	std::cout << "Usage: facial_training -u <user> -m <method> <training_data_directory> [--output|-o <output_file>] [--force|-f] [--verbose|-v]\n";
 	std::cout << "Methods: lbph, eigen, fisher\n";
 }
 
 bool verbose = false;
+bool force_overwrite = false;
 
 void log_info(const std::string& msg) {
 	if (verbose)
@@ -43,24 +43,21 @@ int main(int argc, char** argv) {
 	std::string training_data_directory;
 	std::string output_model;
 
-	// Parse command line arguments
+	// --- Parsing parametri ---
 	for (int i = 1; i < argc; ++i) {
 		std::string arg = argv[i];
-
-		if (arg == "-u" || arg == "--user") {
-			if (i + 1 < argc)
-				user = argv[++i];
-		} else if (arg == "-m" || arg == "--method") {
-			if (i + 1 < argc)
-				method = argv[++i];
-		} else if (arg == "--output" || arg == "-o") {
-			if (i + 1 < argc)
-				output_model = argv[++i];
-		} else if (arg == "--verbose" || arg == "-v") {
+		if ((arg == "-u" || arg == "--user") && i + 1 < argc)
+			user = argv[++i];
+		else if ((arg == "-m" || arg == "--method") && i + 1 < argc)
+			method = argv[++i];
+		else if ((arg == "--output" || arg == "-o") && i + 1 < argc)
+			output_model = argv[++i];
+		else if ((arg == "--force" || arg == "-f"))
+			force_overwrite = true;
+		else if ((arg == "--verbose" || arg == "-v"))
 			verbose = true;
-		} else if (arg[0] != '-') {
+		else if (arg[0] != '-')
 			training_data_directory = arg;
-		}
 	}
 
 	if (user.empty() || method.empty() || training_data_directory.empty()) {
@@ -68,23 +65,30 @@ int main(int argc, char** argv) {
 		return 1;
 	}
 
+	// Percorso completo della directory immagini
+	fs::path base_path = fs::path(training_data_directory) / user;
+	if (!fs::exists(base_path) || !fs::is_directory(base_path)) {
+		log_error("User directory not found: " + base_path.string());
+		return 1;
+	}
+
 	log_info("User: " + user);
 	log_info("Method: " + method);
-	log_info("Training data: " + training_data_directory);
+	log_info("Training directory: " + base_path.string());
 
 	if (output_model.empty()) {
-		output_model = training_data_directory + "/models/" + user + "_model.xml";
+		output_model = (fs::path(training_data_directory) / user / "models" / (user + "_model.xml")).string();
 		log_info("No output specified, using default: " + output_model);
 	}
 
-	// Load images
+	// --- Carica immagini ---
 	std::vector<cv::Mat> images;
 	std::vector<int> labels;
 	int label = 0;
 
-	log_debug("Scanning directory: " + training_data_directory);
+	log_debug("Scanning directory: " + base_path.string());
 
-	for (const auto& entry : fs::directory_iterator(training_data_directory)) {
+	for (const auto& entry : fs::directory_iterator(base_path)) {
 		if (entry.is_directory()) continue;
 
 		std::string file_path = entry.path().string();
@@ -101,23 +105,23 @@ int main(int argc, char** argv) {
 		images.push_back(img);
 		labels.push_back(label);
 
-		log_debug("Found image: " + file_path);
+		log_debug("Loaded image: " + file_path);
 	}
 
 	if (images.empty()) {
-		log_error("No training images found in " + training_data_directory);
+		log_error("No training images found in " + base_path.string());
 		return 1;
 	}
 
-	// Create recognizer
+	// --- Selezione modello ---
 	cv::Ptr<cv::face::FaceRecognizer> model;
-	if (method == "lbph") {
+	if (method == "lbph")
 		model = cv::face::LBPHFaceRecognizer::create();
-	} else if (method == "eigen") {
+	else if (method == "eigen")
 		model = cv::face::EigenFaceRecognizer::create();
-	} else if (method == "fisher") {
+	else if (method == "fisher")
 		model = cv::face::FisherFaceRecognizer::create();
-	} else {
+	else {
 		log_error("Invalid method: " + method);
 		return 1;
 	}
@@ -127,6 +131,16 @@ int main(int argc, char** argv) {
 
 	fs::path out_path(output_model);
 	fs::create_directories(out_path.parent_path());
+
+	// --- Sovrascrittura forzata ---
+	if (fs::exists(out_path) && !force_overwrite) {
+		log_error("Output model already exists, use -f or --force to overwrite.");
+		return 1;
+	}
+
+	if (force_overwrite) {
+		log_info("Forcing overwrite of existing model...");
+	}
 
 	log_info("Saving model to: " + output_model);
 	model->save(output_model);
