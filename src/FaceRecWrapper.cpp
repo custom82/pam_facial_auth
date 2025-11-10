@@ -1,38 +1,38 @@
 #include "FaceRecWrapper.h"
-#include <opencv2/face.hpp>
 #include <opencv2/opencv.hpp>
+#include <opencv2/face.hpp>
 #include <iostream>
 
+// Costruttore per inizializzare il percorso del modello
 FaceRecWrapper::FaceRecWrapper(const std::string &modelPath, const std::string &name)
 : modelPath(modelPath) {
 	// Se il modello esiste, carica il riconoscitore facciale
 	Load(modelPath);
 }
 
-// Carica il modello e la tecnica
+// Funzione per caricare il modello
 void FaceRecWrapper::Load(const std::string &path) {
-	// Carica il riconoscitore facciale (modifica in base alla tecnica scelta)
-	fr = cv::face::createEigenFaceRecognizer(); // Per esempio, usa EigenFaces
-	fr->read(path + "-facerec.xml");
-	// Altre operazioni di caricamento del modello
+	// Inizializza il riconoscitore facciale
+	fr = cv::face::EigenFaceRecognizer::create();  // Usa EigenFaces come esempio
+	fr->read(path + "-facerec.xml"); // Carica il modello da un file XML
 	std::cout << "Model loaded from: " << path << std::endl;
 }
 
-// Allena il riconoscitore facciale con immagini e etichette
+// Funzione per allenare il riconoscitore facciale con immagini e etichette
 void FaceRecWrapper::Train(const std::vector<cv::Mat> &images, const std::vector<int> &labels) {
 	if (images.empty()) {
 		std::cerr << "Error: No images provided for training!" << std::endl;
 		return;
 	}
-	fr->train(images, labels);
+	fr->train(images, labels); // Allena il riconoscitore
 }
 
-// Predice l'etichetta di una faccia in un'immagine
+// Funzione per fare la predizione dell'etichetta di una faccia in un'immagine
 int FaceRecWrapper::Predict(const cv::Mat &image, int &prediction, double &confidence) {
-	return fr->predict(image, prediction, confidence);
+	return fr->predict(image, prediction, confidence); // Predice l'etichetta
 }
 
-// Imposta i nomi delle etichette
+// Funzione per impostare i nomi delle etichette
 void FaceRecWrapper::SetLabelNames(const std::vector<std::string> &names) {
 	labelNames = names;
 	// Aggiungi i nomi delle etichette al riconoscitore
@@ -41,7 +41,7 @@ void FaceRecWrapper::SetLabelNames(const std::vector<std::string> &names) {
 	}
 }
 
-// Restituisce il nome dell'etichetta per un dato indice
+// Funzione per ottenere il nome dell'etichetta in base all'indice
 std::string FaceRecWrapper::GetLabelName(int index) {
 	if (index >= 0 && index < labelNames.size()) {
 		return labelNames[index];

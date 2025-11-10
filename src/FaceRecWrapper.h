@@ -8,18 +8,32 @@
 
 class FaceRecWrapper {
 public:
+    // Costruttore con i parametri di percorso del modello e nome
     FaceRecWrapper(const std::string &modelPath, const std::string &name);
+
+    // Carica il modello
     void Load(const std::string &path);
+
+    // Allena il riconoscitore con immagini e etichette
     void Train(const std::vector<cv::Mat> &images, const std::vector<int> &labels);
+
+    // Predice l'etichetta di una faccia nell'immagine
     int Predict(const cv::Mat &image, int &prediction, double &confidence);
 
-    // Aggiunta delle funzioni per la gestione delle etichette
+    // Aggiungi i nomi delle etichette
     void SetLabelNames(const std::vector<std::string> &names);
+
+    // Ottieni il nome dell'etichetta per l'indice
     std::string GetLabelName(int index);
 
 private:
+    // Riconoscitore facciale
     cv::Ptr<cv::face::FaceRecognizer> fr;
-    std::vector<std::string> labelNames;  // Aggiunto per memorizzare le etichette
+
+    // Vettore per memorizzare i nomi delle etichette
+    std::vector<std::string> labelNames;
+
+    // Percorso del modello
     std::string modelPath;
 };
 
