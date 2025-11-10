@@ -91,3 +91,41 @@ install(TARGETS Utils
 install(FILES etc/haarcascade_frontalface_alt.xml etc/haarcascade_frontalface_default.xml
     DESTINATION /etc/pam_facial_auth
 )
+
+# Compila il binario facial_training
+add_executable(facial_training
+    ${CMAKE_SOURCE_DIR}/src/facial_training.cpp  # Assicurati che il file sia presente
+    ${CMAKE_SOURCE_DIR}/src/FaceRecWrapper.cpp
+)
+
+# Link con le librerie necessarie per facial_training
+target_link_libraries(facial_training
+    PRIVATE
+    ${OpenCV_LIBS}
+    Utils
+)
+
+# Impostare l'output dei binari
+set_target_properties(facial_test facial_training pam_facial_auth PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+)
+
+# Installazione dei file
+install(TARGETS facial_test facial_training pam_facial_auth
+    DESTINATION /usr/sbin
+)
+
+# Installazione della libreria
+install(TARGETS pam_facial_auth
+    DESTINATION /usr/lib64/security
+)
+
+# Installazione della libreria Utils
+install(TARGETS Utils
+    DESTINATION /usr/lib64
+)
+
+# Installazione dei file XML
+install(FILES etc/haarcascade_frontalface_alt.xml etc/haarcascade_frontalface_default.xml
+    DESTINATION /etc/pam_facial_auth
+)
