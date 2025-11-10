@@ -1,98 +1,98 @@
-#include <iostream>
 #include <opencv2/opencv.hpp>
 #include <opencv2/face.hpp>
-#include <opencv2/highgui.hpp>
-#include <opencv2/imgproc.hpp>
+#include <iostream>
 #include <filesystem>
-#include <string>
 #include <vector>
-#include <getopt.h>
 
 namespace fs = std::filesystem;
-using namespace cv;
 
-void print_help() {
-	std::cout << "Usage: facial_training -u <user> -m <method> <training_data_directory> [--output <output_directory>]\n";
-	std::cout << "Methods: lbph, eigen, fisher\n";
-}
+// Funzione per addestrare il modello
+void train_model(const std::string& user, const std::string& method, const std::string& training_data_directory, const std::string& output_model_path) {
+	// Verifica che la directory di dati dell'utente esista
+	std::string user_data_dir = training_data_directory + "/" + user;
+	if (!fs::exists(user_data_dir)) {
+		std::cerr << "Directory not found for user: " << user << std::endl;
+		return;
+	}
 
-int main(int argc, char *argv[]) {
-	// Variabili per i parametri
-	std::string user;
-	std::string method = "lbph"; // Default method
-	std::string training_data_dir;
-	std::string output_model_file;
+	// Aggiungi la logica per supportare i vari metodi
+	std::cout << "Training with method: " << method << " for user: " << user << std::endl;
+	std::cout << "Using training data from: " << user_data_dir << std::endl;
+	std::cout << "Model will be saved in: " << output_model_path << std::endl;
 
-	// Parsing dei parametri
-	static struct option long_options[] = {
-		{"user", required_argument, 0, 'u'},
-		{"method", required_argument, 0, 'm'},
-		{"output", required_argument, 0, 'o'},
-		{0, 0, 0, 0}
-	};
+	// Carica le immagini per l'addestramento
+	std::vector<cv::Mat> images;
+	std::vector<int> labels;
+	int label = 0;  // Usato per etichettare tutte le immagini dello stesso utente
 
-	int option_index = 0;
-	int c;
-	while ((c = getopt_long(argc, argv, "u:m:o:", long_options, &option_index)) != -1) {
-		switch (c) {
-			case 'u':
-				user = optarg;
-				break;
-			case 'm':
-				method = optarg;
-				break;
-			case 'o':
-				output_model_file = optarg;
-				break;
-			default:
-				print_help();
-				return 1;
+	// Cicla attraverso le immagini nella directory dell'utente
+	for (const auto &entry : fs::directory_iterator(user_data_dir)) {
+		if (entry.is_regular_file() && (entry.path().extension() == ".jpg" || entry.path().extension() == ".png")) {
+			// Carica l'immagine come immagine in scala di grigi
+			cv::Mat img = cv::imread(entry.path().string(), cv::IMREAD_GRAYSCALE);
+			if (img.empty()) {
+				std::cerr << "Unable to read image: " << entry.path() << std::endl;
+			} else {
+				images.push_back(img);
+				labels.push_back(label);  // Assegna l'etichetta corretta
+			}
 		}
 	}
 
-	if (optind >= argc) {
-		std::cerr << "Missing training data directory\n";
-		print_help();
-		return 1;
+	// Verifica che ci siano immagini per l'addestramento
+	if (images.empty()) {
+		std::cerr << "No images loaded for training!" << std::endl;
+		return;
 	}
 
-	training_data_dir = argv[optind];
-
-	if (user.empty() || training_data_dir.empty()) {
-		std::cerr << "Error: Missing required arguments\n";
-		print_help();
-		return 1;
-	}
-
-	std::cout << "Training with method: " << method << " for user: " << user << "\n";
-	std::cout << "Using training data from: " << training_data_dir << "\n";
-	std::cout << "Model will be saved in: " << output_model_file << "\n";
-
-	// Prepara il classificatore
-	Ptr<face::FaceRecognizer> model;
-
+	// Inizializza il modello in base al metodo scelto
+	cv::Ptr<cv::face::FaceRecognizer> model;
 	if (method == "lbph") {
-		model = face::LBPHFaceRecognizer::create();
+		model = cv::face::LBPHFaceRecognizer::create();
 	} else if (method == "eigen") {
-		model = face::EigenFaceRecognizer::create();
+		model = cv::face::EigenFaceRecognizer::create();
 	} else if (method == "fisher") {
-		model = face::FisherFaceRecognizer::create();
+		model = cv::face::FisherFaceRecognizer::create();
 	} else {
-		std::cerr << "Unsupported method: " << method << "\n";
-		return 1;
+		std::cerr << "Invalid method specified! Choose from lbph, eigen, or fisher." << std::endl;
+		return;
 	}
 
-	// Carica le immagini e le etichette di addestramento
-	std::vector<Mat> images;
-	std::vector<int> labels;
-	// Esegui la lettura delle immagini e l'assegnazione delle etichette (come hai già fatto nel codice precedente)
-	// Aggiungi la logica di caricamento delle immagini e salvataggio del modello
+	// Addestra il modello con le immagini caricate
+	model->train(images, labels);
 
-	// Salva il modello nella directory specificata
-	if (!output_model_file.empty()) {
-		model->save(output_model_file);
-		std::cout << "Model saved at: " << output_model_file << std::endl;
+	// Salva il modello addestrato
+	model->save(output_model_path);
+	std::cout << "Model saved at: " << output_model_path << std::endl;
+}
+
+int main(int argc, char* argv[]) {
+	// Verifica se sono stati forniti i parametri
+	if (argc < 5) {
+		std::cerr << "Usage: facial_training -u <user> -m <method> <training_data_directory> --output <output_model_path>" << std::endl;
+		return -1;
 	}
+
+	std::string user;
+	std::string method;
+	std::string training_data_directory;
+	std::string output_model_path;
+
+	// Parsing dei parametri
+	for (int i = 1; i < argc; i++) {
+		if (std::string(argv[i]) == "-u") {
+			user = argv[++i];
+		} else if (std::string(argv[i]) == "-m") {
+			method = argv[++i];
+		} else if (std::string(argv[i]) == "--output") {
+			output_model_path = argv[++i];
+		} else {
+			training_data_directory = argv[i];
+		}
+	}
+
+	// Esegui il training del modello
+	train_model(user, method, training_data_directory, output_model_path);
 
 	return 0;
 }
