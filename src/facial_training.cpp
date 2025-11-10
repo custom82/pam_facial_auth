@@ -1,140 +1,136 @@
-#include <iostream>
 #include <opencv2/opencv.hpp>
 #include <opencv2/face.hpp>
+#include <opencv2/imgcodecs.hpp>
+#include <opencv2/highgui.hpp>
+#include <opencv2/core.hpp>
+#include <iostream>
 #include <filesystem>
 #include <vector>
 #include <string>
-#include <unistd.h> // getuid()
+#include <cstdlib>
 
 namespace fs = std::filesystem;
 
-void trainModel(const std::string &trainingDataDir,
-				const std::string &outputFile,
-				const std::string &method)
-{
-	std::vector<cv::Mat> images;
-	std::vector<int> labels;
-
-	int label = 0;
-
-	std::cout << "[DEBUG] Scanning directory: " << trainingDataDir << std::endl;
-
-	// Verifica la presenza di immagini nella directory dell'utente
-	for (const auto &entry : fs::directory_iterator(trainingDataDir))
-	{
-		if (entry.is_regular_file())
-		{
-			std::string ext = entry.path().extension().string();
-			if (ext == ".jpg" || ext == ".png" || ext == ".jpeg")
-			{
-				cv::Mat img = cv::imread(entry.path().string(), cv::IMREAD_GRAYSCALE);
-				if (img.empty())
-				{
-					std::cerr << "[WARN] Cannot read image: " << entry.path() << std::endl;
-					continue;
-				}
-
-				std::cout << "[INFO] Found image: " << entry.path() << std::endl;
-				images.push_back(img);
-				labels.push_back(label++);
-			}
-		}
-	}
-
-	if (images.empty())
-	{
-		std::cerr << "[ERROR] No training images found in " << trainingDataDir << std::endl;
-		return;
-	}
-
-	cv::Ptr<cv::face::FaceRecognizer> model;
-
-	if (method == "lbph")
-		model = cv::face::LBPHFaceRecognizer::create();
-	else if (method == "eigen")
-		model = cv::face::EigenFaceRecognizer::create();
-	else if (method == "fisher")
-		model = cv::face::FisherFaceRecognizer::create();
-	else
-	{
-		std::cerr << "[ERROR] Invalid method. Use: lbph | eigen | fisher" << std::endl;
-		return;
-	}
-
-	std::cout << "[INFO] Training model with " << images.size() << " images..." << std::endl;
-	model->train(images, labels);
-
-	fs::path outputPath(outputFile);
-	fs::create_directories(outputPath.parent_path());
-
-	model->save(outputFile);
-	std::cout << "[SUCCESS] Model saved to: " << outputFile << std::endl;
+void print_usage() {
+	std::cout << "Usage: facial_training -u <user> -m <method> <training_data_directory> [--output|-o <output_file>] [--verbose|-v]\n";
+	std::cout << "Methods: lbph, eigen, fisher\n";
 }
 
-int main(int argc, char **argv)
-{
-	// Impedisci esecuzione da utente non root
-	if (getuid() != 0)
-	{
-		std::cerr << "[ERROR] This program must be run as root!" << std::endl;
-		return 1;
-	}
+bool verbose = false;
 
-	if (argc < 5)
-	{
-		std::cerr << "Usage: facial_training -u <user> -m <method> <training_data_directory> "
-		"[-o|--output <output_file>]\n"
-		"Methods: lbph, eigen, fisher"
-		<< std::endl;
+void log_info(const std::string& msg) {
+	if (verbose)
+		std::cout << "[INFO] " << msg << std::endl;
+}
+
+void log_debug(const std::string& msg) {
+	if (verbose)
+		std::cout << "[DEBUG] " << msg << std::endl;
+}
+
+void log_error(const std::string& msg) {
+	std::cerr << "[ERROR] " << msg << std::endl;
+}
+
+int main(int argc, char** argv) {
+	if (argc < 4) {
+		print_usage();
 		return 1;
 	}
 
 	std::string user;
-	std::string method = "lbph";
-	std::string trainingDataDir;
-	std::string outputFile;
+	std::string method;
+	std::string training_data_directory;
+	std::string output_model;
 
-	for (int i = 1; i < argc; ++i)
-	{
+	// Parse command line arguments
+	for (int i = 1; i < argc; ++i) {
 		std::string arg = argv[i];
 
-		if ((arg == "-u" || arg == "--user") && i + 1 < argc)
-			user = argv[++i];
-		else if ((arg == "-m" || arg == "--method") && i + 1 < argc)
-			method = argv[++i];
-		else if ((arg == "-o" || arg == "--output") && i + 1 < argc)
-			outputFile = argv[++i];
-		else if (arg[0] != '-')
-			trainingDataDir = arg;
+		if (arg == "-u" || arg == "--user") {
+			if (i + 1 < argc)
+				user = argv[++i];
+		} else if (arg == "-m" || arg == "--method") {
+			if (i + 1 < argc)
+				method = argv[++i];
+		} else if (arg == "--output" || arg == "-o") {
+			if (i + 1 < argc)
+				output_model = argv[++i];
+		} else if (arg == "--verbose" || arg == "-v") {
+			verbose = true;
+		} else if (arg[0] != '-') {
+			training_data_directory = arg;
+		}
 	}
 
-	if (user.empty())
-	{
-		std::cerr << "[ERROR] Missing user (-u <user>)" << std::endl;
+	if (user.empty() || method.empty() || training_data_directory.empty()) {
+		print_usage();
 		return 1;
 	}
 
-	if (trainingDataDir.empty())
-	{
-		std::cerr << "[ERROR] Missing training data directory" << std::endl;
+	log_info("User: " + user);
+	log_info("Method: " + method);
+	log_info("Training data: " + training_data_directory);
+
+	if (output_model.empty()) {
+		output_model = training_data_directory + "/models/" + user + "_model.xml";
+		log_info("No output specified, using default: " + output_model);
+	}
+
+	// Load images
+	std::vector<cv::Mat> images;
+	std::vector<int> labels;
+	int label = 0;
+
+	log_debug("Scanning directory: " + training_data_directory);
+
+	for (const auto& entry : fs::directory_iterator(training_data_directory)) {
+		if (entry.is_directory()) continue;
+
+		std::string file_path = entry.path().string();
+		std::string ext = entry.path().extension().string();
+		if (ext != ".jpg" && ext != ".jpeg" && ext != ".png")
+			continue;
+
+		cv::Mat img = cv::imread(file_path, cv::IMREAD_GRAYSCALE);
+		if (img.empty()) {
+			log_error("Failed to load image: " + file_path);
+			continue;
+		}
+
+		images.push_back(img);
+		labels.push_back(label);
+
+		log_debug("Found image: " + file_path);
+	}
+
+	if (images.empty()) {
+		log_error("No training images found in " + training_data_directory);
 		return 1;
 	}
 
-	if (outputFile.empty())
-	{
-		outputFile = "/etc/pam_facial_auth/" + user + "/models/" + user + ".xml";
-		std::cout << "[INFO] No output specified, defaulting to: " << outputFile << std::endl;
+	// Create recognizer
+	cv::Ptr<cv::face::FaceRecognizer> model;
+	if (method == "lbph") {
+		model = cv::face::LBPHFaceRecognizer::create();
+	} else if (method == "eigen") {
+		model = cv::face::EigenFaceRecognizer::create();
+	} else if (method == "fisher") {
+		model = cv::face::FisherFaceRecognizer::create();
+	} else {
+		log_error("Invalid method: " + method);
+		return 1;
 	}
 
-	// Directory dell'utente
-	std::string userDataDir = "/etc/pam_facial_auth/" + user;
+	log_info("Training model with " + std::to_string(images.size()) + " images...");
+	model->train(images, labels);
 
-	std::cout << "[INFO] User: " << user << std::endl;
-	std::cout << "[INFO] Method: " << method << std::endl;
-	std::cout << "[INFO] Training data: " << userDataDir << std::endl;
-	std::cout << "[INFO] Output file: " << outputFile << std::endl;
+	fs::path out_path(output_model);
+	fs::create_directories(out_path.parent_path());
 
-	trainModel(userDataDir, outputFile, method);
+	log_info("Saving model to: " + output_model);
+	model->save(output_model);
 
+	std::cout << "[SUCCESS] Model saved successfully to " << output_model << std::endl;
 	return 0;
 }
