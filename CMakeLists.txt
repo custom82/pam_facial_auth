@@ -39,7 +39,7 @@ target_link_libraries(pam_facial_auth
 
 # Impostare l'output della libreria
 set_target_properties(pam_facial_auth PROPERTIES
-    LIBRARY_OUTPUT_DIRECTORY /usr/lib64/security/
+    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
 )
 
 # Compila il binario facial_test
@@ -68,34 +68,33 @@ target_link_libraries(facial_training
     Utils
 )
 
-# Impostare l'output dei binari
+# Impostare l'output dei binari sotto /usr/sbin
 set_target_properties(facial_test facial_training pam_facial_auth PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY /sbin
+    RUNTIME_OUTPUT_DIRECTORY /usr/sbin
 )
 
-# Installazione delle man pages
-install(FILES 
+# Installare le man pages
+install(FILES
     man/facial_test.1
     man/facial_training.1
     man/pam_facial_auth.1
     DESTINATION /usr/share/man/man1
 )
 
-# Installazione dei file XML in /etc/pam_facial_auth/
-install(FILES 
-    ${CMAKE_SOURCE_DIR}/etc/haarcascade_frontalface_alt.xml
-    ${CMAKE_SOURCE_DIR}/etc/haarcascade_frontalface_default.xml
-    DESTINATION /etc/pam_facial_auth
+# Installare i file XML
+install(FILES
+    etc/haarcascade_frontalface_alt.xml
+    etc/haarcascade_frontalface_default.xml
+    DESTINATION /etc/pam_facial_auth/
 )
 
-# Installazione del modulo PAM
+# Installare il modulo PAM
 install(TARGETS pam_facial_auth
-    DESTINATION /usr/lib64/security/
+    DESTINATION /usr/lib64/security
 )
 
-# Installazione dei binari
+# Installare i binari
 install(TARGETS facial_test facial_training
-    DESTINATION /sbin
+    DESTINATION /usr/sbin
 )
-
 
