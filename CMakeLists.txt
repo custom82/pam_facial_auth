@@ -98,3 +98,9 @@ install(TARGETS facial_test facial_training
     DESTINATION /usr/sbin
 )
 
+# Installare la libreria statica Utils.a
+install(TARGETS Utils
+    DESTINATION /usr/lib64
+    ARCHIVE DESTINATION /usr/lib64
+)
+
