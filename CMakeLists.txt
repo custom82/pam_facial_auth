@@ -63,10 +63,6 @@ target_link_libraries(facial_training
     Utils
 )
 
-# Impostare l'output dei binari sotto /usr/sbin
-set_target_properties(facial_test facial_training pam_facial_auth PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY /usr/sbin
-)
 
 # Installare le man pages
 install(FILES
