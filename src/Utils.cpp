@@ -2,6 +2,10 @@
 #include <iostream>
 #include <fstream>
 #include <opencv2/opencv.hpp>
+#include <dirent.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 // Funzione per leggere la configurazione da un file
 bool Utils::GetConfig(const std::string& configPath, std::map<std::string, std::string>& config) {
@@ -53,5 +57,39 @@ void Utils::ProcessImage(const cv::Mat& image) {
     
     // Visualizza il risultato
     std::cout << "Lunghezza dell'istogramma: " << hist.rows << std::endl;
+}
+
+// Funzione per camminare nella directory e raccogliere file e cartelle
+void Utils::WalkDirectory(const std::string& dirPath, std::vector<std::string>& fileNames, std::vector<std::string>& userNames) {
+    struct dirent* entry;
+    DIR* dir = opendir(dirPath.c_str());
+
+    if (dir == nullptr) {
+        std::cerr << "Impossibile aprire la directory: " << dirPath << std::endl;
+        return;
+    }
+
+    while ((entry = readdir(dir)) != nullptr) {
+        std::string fileName = entry->d_name;
+
+        // Ignora le voci '.' e '..'
+        if (fileName == "." || fileName == "..") continue;
+
+        std::string fullPath = dirPath + "/" + fileName;
+        struct stat statBuf;
+
+        if (stat(fullPath.c_str(), &statBuf) == 0) {
+            if (S_ISDIR(statBuf.st_mode)) {
+                // Se è una directory, aggiungi il nome alla lista degli utenti
+                userNames.push_back(fileName);
+                WalkDirectory(fullPath, fileNames, userNames);  // Recursively call for subdirectories
+            } else {
+                // Se è un file, aggiungi il nome alla lista dei file
+                fileNames.push_back(fileName);
+            }
+        }
+    }
+
+    closedir(dir);
 }
 
