@@ -14,12 +14,12 @@ include_directories(${PAM_INCLUDE_DIRS})
 include_directories(${CMAKE_SOURCE_DIR}/src)  # Aggiungi la tua directory di sorgenti
 
 # Aggiungi la libreria di utilità
-add_library(Utils STATIC ${CMAKE_SOURCE_DIR}/src/Utils.cpp)
+add_library(Utils STATIC src/Utils.cpp)
 
 # Creazione del modulo PAM come libreria condivisa
 add_library(pam_facial_auth MODULE
-    ${CMAKE_SOURCE_DIR}/src/pam_facial_auth.cpp  # Assicurati che il file sia presente
-    ${CMAKE_SOURCE_DIR}/src/FaceRecWrapper.cpp
+   src/pam_facial_auth.cpp  # Assicurati che il file sia presente
+   src/FaceRecWrapper.cpp
 )
 
 # Imposta il nome del modulo come pam_facial_auth.so
@@ -43,8 +43,8 @@ set_target_properties(pam_facial_auth PROPERTIES
 
 # Compila il binario facial_test
 add_executable(facial_test
-    ${CMAKE_SOURCE_DIR}/src/facial_test.cpp  # Assicurati che il file sia presente
-    ${CMAKE_SOURCE_DIR}/src/FaceRecWrapper.cpp
+    src/facial_test.cpp  # Assicurati che il file sia presente
+    src/FaceRecWrapper.cpp
 )
 
 # Link con le librerie necessarie per facial_test
