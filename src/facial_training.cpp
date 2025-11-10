@@ -5,7 +5,6 @@
 #include <getopt.h>  // Libreria per il parsing degli argomenti da linea di comando
 
 namespace fs = std::filesystem;
-namespace cv = cv::face;  // Usa il namespace cv::face direttamente per evitare conflitti
 
 void print_usage() {
 	std::cout << "Usage: facial_training -u <user> -m <method> <training_data_directory> [--output <output_directory>]" << std::endl;
