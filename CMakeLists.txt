@@ -1,40 +1,35 @@
+# Imposta il progetto
 cmake_minimum_required(VERSION 3.10)
+project(pam_facial_auth)
 
-# Nome del progetto
-project(PAM_Facial_Auth)
+# Definisce il tipo di build
+set(CMAKE_BUILD_TYPE RelWithDebInfo)
 
-# Impostare il linguaggio C++
-set(CMAKE_CXX_STANDARD 20)
+# Imposta la versione minima di OpenCV richiesta
+find_package(OpenCV 4 REQUIRED)
 
-# Trova OpenCV
-find_package(OpenCV REQUIRED)
+# Imposta la libreria PAM
+find_library(PAM_LIBRARIES NAMES pam)
 
-# Trova PAM (Personal Authentication Module)
-find_package(PAM REQUIRED)
+# Includi la directory di OpenCV
+include_directories(${OpenCV_INCLUDE_DIRS})
 
-# Aggiungi la directory src
-add_subdirectory(src)
+# Aggiungi il file eseguibile per il test
+add_executable(facial_test facial_test.cpp)
 
-# Aggiungi l'eseguibile di test
-add_executable(facial_test src/facial_test.cpp)
+# Aggiungi il file eseguibile per il modulo PAM
+add_library(pam_facial_auth SHARED src/FacialAuth.cpp src/FaceRecWrapper.cpp)
 
-# Collegamento con le librerie di OpenCV e PAM
+# Collega le librerie necessarie
 target_link_libraries(facial_test
-    ${OpenCV_LIBS}  # Collegamento con OpenCV
-    ${PAM_LIBRARIES}  # Collegamento con PAM
+    ${OpenCV_LIBS}
+    ${PAM_LIBRARIES}
 )
 
-# Aggiungere le librerie di PAM Faciale
-add_library(pam_facial_auth SHARED
-    src/FacialAuth.cpp
-    src/FaceRecWrapper.cpp
-)
-
-# Collegamento delle librerie OpenCV e PAM alla libreria pam_facial_auth
 target_link_libraries(pam_facial_auth
-    ${OpenCV_LIBS}  # Collegamento con OpenCV
-    ${PAM_LIBRARIES}  # Collegamento con PAM
+    ${OpenCV_LIBS}
+    ${PAM_LIBRARIES}
 )
 
-# Include delle directory OpenCV
-include_directories(${O_
+# Aggiungi eventuali altre configurazioni di compilazione
+set_target_properties(pam_facial_auth PROPERTIES PREFIX "")
