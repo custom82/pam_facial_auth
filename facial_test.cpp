@@ -1,32 +1,30 @@
 #include "FaceRecWrapper.h"
 #include <opencv2/opencv.hpp>
-#include <opencv2/face.hpp>
 #include <iostream>
 
-int main(int argc, char** argv) {
-	if (argc < 2) {
-		std::cerr << "usage: facial_test <image_path>" << std::endl;
-		return -1;
-	}
+int main() {
+	// Inizializza il riconoscimento facciale
+	std::string modelPath = "path/to/trained_model.yml";
+	std::string name = "Face Recognizer";
 
-	std::string imagePath = argv[1];
-	cv::Mat image = cv::imread(imagePath, cv::IMREAD_GRAYSCALE);
-
-	if (image.empty()) {
-		std::cerr << "Could not open or find the image!" << std::endl;
-		return -1;
-	}
+	FaceRecWrapper frw(modelPath, name);
 
 	// Carica il modello
-	FaceRecWrapper frw("eigen", "etc/haarcascade_frontalface_default.xml");
-	frw.Load("model");
+	frw.Load(modelPath);
 
-	// Esegui la previsione
-	int label;
+	// Carica un'immagine da testare
+	cv::Mat image = cv::imread("path/to/image.jpg");
+	if (image.empty()) {
+		std::cerr << "Immagine non trovata!" << std::endl;
+		return -1;
+	}
+
+	// Predizione
+	int prediction;
 	double confidence;
-	frw.Predict(image, label, confidence);
+	frw.Predict(image, prediction, confidence);
 
-	std::cout << "Predicted label: " << label << " with confidence: " << confidence << std::endl;
+	std::cout << "Predizione: " << prediction << ", Confidenza: " << confidence << std::endl;
 
 	return 0;
 }

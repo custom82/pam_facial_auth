@@ -1,35 +1,27 @@
 #include "FaceRecWrapper.h"
-#include <opencv2/opencv.hpp>
 #include <opencv2/face.hpp>
-#include <fstream>
+#include <opencv2/imgproc.hpp>
+#include <opencv2/highgui.hpp>
 #include <iostream>
 
-FaceRecWrapper::FaceRecWrapper(const std::string &modelPath, const std::string &name) {
-	// Inizializza il riconoscitore con un tipo predefinito
+FaceRecWrapper::FaceRecWrapper(const std::string &modelPath, const std::string &name)
+: modelPath(modelPath), name(name) {
+	// Inizializzazione
 	fr = cv::face::EigenFaceRecognizer::create();
-	Load(modelPath);  // Carica il modello dal percorso
 }
 
 void FaceRecWrapper::Load(const std::string &path) {
-	fr->read(path);  // Carica il modello dal file
-}
-
-void FaceRecWrapper::Train(const std::vector<cv::Mat> &images, const std::vector<int> &labels) {
-	fr->train(images, labels);
+	// Caricamento del modello
+	fr->read(path);
 }
 
 int FaceRecWrapper::Predict(const cv::Mat &image, int &prediction, double &confidence) {
-	fr->predict(image, prediction, confidence);  // Usa il riconoscitore per fare una previsione
-	return prediction;
-}
-
-void FaceRecWrapper::SetLabelNames(const std::vector<std::string> &names) {
-	labelNames = names;
-}
-
-std::string FaceRecWrapper::GetLabelName(int index) {
-	if (index < 0 || index >= labelNames.size()) {
-		return "";
+	// Predizione della faccia
+	cv::Mat gray;
+	if (image.channels() == 3) {
+		cv::cvtColor(image, gray, cv::COLOR_BGR2GRAY);
+	} else {
+		gray = image;
 	}
-	return labelNames[index];
+	return fr->predict(gray, prediction, confidence);
 }
