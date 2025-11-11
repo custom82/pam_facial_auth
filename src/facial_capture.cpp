@@ -62,6 +62,11 @@ bool is_resolution_supported(const std::string &device, int width, int height, b
     return true;
 }
 
+bool is_valid_device(const std::string &device) {
+    std::ifstream dev_check(device);
+    return dev_check.is_open();
+}
+
 void flush_images(const std::string &user_dir, const std::string &user, bool verbose) {
     fs::path dir_path = user_dir + "/" + user;
     if (!fs::exists(dir_path)) {
@@ -175,6 +180,12 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    // Verifica la validità del dispositivo
+    if (!is_valid_device(cfg.device)) {
+        std::cerr << "[ERROR] Il dispositivo specificato non è valido: " << cfg.device << std::endl;
+        return 1;
+    }
+
     // Directory per le immagini dell'utente
     std::string user_dir = "/etc/pam_facial_auth/" + user;
     if (!fs::exists(user_dir)) {
@@ -210,7 +221,7 @@ int main(int argc, char **argv) {
             cv::imshow("Facial Capture - Premere 's' per salvare, 'q' per uscire", frame);
         }
 
-        char key = (char)cv::waitKey(1);
+        char key = (char)cv::waitKey(10000);  // Aumentato a 10 secondi per l'attesa
 
         if (key == 's') {
             std::string filename = get_next_filename(user_dir, user, force, verbose);
