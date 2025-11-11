@@ -1,8 +1,8 @@
 #include <iostream>
-#include <filesystem>
 #include <opencv2/opencv.hpp>
-#include <string>
 #include <fstream>
+#include <string>
+#include <filesystem>
 #include <unistd.h>
 
 namespace fs = std::filesystem;
@@ -13,6 +13,7 @@ struct Config {
     int height = 480;
 };
 
+// Funzione per caricare il file di configurazione
 Config load_config(const std::string &config_path, bool verbose) {
     Config cfg;
     std::ifstream conf(config_path);
@@ -34,6 +35,31 @@ Config load_config(const std::string &config_path, bool verbose) {
         std::cout << "[INFO] Device: " << cfg.device << ", width=" << cfg.width << ", height=" << cfg.height << std::endl;
     }
     return cfg;
+}
+
+// Verifica se una risoluzione è supportata dalla webcam
+bool is_resolution_supported(const std::string &device, int width, int height, bool verbose) {
+    cv::VideoCapture cap(device);
+    if (!cap.isOpened()) {
+        std::cerr << "[ERROR] Unable to open video device: " << device << std::endl;
+        return false;
+    }
+
+    // Verifica se la risoluzione desiderata è supportata
+    cap.set(cv::CAP_PROP_FRAME_WIDTH, width);
+    cap.set(cv::CAP_PROP_FRAME_HEIGHT, height);
+
+    int cap_width = cap.get(cv::CAP_PROP_FRAME_WIDTH);
+    int cap_height = cap.get(cv::CAP_PROP_FRAME_HEIGHT);
+
+    if (cap_width != width || cap_height != height) {
+        if (verbose)
+            std::cerr << "[ERROR] Desired resolution " << width << "x" << height
+            << " is not supported. Using " << cap_width << "x" << cap_height << " instead." << std::endl;
+        return false;
+    }
+
+    return true;
 }
 
 void flush_images(const std::string &user_dir, const std::string &user, bool verbose) {
@@ -138,6 +164,12 @@ int main(int argc, char **argv) {
     if (!device_override.empty()) cfg.device = device_override;
     if (width_override > 0) cfg.width = width_override;
     if (height_override > 0) cfg.height = height_override;
+
+    // Verifica se la risoluzione è supportata
+    if (!is_resolution_supported(cfg.device, cfg.width, cfg.height, verbose)) {
+        std::cerr << "[ERROR] La risoluzione desiderata non è supportata dalla webcam!" << std::endl;
+        return 1;
+    }
 
     // Directory per le immagini dell'utente
     std::string user_dir = "/etc/pam_facial_auth/" + user;
