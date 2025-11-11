@@ -8,6 +8,7 @@
 #include <chrono>
 #include <thread>
 #include "FaceRecWrapper.h"
+#include <syslog.h>
 
 namespace fs = std::filesystem;
 
