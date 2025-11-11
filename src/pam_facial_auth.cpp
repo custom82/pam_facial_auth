@@ -1,5 +1,6 @@
 #include <security/pam_modules.h>  // Include PAM per l'autenticazione
 #include <security/pam_appl.h>     // Include PAM per il logging
+#include <security/pam_ext.h>      // Include PAM per il syslog
 #include <syslog.h>                // Per i macro LOG_* (LOG_ERR, LOG_INFO, etc.)
 #include <string>
 #include <opencv2/opencv.hpp>
