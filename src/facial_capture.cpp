@@ -1,6 +1,5 @@
 #include <iostream>
 #include <filesystem>
-#include <fstream>
 #include <opencv2/opencv.hpp>
 #include <string>
 #include <unistd.h>
@@ -100,7 +99,7 @@ int main(int argc, char **argv) {
             height_override = std::stoi(argv[++i]);
         } else if (arg == "-f" || arg == "--force") {
             force = true;
-        } else if (arg == "--flush" || arg == "--clean") {
+        } else if ((arg == "--flush" || arg == "--clean") && i + 1 < argc) {
             flush = true;
         } else if (arg == "-v" || arg == "--verbose") {
             verbose = true;
