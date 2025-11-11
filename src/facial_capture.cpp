@@ -108,6 +108,7 @@ int main(int argc, char **argv) {
     bool force = false;
     bool flush = false;
     bool nogui = false;
+    bool debug = false;
     std::string device_override;
     int width_override = -1, height_override = -1;
 
@@ -130,6 +131,8 @@ int main(int argc, char **argv) {
             flush = true;
         } else if (arg == "-v" || arg == "--verbose") {
             verbose = true;
+        } else if (arg == "--debug") {
+            debug = true;
         } else if (arg == "--nogui") {
             nogui = true;
         } else if (arg == "--help" || arg == "-H") {
@@ -143,6 +146,7 @@ int main(int argc, char **argv) {
             << "  -f, --force             Sovrascrive immagini esistenti e riparte da 1\n"
             << "  --flush, --clean        Elimina tutte le immagini per l'utente specificato\n"
             << "  -v, --verbose           Output dettagliato\n"
+            << "  --debug                 Abilita output di debug\n"
             << "  --nogui                 Disabilita la GUI, usa solo la console\n"
             << "  --help, -H              Mostra questo messaggio\n";
             return 0;
