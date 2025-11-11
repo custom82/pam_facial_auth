@@ -7,14 +7,18 @@
 #include <opencv2/face.hpp>
 #include <chrono>
 #include <thread>
-#include <security/pam_appl.h>  // Necessario per pam_handle_t e PAM
-#include <security/pam_modules.h>  // Per definire la funzione pam_sm_authenticate
+
+#include <security/pam_appl.h>     // pam_handle_t
+#include <security/pam_modules.h>  // PAM interface
+#include <security/pam_ext.h>      // pam_syslog()
 
 namespace fs = std::filesystem;
 
-// Definizione della struttura Config
+// =============================
+// Struttura di configurazione
+// =============================
 struct Config {
-    std::string device = "/dev/video0";  // Dispositivo predefinito
+    std::string device = "/dev/video0";
     int width = 640;
     int height = 480;
     int timeout = 10;
@@ -23,7 +27,9 @@ struct Config {
     bool debug = false;
 };
 
-// Funzione per caricare la configurazione
+// =============================
+// Caricamento configurazione
+// =============================
 Config load_config(const std::string& config_path) {
     Config cfg;
     std::ifstream conf(config_path);
@@ -34,63 +40,73 @@ Config load_config(const std::string& config_path) {
     }
 
     conf >> cfg.device >> cfg.width >> cfg.height >> cfg.timeout >> cfg.threshold;
-
     return cfg;
 }
 
-// Funzione per applicare i parametri PAM
+// =============================
+// Parametri PAM
+// =============================
 void apply_pam_args(Config& cfg, pam_handle_t* pamh, int argc, const char** argv) {
     for (int i = 0; i < argc; ++i) {
         if (strcmp(argv[i], "nogui") == 0) {
             cfg.nogui = true;
-        }
-        else if (strcmp(argv[i], "debug") == 0) {
+        } else if (strcmp(argv[i], "debug") == 0) {
             cfg.debug = true;
-        }
-        else if (strncmp(argv[i], "threshold=", 10) == 0) {
+        } else if (strncmp(argv[i], "threshold=", 10) == 0) {
             cfg.threshold = std::stof(argv[i] + 10);
-        }
-        else if (strncmp(argv[i], "timeout=", 8) == 0) {
+        } else if (strncmp(argv[i], "timeout=", 8) == 0) {
             cfg.timeout = std::stoi(argv[i] + 8);
         }
     }
+
+    if (cfg.debug)
+        pam_syslog(pamh, LOG_DEBUG, "pam_facial_auth: threshold=%.2f timeout=%d nogui=%d",
+                   cfg.threshold, cfg.timeout, cfg.nogui);
 }
 
-// Funzione di autenticazione PAM
-int pam_sm_authenticate(pam_handle_t* pamh, int flags, int argc, const char** argv) {
-    const char* user = NULL;
-    const char* model_path = NULL;
+// =============================
+// Funzione principale PAM
+// =============================
+extern "C" int pam_sm_authenticate(pam_handle_t* pamh, int flags, int argc, const char** argv) {
+    const char* user = nullptr;
+    const char* model_path = nullptr;
 
-    // Ottieni il nome dell'utente dal PAM
-    if (pam_get_user(pamh, &user, NULL) != PAM_SUCCESS) {
-        std::cerr << "Unable to get user" << std::endl;
+    // Ottieni l’utente PAM
+    if (pam_get_user(pamh, &user, nullptr) != PAM_SUCCESS || !user) {
+        pam_syslog(pamh, LOG_ERR, "pam_facial_auth: unable to retrieve username");
         return PAM_AUTH_ERR;
     }
 
-    // Carica la configurazione da file o dai parametri
-    Config cfg = load_config("/etc/pam_facial_auth/pam_facial.conf");
+    // Carica configurazione
+    Config cfg;
+    try {
+        cfg = load_config("/etc/pam_facial_auth/pam_facial.conf");
+    } catch (...) {
+        pam_syslog(pamh, LOG_ERR, "pam_facial_auth: unable to read config file");
+        return PAM_AUTH_ERR;
+    }
 
-    // Leggi i parametri dalla riga di comando
     apply_pam_args(cfg, pamh, argc, argv);
 
-    // Se il percorso del modello è specificato, usalo, altrimenti cerca nella directory dell'utente
-    if (argc > 1) {
-        model_path = argv[1];
-    } else {
-        model_path = (std::string("/etc/pam_facial_auth/") + user + "/models/" + user + ".xml").c_str();
-    }
+    // Percorso modello
+    std::string user_model_dir = "/etc/pam_facial_auth/" + std::string(user) + "/models/";
+    std::string default_model = user_model_dir + std::string(user) + ".xml";
+    model_path = default_model.c_str();
 
-    // Verifica se il modello esiste
     if (!fs::exists(model_path)) {
-        pam_syslog(pamh, LOG_ERR, "Model not found for user %s at %s", user, model_path);
+        pam_syslog(pamh, LOG_ERR, "pam_facial_auth: model not found for user %s at %s", user, model_path);
         return PAM_AUTH_ERR;
     }
 
-    // Aggiungi qui la logica di autenticazione facciale, ad esempio caricando il modello e facendo una previsione
-    // Esegui il riconoscimento facciale (aggiungi la logica necessaria)
+    // TODO: Inserire qui la logica di riconoscimento facciale
+    // Per ora simuliamo un successo di autenticazione
+    pam_syslog(pamh, LOG_INFO, "pam_facial_auth: authentication succeeded for %s", user);
+    return PAM_SUCCESS;
+}
 
-    // Log dell'esito dell'autenticazione
-    pam_syslog(pamh, LOG_INFO, "Authentication succeeded for user %s", user);
-
+// =============================
+// Sessione PAM (stub vuoti)
+// =============================
+extern "C" int pam_sm_setcred(pam_handle_t*, int, int, const char**) {
     return PAM_SUCCESS;
 }
