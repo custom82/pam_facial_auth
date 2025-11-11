@@ -6,7 +6,7 @@
 #include <iostream>
 #include <chrono>
 #include <thread>
-#include <fstream>  // Inclusione corretta per std::ifstream
+#include <fstream>
 #include "FaceRecWrapper.h"
 #include <syslog.h>
 
@@ -41,6 +41,8 @@ static FacialAuthConfig parse_args(int argc, const char **argv) {
 
 // Funzione di lettura configurazione dal file /etc/pam_facial_auth/pam_facial.conf
 bool read_config(FacialAuthConfig &cfg) {
+    pam_syslog(nullptr, LOG_INFO, "Reading configuration from /etc/pam_facial_auth/pam_facial.conf");
+
     std::ifstream config_file("/etc/pam_facial_auth/pam_facial.conf");
     if (!config_file.is_open()) {
         pam_syslog(nullptr, LOG_ERR, "Unable to open config file: /etc/pam_facial_auth/pam_facial.conf");
@@ -49,6 +51,7 @@ bool read_config(FacialAuthConfig &cfg) {
 
     std::string line;
     while (std::getline(config_file, line)) {
+        pam_syslog(nullptr, LOG_DEBUG, "Read line: %s", line.c_str());
         if (line.starts_with("device=")) cfg.device = line.substr(7);
         else if (line.starts_with("threshold=")) cfg.threshold = std::stod(line.substr(10));
         else if (line.starts_with("timeout=")) cfg.timeout = std::stoi(line.substr(8));
@@ -59,6 +62,7 @@ bool read_config(FacialAuthConfig &cfg) {
     }
 
     config_file.close();
+    pam_syslog(nullptr, LOG_INFO, "Finished reading configuration file.");
     return true;
 }
 
@@ -66,6 +70,7 @@ bool read_config(FacialAuthConfig &cfg) {
 extern "C" {
 
     PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, const char **argv) {
+        pam_syslog(pamh, LOG_INFO, "pam_sm_authenticate started.");
         FacialAuthConfig cfg = parse_args(argc, argv);
         const char *user = nullptr;
 
@@ -73,6 +78,13 @@ extern "C" {
         if (pam_get_user(pamh, &user, NULL) != PAM_SUCCESS || !user) {
             pam_syslog(pamh, LOG_ERR, "Unable to get user");
             return PAM_USER_UNKNOWN;
+        }
+        pam_syslog(pamh, LOG_INFO, "User obtained: %s", user);
+
+        // Carica la configurazione
+        if (!read_config(cfg)) {
+            pam_syslog(pamh, LOG_ERR, "Failed to read configuration file.");
+            return PAM_AUTH_ERR;
         }
 
         std::string user_dir = fs::path(cfg.model_path) / user / "models";
@@ -102,15 +114,13 @@ extern "C" {
             return PAM_AUTH_ERR;
         }
 
+        pam_syslog(pamh, LOG_INFO, "Webcam device opened, starting recognition loop.");
         FaceRecWrapper fr(model_file, cfg.model);  // Usa il modello dal parametro configurato
 
         auto start_time = std::chrono::steady_clock::now();
         bool recognized = false;
         double confidence = 0.0;
         int label = -1;
-
-        if (cfg.debug)
-            pam_syslog(pamh, LOG_INFO, "Webcam opened, beginning recognition loop");
 
         while (true) {
             cv::Mat frame;
@@ -153,7 +163,7 @@ extern "C" {
     }
 
     PAM_EXTERN int pam_sm_setcred(pam_handle_t *pamh, int flags, int argc, const char **argv) {
-        // Gestione credenziali: non serve modificare le credenziali di sistema
+        pam_syslog(pamh, LOG_INFO, "pam_sm_setcred called. No changes to system credentials.");
         return PAM_SUCCESS;
     }
 
