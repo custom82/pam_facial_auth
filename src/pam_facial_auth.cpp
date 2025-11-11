@@ -1,6 +1,7 @@
 #include <security/pam_modules.h>
 #include <security/pam_ext.h>
 #include <opencv2/opencv.hpp>
+#include <opencv2/face.hpp>
 #include <filesystem>
 #include <string>
 #include <iostream>
@@ -19,6 +20,7 @@ struct FacialAuthConfig {
     int timeout = 10;
     std::string model_path = "/etc/pam_facial_auth";
     std::string device = "/dev/video0";
+    std::string model_type = "eigenfaces"; // Default: Eigenfaces
 };
 
 // Analisi parametri passati dallo stack PAM
@@ -32,8 +34,36 @@ static FacialAuthConfig parse_args(int argc, const char **argv) {
         else if (arg.starts_with("timeout=")) cfg.timeout = std::stoi(arg.substr(8));
         else if (arg.starts_with("model_path=")) cfg.model_path = arg.substr(11);
         else if (arg.starts_with("device=")) cfg.device = arg.substr(7);
+        else if (arg.starts_with("model=")) cfg.model_type = arg.substr(6);  // Nuovo parametro per il modello
     }
     return cfg;
+}
+
+// Funzione per caricare il modello di riconoscimento facciale
+cv::Ptr<cv::face::FaceRecognizer> load_face_recognizer(const FacialAuthConfig& cfg, const std::string& user) {
+    std::string user_dir = fs::path(cfg.model_path) / user / "models";
+    std::string model_file = (fs::path(user_dir) / (user + ".xml")).string();
+
+    // Se il file del modello non esiste, ritorna nullptr
+    if (!fs::exists(model_file)) {
+        return nullptr;
+    }
+
+    // Carica il modello facciale in base al tipo selezionato
+    cv::Ptr<cv::face::FaceRecognizer> model;
+    if (cfg.model_type == "eigenfaces") {
+        model = cv::face::EigenFaceRecognizer::create();
+    } else if (cfg.model_type == "lbph") {
+        model = cv::face::LBPHFaceRecognizer::create();
+    } else {
+        // Default a Eigenfaces se il modello non è riconosciuto
+        model = cv::face::EigenFaceRecognizer::create();
+    }
+
+    // Carica il modello
+    model->read(model_file);
+
+    return model;
 }
 
 // Implementazione del modulo PAM
@@ -49,12 +79,10 @@ extern "C" {
             return PAM_USER_UNKNOWN;
         }
 
-        std::string user_dir = fs::path(cfg.model_path) / user / "models";
-        std::string model_file = (fs::path(user_dir) / (std::string(user) + ".xml")).string();
-
-        if (!fs::exists(model_file)) {
-            if (cfg.debug)
-                pam_syslog(pamh, LOG_DEBUG, "Model not found for user %s at %s", user, model_file.c_str());
+        // Carica il modello di riconoscimento facciale
+        cv::Ptr<cv::face::FaceRecognizer> fr = load_face_recognizer(cfg, user);
+        if (fr.empty()) {
+            pam_syslog(pamh, LOG_ERR, "Model not found for user %s", user);
             return PAM_IGNORE; // Non bloccare, lascia passare ad altri moduli
         }
 
@@ -76,8 +104,6 @@ extern "C" {
             return PAM_AUTH_ERR;
         }
 
-        FaceRecWrapper fr(model_file, user);
-
         auto start_time = std::chrono::steady_clock::now();
         bool recognized = false;
         double confidence = 0.0;
@@ -96,7 +122,7 @@ extern "C" {
 
             int pred = -1;
             double conf = 0.0;
-            fr.Predict(frame, pred, conf);
+            fr->predict(frame, pred, conf);
 
             if (cfg.debug)
                 pam_syslog(pamh, LOG_INFO, "Prediction=%d Confidence=%.2f", pred, conf);
