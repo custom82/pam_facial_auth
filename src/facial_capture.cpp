@@ -85,6 +85,7 @@ int main(int argc, char **argv) {
     bool verbose = false, force = false, flush = false, nogui = false, debug = false;
     std::string device_override;
     int width_override = -1, height_override = -1;
+    int num_images = 0, sleep_time = 0; // sleep_time per la pausa tra le immagini
 
     // === PARSING ARGOMENTI ===
     for (int i = 1; i < argc; ++i) {
@@ -95,10 +96,12 @@ int main(int argc, char **argv) {
         else if ((arg == "-w" || arg == "--width") && i + 1 < argc) width_override = std::stoi(argv[++i]);
         else if ((arg == "-h" || arg == "--height") && i + 1 < argc) height_override = std::stoi(argv[++i]);
         else if (arg == "-f" || arg == "--force") force = true;
-        else if (arg == "--flush" || arg == "--clean") flush = true;
+        else if ((arg == "--flush" || arg == "--clean")) flush = true;
         else if (arg == "-v" || arg == "--verbose") verbose = true;
         else if (arg == "--debug") debug = true;
         else if (arg == "--nogui") nogui = true;
+        else if ((arg == "-n" || arg == "--num_images") && i + 1 < argc) num_images = std::stoi(argv[++i]);
+        else if ((arg == "-s" || arg == "--sleep") && i + 1 < argc) sleep_time = std::stoi(argv[++i]);
         else if (arg == "--help" || arg == "-H") {
             std::cout << "Usage: facial_capture -u <user> [options]\n\n"
             << "Options:\n"
@@ -109,6 +112,8 @@ int main(int argc, char **argv) {
             << "  -h, --height <px>       Altezza frame\n"
             << "  -f, --force             Sovrascrive immagini esistenti e riparte da 1\n"
             << "  --flush, --clean        Elimina tutte le immagini per l'utente specificato\n"
+            << "  -n, --num_images <num>  Numero di immagini da acquisire\n"
+            << "  -s, --sleep <sec>       Pausa tra una cattura e l'altra (in secondi)\n"
             << "  -v, --verbose           Output dettagliato\n"
             << "  --debug                 Abilita output di debug\n"
             << "  --nogui                 Disabilita GUI, cattura solo da console\n"
@@ -165,7 +170,7 @@ int main(int argc, char **argv) {
     cv::Mat frame;
     int saved_count = 0;
 
-    while (true) {
+    while (saved_count < num_images || num_images == 0) {
         cap >> frame;
         if (frame.empty()) {
             std::cerr << "[ERROR] Frame non valido.\n";
@@ -173,7 +178,7 @@ int main(int argc, char **argv) {
         }
 
         if (!nogui) {
-            cv::imshow("Facial Capture - Premere 's' per salvare, 'q' per uscire", frame);
+            cv::imshow("Facial Capture - Premi 's' per salvare, 'q' per uscire", frame);
             char key = (char)cv::waitKey(10000); // 10 sec attesa GUI
             if (key == 's') {
                 std::string filename = get_next_filename(user_dir, user, force, verbose);
@@ -191,8 +196,8 @@ int main(int argc, char **argv) {
             saved_count++;
             if (verbose) std::cout << "[INFO] (NOGUI) Salvata immagine: " << filename << std::endl;
 
-            // Attendi 10 secondi prima della prossima cattura
-            std::this_thread::sleep_for(std::chrono::seconds(10));
+            // Pausa tra le immagini
+            std::this_thread::sleep_for(std::chrono::seconds(sleep_time));
 
             if (force) break; // salva solo una immagine se force è attivo
         }
