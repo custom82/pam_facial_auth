@@ -36,6 +36,7 @@ target_link_libraries(pam_facial_auth
     PRIVATE
     ${OpenCV_LIBS}
     Utils
+    pam  # Aggiungi il linking con libpam
 )
 
 # =========================
