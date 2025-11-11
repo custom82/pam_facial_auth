@@ -5,6 +5,8 @@
 #include <iostream>
 #include <filesystem>
 #include <security/pam_modules.h>  // Include PAM
+#include <fstream>                 // Per std::ifstream
+#include <thread>                  // Per std::this_thread
 
 namespace fs = std::filesystem;
 
