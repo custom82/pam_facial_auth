@@ -2,6 +2,7 @@
 #include <filesystem>
 #include <opencv2/opencv.hpp>
 #include <string>
+#include <fstream>  // Aggiungi questa linea
 #include <unistd.h>
 
 namespace fs = std::filesystem;
