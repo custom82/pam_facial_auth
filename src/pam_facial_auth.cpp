@@ -1,149 +1,154 @@
+// pam_facial_auth.cpp
 #include <string>
-#include <iostream>
-#include <fstream>
-#include <filesystem>
-#include <chrono>
-#include <thread>
-#include <syslog.h>
 #include <opencv2/opencv.hpp>
-
-#include <security/pam_appl.h>
-#include <security/pam_modules.h>
-#include <security/pam_ext.h>
-
-#include "FaceRecWrapper.h"
+#include <opencv2/face.hpp>
+#include <iostream>
+#include <filesystem>
+#include <security/pam_modules.h>  // Include PAM
 
 namespace fs = std::filesystem;
 
+// Struttura per configurazione
 struct Config {
-    std::string device = "/dev/video0";
-    int width = 640;
-    int height = 480;
-    int timeout = 10;
-    float threshold = 80.0f;
-    bool nogui = false;
-    bool debug = false;
+    std::string device;
+    int timeout;
+    double threshold;
+    bool nogui;
+    bool debug;
 };
 
 Config load_config(const std::string& config_path) {
     Config cfg;
+
+    // Legge il file di configurazione (file di esempio)
     std::ifstream conf(config_path);
     if (!conf.is_open()) {
-        throw std::runtime_error("Impossibile aprire il file di configurazione");
+        std::cerr << "Error: Cannot open config file: " << config_path << std::endl;
+        return cfg;
     }
-    conf >> cfg.device >> cfg.width >> cfg.height >> cfg.timeout >> cfg.threshold;
+
+    std::string line;
+    while (std::getline(conf, line)) {
+        if (line.find("device") != std::string::npos) {
+            cfg.device = line.substr(line.find('=') + 1);
+        } else if (line.find("timeout") != std::string::npos) {
+            cfg.timeout = std::stoi(line.substr(line.find('=') + 1));
+        } else if (line.find("threshold") != std::string::npos) {
+            cfg.threshold = std::stod(line.substr(line.find('=') + 1));
+        } else if (line.find("nogui") != std::string::npos) {
+            cfg.nogui = line.substr(line.find('=') + 1) == "true";
+        } else if (line.find("debug") != std::string::npos) {
+            cfg.debug = line.substr(line.find('=') + 1) == "true";
+        }
+    }
+
     return cfg;
 }
 
 void apply_pam_args(Config& cfg, pam_handle_t* pamh, int argc, const char** argv) {
+    // Aggiungi eventuali logiche per applicare i parametri PAM
     for (int i = 0; i < argc; ++i) {
-        if (strcmp(argv[i], "nogui") == 0)
-            cfg.nogui = true;
-        else if (strcmp(argv[i], "debug") == 0)
-            cfg.debug = true;
-        else if (strncmp(argv[i], "threshold=", 10) == 0)
-            cfg.threshold = std::stof(argv[i] + 10);
-        else if (strncmp(argv[i], "timeout=", 8) == 0)
+        if (strncmp(argv[i], "device=", 7) == 0) {
+            cfg.device = argv[i] + 7;
+        } else if (strncmp(argv[i], "timeout=", 8) == 0) {
             cfg.timeout = std::stoi(argv[i] + 8);
+        } else if (strncmp(argv[i], "threshold=", 10) == 0) {
+            cfg.threshold = std::stod(argv[i] + 10);
+        } else if (strncmp(argv[i], "nogui=", 6) == 0) {
+            cfg.nogui = std::string(argv[i] + 6) == "true";
+        } else if (strncmp(argv[i], "debug=", 6) == 0) {
+            cfg.debug = std::string(argv[i] + 6) == "true";
+        }
     }
-
-    if (cfg.debug)
-        pam_syslog(pamh, LOG_DEBUG,
-                   "pam_facial_auth: threshold=%.2f timeout=%d nogui=%d",
-                   cfg.threshold, cfg.timeout, cfg.nogui);
 }
 
-extern "C" int pam_sm_authenticate(pam_handle_t* pamh, int, int argc, const char** argv) {
-    const char* user = nullptr;
-    if (pam_get_user(pamh, &user, nullptr) != PAM_SUCCESS || !user) {
-        pam_syslog(pamh, LOG_ERR, "pam_facial_auth: impossibile ottenere l'utente");
-        return PAM_AUTH_ERR;
-    }
+extern "C" {
+    int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, const char **argv) {
+        const char *user = NULL;
+        const char *model_path = NULL;
 
-    Config cfg;
-    try {
-        cfg = load_config("/etc/pam_facial_auth/pam_facial.conf");
-    } catch (...) {
-        pam_syslog(pamh, LOG_ERR, "pam_facial_auth: impossibile leggere il file di configurazione");
-        return PAM_AUTH_ERR;
-    }
-
-    apply_pam_args(cfg, pamh, argc, argv);
-
-    std::string user_dir = std::string("/etc/pam_facial_auth/") + user;
-    std::string model_file = user_dir + "/models/" + user + ".xml";
-
-    if (!fs::exists(model_file)) {
-        pam_syslog(pamh, LOG_ERR, "pam_facial_auth: modello non trovato per %s (%s)",
-                   user, model_file.c_str());
-        return PAM_AUTH_ERR;
-    }
-
-    // Istanzia FaceRecWrapper
-    FaceRecWrapper fr(model_file, user);
-
-    cv::VideoCapture cap(cfg.device);
-    if (!cap.isOpened()) {
-        pam_syslog(pamh, LOG_ERR, "pam_facial_auth: impossibile aprire webcam %s", cfg.device.c_str());
-        return PAM_AUTH_ERR;
-    }
-
-    cap.set(cv::CAP_PROP_FRAME_WIDTH, cfg.width);
-    cap.set(cv::CAP_PROP_FRAME_HEIGHT, cfg.height);
-
-    cv::CascadeClassifier face_cascade;
-    face_cascade.load("/usr/share/opencv4/haarcascades/haarcascade_frontalface_default.xml");
-
-    auto start = std::chrono::steady_clock::now();
-    pam_syslog(pamh, LOG_INFO, "pam_facial_auth: in attesa del volto di %s", user);
-
-    while (true) {
-        cv::Mat frame, gray;
-        cap >> frame;
-        if (frame.empty())
-            continue;
-
-        cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
-        std::vector<cv::Rect> faces;
-        face_cascade.detectMultiScale(gray, faces, 1.1, 4, 0, cv::Size(100, 100));
-
-        if (!faces.empty()) {
-            int predicted = -1;
-            double confidence = 0.0;
-            cv::Mat roi = gray(faces[0]);
-            fr.Predict(roi, predicted, confidence);
-
-            if (cfg.debug)
-                pam_syslog(pamh, LOG_DEBUG,
-                           "pam_facial_auth: pred=%d conf=%.2f thr=%.2f",
-                           predicted, confidence, cfg.threshold);
-
-                if (confidence <= cfg.threshold) {
-                    pam_syslog(pamh, LOG_INFO,
-                               "pam_facial_auth: riconoscimento riuscito per %s (%.2f)",
-                               user, confidence);
-                    return PAM_SUCCESS;
-                }
+        // Ottieni il nome dell'utente dal PAM
+        if (pam_get_user(pamh, &user, NULL) != PAM_SUCCESS) {
+            std::cerr << "Unable to get user" << std::endl;
+            return PAM_AUTH_ERR;
         }
 
-        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
-            std::chrono::steady_clock::now() - start)
-        .count();
+        // Carica la configurazione
+        Config cfg = load_config("/etc/pam_facial_auth/pam_facial.conf");
 
-        if (elapsed > cfg.timeout) {
-            pam_syslog(pamh, LOG_ERR,
-                       "pam_facial_auth: timeout (%d s) per %s",
-                       cfg.timeout, user);
-            break;
+        // Applica i parametri passati nel modulo PAM
+        apply_pam_args(cfg, pamh, argc, argv);
+
+        if (cfg.debug) {
+            std::cerr << "Configuration loaded. Device: " << cfg.device << ", Timeout: " << cfg.timeout << ", Threshold: " << cfg.threshold << std::endl;
         }
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        // Ottieni il percorso del modello
+        if (argc > 1) {
+            model_path = argv[1];  // Percorso fornito come argomento
+        } else {
+            model_path = (std::string("/etc/pam_facial_auth/") + user + "/models/" + user + ".xml").c_str();  // Percorso di default
+        }
+
+        // Verifica se il modello esiste
+        if (!fs::exists(model_path)) {
+            std::cerr << "Model not found at " << model_path << std::endl;
+            return PAM_AUTH_ERR;
+        }
+
+        // Carica il modello
+        cv::Ptr<cv::face::FaceRecognizer> model = cv::face::LBPHFaceRecognizer::create();
+        try {
+            model->read(model_path);
+        } catch (const cv::Exception& e) {
+            std::cerr << "Error loading model: " << e.what() << std::endl;
+            return PAM_AUTH_ERR;
+        }
+
+        // Apre la webcam
+        cv::VideoCapture cap(cfg.device);  // Apri il dispositivo webcam
+
+        if (!cap.isOpened()) {
+            pam_syslog(pamh, LOG_ERR, "Error: Unable to open webcam device %s", cfg.device.c_str());
+            return PAM_AUTH_ERR;
+        }
+
+        pam_syslog(pamh, LOG_INFO, "Webcam %s opened successfully", cfg.device.c_str());
+
+        cv::Mat frame;
+        int prediction = -1;
+        double confidence = 0.0;
+        while (true) {
+            cap >> frame;  // Leggi un frame dalla webcam
+
+            if (frame.empty()) {
+                pam_syslog(pamh, LOG_ERR, "Error: Failed to capture frame from webcam");
+                return PAM_AUTH_ERR;
+            }
+
+            // Previsione del volto
+            model->predict(frame, prediction, confidence);
+
+            if (cfg.debug) {
+                pam_syslog(pamh, LOG_DEBUG, "Prediction: %d, Confidence: %.2f", prediction, confidence);
+            }
+
+            if (confidence < cfg.threshold) {
+                pam_syslog(pamh, LOG_INFO, "Authentication successful for user %s", user);
+                return PAM_SUCCESS;  // Autenticazione riuscita
+            }
+
+            // Timeout dopo il periodo definito
+            if (cfg.timeout > 0) {
+                std::this_thread::sleep_for(std::chrono::seconds(cfg.timeout));
+            }
+
+            // Se il ciclo è stato interrotto
+            if (prediction != -1) {
+                break;
+            }
+        }
+
+        return PAM_AUTH_ERR;  // Se non corrisponde
     }
-
-    pam_syslog(pamh, LOG_WARNING, "pam_facial_auth: autenticazione fallita per %s", user);
-    return PAM_AUTH_ERR;
-}
-
-extern "C" int pam_sm_setcred(pam_handle_t*, int, int, const char**) {
-    return PAM_SUCCESS;
 }
