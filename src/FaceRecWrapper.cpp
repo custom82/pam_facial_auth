@@ -1,33 +1,39 @@
 #include "FaceRecWrapper.h"
-#include <opencv2/opencv.hpp>
-#include <opencv2/face.hpp>
 #include <iostream>
 
-FaceRecWrapper::FaceRecWrapper(const std::string &modelPath, const std::string &name, const std::string &model)
-: modelPath(modelPath), name(name), model(model) {
+FaceRecWrapper::FaceRecWrapper(const std::string &modelPath, const std::string &name)
+: modelPath(modelPath), name(name) {
+	// Inizializzazione del riconoscitore
+	if (modelPath.empty()) {
+		std::cerr << "Model path is empty!" << std::endl;
+		return;
+	}
 
-	// Seleziona il tipo di riconoscitore in base al parametro 'model'
-	if (model == "lbph") {
+	// Carica il modello in base al tipo configurato
+	if (name == "lbph") {
 		fr = cv::face::LBPHFaceRecognizer::create();
-		std::cout << "Using LBPH model" << std::endl;
-	} else if (model == "eigenfaces") {
+	} else if (name == "eigenfaces") {
 		fr = cv::face::EigenFaceRecognizer::create();
-		std::cout << "Using Eigenfaces model" << std::endl;
-	} else if (model == "fisherfaces") {
+	} else if (name == "fisherfaces") {
 		fr = cv::face::FisherFaceRecognizer::create();
-		std::cout << "Using Fisherfaces model" << std::endl;
+	}
+
+	// Carica il modello dal percorso
+	if (!modelPath.empty() && fs::exists(modelPath)) {
+		fr->read(modelPath);  // Carica il modello
 	} else {
-		std::cerr << "Invalid model type: " << model << ", defaulting to Eigenfaces" << std::endl;
-		fr = cv::face::EigenFaceRecognizer::create();
+		std::cerr << "Model file not found: " << modelPath << std::endl;
 	}
 }
 
 void FaceRecWrapper::Load(const std::string &path) {
-	// Carica il modello addestrato
-	fr->read(path);
+	if (fs::exists(path)) {
+		fr->read(path);  // Carica il modello
+	}
 }
 
 int FaceRecWrapper::Predict(const cv::Mat &image, int &prediction, double &confidence) {
-	// Esegui la previsione sul frame
-	return fr->predict(image, prediction, confidence);
+	// Predizione usando il riconoscitore facciale
+	fr->predict(image, prediction, confidence);
+	return prediction;  // Return prediction for further use (not necessary, but useful if needed)
 }

@@ -5,21 +5,20 @@
 #include <opencv2/face.hpp>
 #include <vector>
 #include <string>
+#include <filesystem>
+
+namespace fs = std::filesystem;
 
 class FaceRecWrapper {
 public:
-    // Modifica il costruttore per includere il parametro model
-    FaceRecWrapper(const std::string &modelPath, const std::string &name, const std::string &model = "eigenfaces");
-
+    FaceRecWrapper(const std::string &modelPath, const std::string &name);
     void Load(const std::string &path);
     int Predict(const cv::Mat &image, int &prediction, double &confidence);
 
 private:
-    cv::Ptr<cv::face::FaceRecognizer> fr; // Oggetto riconoscitore facciale
-    std::string modelPath;                // Percorso del modello
-    std::string name;                     // Nome dell'utente
-    std::string model;                    // Tipo di modello (e.g., eigenfaces, lbph)
+    cv::Ptr<cv::face::FaceRecognizer> fr;
+    std::string modelPath;
+    std::string name;
 };
 
 #endif // FACERECWRAPPER_H
-
