@@ -4,6 +4,7 @@
 #include <string>
 #include <filesystem>
 #include <unistd.h>
+#include <cstdlib> // getenv
 
 namespace fs = std::filesystem;
 
@@ -13,7 +14,7 @@ struct Config {
     int height = 480;
 };
 
-// Funzione per caricare il file di configurazione
+// ======== CONFIG LOAD ========
 Config load_config(const std::string &config_path, bool verbose) {
     Config cfg;
     std::ifstream conf(config_path);
@@ -37,7 +38,7 @@ Config load_config(const std::string &config_path, bool verbose) {
     return cfg;
 }
 
-// Verifica se una risoluzione è supportata dalla webcam
+// ======== RESOLUTION CHECK ========
 bool is_resolution_supported(const std::string &device, int width, int height, bool verbose) {
     cv::VideoCapture cap(device);
     if (!cap.isOpened()) {
@@ -45,7 +46,6 @@ bool is_resolution_supported(const std::string &device, int width, int height, b
         return false;
     }
 
-    // Verifica se la risoluzione desiderata è supportata
     cap.set(cv::CAP_PROP_FRAME_WIDTH, width);
     cap.set(cv::CAP_PROP_FRAME_HEIGHT, height);
 
@@ -54,7 +54,7 @@ bool is_resolution_supported(const std::string &device, int width, int height, b
 
     if (cap_width != width || cap_height != height) {
         if (verbose)
-            std::cerr << "[ERROR] Desired resolution " << width << "x" << height
+            std::cerr << "[WARN] Desired resolution " << width << "x" << height
             << " is not supported. Using " << cap_width << "x" << cap_height << " instead." << std::endl;
         return false;
     }
@@ -62,11 +62,13 @@ bool is_resolution_supported(const std::string &device, int width, int height, b
     return true;
 }
 
+// ======== DEVICE CHECK ========
 bool is_valid_device(const std::string &device) {
     std::ifstream dev_check(device);
     return dev_check.is_open();
 }
 
+// ======== CLEAN USER DIR ========
 void flush_images(const std::string &user_dir, const std::string &user, bool verbose) {
     fs::path dir_path = user_dir + "/" + user;
     if (!fs::exists(dir_path)) {
@@ -90,6 +92,7 @@ void flush_images(const std::string &user_dir, const std::string &user, bool ver
     std::cout << "[INFO] All images for user " << user << " have been deleted." << std::endl;
 }
 
+// ======== NEXT FILENAME ========
 std::string get_next_filename(const std::string &user_dir, const std::string &user, bool force, bool verbose) {
     if (force) {
         if (verbose)
@@ -106,6 +109,7 @@ std::string get_next_filename(const std::string &user_dir, const std::string &us
     return filename;
 }
 
+// ======== MAIN ========
 int main(int argc, char **argv) {
     std::string user;
     std::string config_path = "/etc/pam_facial_auth/pam_facial.conf";
@@ -120,27 +124,17 @@ int main(int argc, char **argv) {
     // Parse args
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
-        if ((arg == "-u" || arg == "--user") && i + 1 < argc) {
-            user = argv[++i];
-        } else if ((arg == "-c" || arg == "--config") && i + 1 < argc) {
-            config_path = argv[++i];
-        } else if ((arg == "-d" || arg == "--device") && i + 1 < argc) {
-            device_override = argv[++i];
-        } else if ((arg == "-w" || arg == "--width") && i + 1 < argc) {
-            width_override = std::stoi(argv[++i]);
-        } else if ((arg == "-h" || arg == "--height") && i + 1 < argc) {
-            height_override = std::stoi(argv[++i]);
-        } else if (arg == "-f" || arg == "--force") {
-            force = true;
-        } else if ((arg == "--flush" || arg == "--clean") && i + 1 < argc) {
-            flush = true;
-        } else if (arg == "-v" || arg == "--verbose") {
-            verbose = true;
-        } else if (arg == "--debug") {
-            debug = true;
-        } else if (arg == "--nogui") {
-            nogui = true;
-        } else if (arg == "--help" || arg == "-H") {
+        if ((arg == "-u" || arg == "--user") && i + 1 < argc) user = argv[++i];
+        else if ((arg == "-c" || arg == "--config") && i + 1 < argc) config_path = argv[++i];
+        else if ((arg == "-d" || arg == "--device") && i + 1 < argc) device_override = argv[++i];
+        else if ((arg == "-w" || arg == "--width") && i + 1 < argc) width_override = std::stoi(argv[++i]);
+        else if ((arg == "-h" || arg == "--height") && i + 1 < argc) height_override = std::stoi(argv[++i]);
+        else if (arg == "-f" || arg == "--force") force = true;
+        else if ((arg == "--flush" || arg == "--clean")) flush = true;
+        else if (arg == "-v" || arg == "--verbose") verbose = true;
+        else if (arg == "--debug") debug = true;
+        else if (arg == "--nogui") nogui = true;
+        else if (arg == "--help" || arg == "-H") {
             std::cout << "Usage: facial_capture -u <user> [options]\n\n"
             << "Options:\n"
             << "  -u, --user <name>       Nome utente per cui salvare le immagini\n"
@@ -152,10 +146,17 @@ int main(int argc, char **argv) {
             << "  --flush, --clean        Elimina tutte le immagini per l'utente specificato\n"
             << "  -v, --verbose           Output dettagliato\n"
             << "  --debug                 Abilita output di debug\n"
-            << "  --nogui                 Disabilita la GUI, usa solo la console\n"
+            << "  --nogui                 Disabilita GUI, cattura solo da console\n"
             << "  --help, -H              Mostra questo messaggio\n";
             return 0;
         }
+    }
+
+    // ===== SAFETY: auto-disable GUI if no display =====
+    if (std::getenv("DISPLAY") == nullptr || std::getenv("XDG_RUNTIME_DIR") == nullptr) {
+        nogui = true;
+        if (verbose)
+            std::cout << "[INFO] Nessun ambiente grafico rilevato, uso modalità --nogui automatica." << std::endl;
     }
 
     if (user.empty()) {
@@ -168,38 +169,34 @@ int main(int argc, char **argv) {
         return 0;
     }
 
-    // Carica la configurazione
+    // ===== LOAD CONFIG =====
     Config cfg = load_config(config_path, verbose);
     if (!device_override.empty()) cfg.device = device_override;
     if (width_override > 0) cfg.width = width_override;
     if (height_override > 0) cfg.height = height_override;
 
-    // Verifica se la risoluzione è supportata
-    if (!is_resolution_supported(cfg.device, cfg.width, cfg.height, verbose)) {
-        std::cerr << "[ERROR] La risoluzione desiderata non è supportata dalla webcam!" << std::endl;
-        return 1;
-    }
-
-    // Verifica la validità del dispositivo
+    // ===== CHECK DEVICE =====
     if (!is_valid_device(cfg.device)) {
         std::cerr << "[ERROR] Il dispositivo specificato non è valido: " << cfg.device << std::endl;
         return 1;
     }
 
-    // Directory per le immagini dell'utente
+    // ===== CHECK RESOLUTION =====
+    is_resolution_supported(cfg.device, cfg.width, cfg.height, verbose);
+
+    // ===== USER DIRECTORY =====
     std::string user_dir = "/etc/pam_facial_auth/" + user;
     if (!fs::exists(user_dir)) {
         if (verbose) std::cout << "[INFO] Creazione directory utente: " << user_dir << std::endl;
         fs::create_directories(user_dir);
     }
 
-    // Apri la webcam
+    // ===== OPEN CAMERA =====
     cv::VideoCapture cap(cfg.device);
     if (!cap.isOpened()) {
         std::cerr << "[ERROR] Impossibile aprire il dispositivo: " << cfg.device << std::endl;
         return 1;
     }
-
     cap.set(cv::CAP_PROP_FRAME_WIDTH, cfg.width);
     cap.set(cv::CAP_PROP_FRAME_HEIGHT, cfg.height);
 
@@ -221,17 +218,24 @@ int main(int argc, char **argv) {
             cv::imshow("Facial Capture - Premere 's' per salvare, 'q' per uscire", frame);
         }
 
-        char key = (char)cv::waitKey(10000);  // Aumentato a 10 secondi per l'attesa
+        // 10 secondi di attesa
+        char key = (char)cv::waitKey(nogui ? 10000 : 1);
 
-        if (key == 's') {
+        // In modalità nogui, nessun display → salvataggio automatico ogni 10s
+        if (nogui) {
+            std::string filename = get_next_filename(user_dir, user, force, verbose);
+            cv::imwrite(filename, frame);
+            saved_count++;
+            if (verbose)
+                std::cout << "[INFO] (NOGUI) Salvata immagine: " << filename << std::endl;
+            if (saved_count >= 1 && force)
+                break;
+        } else if (key == 's') {
             std::string filename = get_next_filename(user_dir, user, force, verbose);
             cv::imwrite(filename, frame);
             saved_count++;
             if (verbose) std::cout << "[INFO] Salvata immagine: " << filename << std::endl;
-            if (force) {
-                if (verbose) std::cout << "[DEBUG] Force attivo, sovrascrittura terminata dopo 1 immagine.\n";
-                break;
-            }
+            if (force) break;
         } else if (key == 'q') {
             if (verbose) std::cout << "[INFO] Uscita richiesta dall'utente.\n";
             break;
@@ -239,7 +243,8 @@ int main(int argc, char **argv) {
     }
 
     cap.release();
-    cv::destroyAllWindows();
+    if (!nogui) cv::destroyAllWindows();
+
     if (verbose)
         std::cout << "[INFO] Capture terminato. Immagini salvate: " << saved_count << std::endl;
 
