@@ -1,6 +1,6 @@
 #include <string>
 #include <iostream>
-#include <fstream>          // Per std::ifstream
+#include <fstream>
 #include <filesystem>
 #include <syslog.h>         // Per LOG_ERR, LOG_INFO, ecc.
 #include <opencv2/opencv.hpp>
@@ -10,10 +10,16 @@
 
 namespace fs = std::filesystem;
 
-extern "C" {
-    #include <security/pam_modules.h>
-    #include <security/pam_ext.h>
-}
+// Definizione della struttura Config
+struct Config {
+    std::string device = "/dev/video0";  // Dispositivo predefinito
+    int width = 640;
+    int height = 480;
+    int timeout = 10;
+    float threshold = 80.0f;
+    bool nogui = false;
+    bool debug = false;
+};
 
 // Funzione per caricare la configurazione
 Config load_config(const std::string& config_path) {
@@ -78,9 +84,10 @@ int pam_sm_authenticate(pam_handle_t* pamh, int flags, int argc, const char** ar
         return PAM_AUTH_ERR;
     }
 
-    // Esegui il riconoscimento facciale qui (logica di autenticazione)
+    // Aggiungi qui la logica di autenticazione facciale, ad esempio caricando il modello e facendo una previsione
+    // Esegui il riconoscimento facciale (aggiungi la logica necessaria)
 
-    // Invia il risultato del login al PAM
+    // Log dell'esito dell'autenticazione
     pam_syslog(pamh, LOG_INFO, "Authentication succeeded for user %s", user);
 
     return PAM_SUCCESS;
