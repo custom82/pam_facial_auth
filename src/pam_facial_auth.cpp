@@ -2,11 +2,13 @@
 #include <iostream>
 #include <fstream>
 #include <filesystem>
-#include <syslog.h>         // Per LOG_ERR, LOG_INFO, ecc.
+#include <syslog.h>  // Per LOG_ERR, LOG_INFO, ecc.
 #include <opencv2/opencv.hpp>
 #include <opencv2/face.hpp>
 #include <chrono>
 #include <thread>
+#include <security/pam_appl.h>  // Necessario per pam_handle_t e PAM
+#include <security/pam_modules.h>  // Per definire la funzione pam_sm_authenticate
 
 namespace fs = std::filesystem;
 
