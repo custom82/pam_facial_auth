@@ -1,4 +1,3 @@
-// pam_facial_auth.cpp
 #include <security/pam_modules.h>
 #include <security/pam_ext.h>
 #include <opencv2/opencv.hpp>
