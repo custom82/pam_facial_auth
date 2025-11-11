@@ -12,7 +12,7 @@
 #include <security/pam_modules.h>
 #include <security/pam_ext.h>
 
-#include "FaceRecWrapper.hpp"  // include del tuo wrapper C++ per OpenCV
+#include "FaceRecWrapper.h"  // include del tuo wrapper C++ per OpenCV
 
 namespace fs = std::filesystem;
 
