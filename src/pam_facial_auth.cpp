@@ -6,6 +6,7 @@
 #include <iostream>
 #include <chrono>
 #include <thread>
+#include <fstream>  // Inclusione corretta per std::ifstream
 #include "FaceRecWrapper.h"
 #include <syslog.h>
 
