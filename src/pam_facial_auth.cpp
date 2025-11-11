@@ -6,11 +6,10 @@
 #include <iostream>
 #include <chrono>
 #include <thread>
-#include "FaceRecWrapper.h"
-#include <syslog.h>
 #include <fstream>
 #include <sstream>
-#include <json/json.h>
+#include "FaceRecWrapper.h"
+#include <syslog.h>
 
 namespace fs = std::filesystem;
 
@@ -22,65 +21,48 @@ struct FacialAuthConfig {
     int timeout = 10;
     std::string model_path = "/etc/pam_facial_auth";
     std::string device = "/dev/video0";
-    std::string model = "eigenfaces"; // Modello di default
+    std::string model = "lbph"; // Default model
 };
 
-// Legge la configurazione dal file /etc/pam_facial_auth/pam_facial.conf
-static FacialAuthConfig read_config() {
+// Funzione per caricare il file di configurazione
+FacialAuthConfig load_config(const std::string &config_file) {
     FacialAuthConfig cfg;
+    std::ifstream file(config_file);
+    std::string line;
 
-    std::ifstream config_file("/etc/pam_facial_auth/pam_facial.conf");
-    if (!config_file.is_open()) {
-        pam_syslog(nullptr, LOG_ERR, "Could not open configuration file /etc/pam_facial_auth/pam_facial.conf");
+    if (!file.is_open()) {
+        std::cerr << "Unable to open configuration file: " << config_file << std::endl;
         return cfg;
     }
 
-    std::string line;
-    while (std::getline(config_file, line)) {
-        std::istringstream line_stream(line);
-        std::string key, value;
-
-        if (std::getline(line_stream, key, ' ') && std::getline(line_stream, value)) {
-            if (key == "device") cfg.device = value;
-            else if (key == "width") cfg.width = std::stoi(value);
-            else if (key == "height") cfg.height = std::stoi(value);
-            else if (key == "threshold") cfg.threshold = std::stod(value);
-            else if (key == "timeout") cfg.timeout = std::stoi(value);
-            else if (key == "nogui") cfg.nogui = (value == "true");
-            else if (key == "debug") cfg.debug = (value == "true");
-            else if (key == "model") cfg.model = value; // Nuovo parametro per il modello
+    while (std::getline(file, line)) {
+        std::istringstream iss(line);
+        std::string key;
+        if (std::getline(iss, key, ' ')) {
+            std::string value;
+            if (std::getline(iss, value)) {
+                // Assegna i parametri in base alla chiave
+                if (key == "device") cfg.device = value;
+                else if (key == "threshold") cfg.threshold = std::stod(value);
+                else if (key == "timeout") cfg.timeout = std::stoi(value);
+                else if (key == "model_path") cfg.model_path = value;
+                else if (key == "model") cfg.model = value;  // Imposta il modello
+                else if (key == "debug") cfg.debug = (value == "true");
+                else if (key == "nogui") cfg.nogui = (value == "true");
+            }
         }
     }
-
     return cfg;
 }
 
-// Analisi parametri passati dallo stack PAM
-static FacialAuthConfig parse_args(int argc, const char **argv) {
-    FacialAuthConfig cfg = read_config();  // Leggi la configurazione predefinita
-
-    for (int i = 0; i < argc; ++i) {
-        std::string arg(argv[i]);
-        if (arg == "debug") cfg.debug = true;
-        else if (arg == "nogui") cfg.nogui = true;
-        else if (arg.starts_with("threshold=")) cfg.threshold = std::stod(arg.substr(10));
-        else if (arg.starts_with("timeout=")) cfg.timeout = std::stoi(arg.substr(8));
-        else if (arg.starts_with("model_path=")) cfg.model_path = arg.substr(11);
-        else if (arg.starts_with("device=")) cfg.device = arg.substr(7);
-        else if (arg.starts_with("model=")) cfg.model = arg.substr(6); // Aggiunto per il modello
-    }
-
-    return cfg;
-}
-
-// Implementazione del modulo PAM
 extern "C" {
 
     PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, const char **argv) {
-        FacialAuthConfig cfg = parse_args(argc, argv);
+        // Carica la configurazione dal file
+        FacialAuthConfig cfg = load_config("/etc/pam_facial_auth/pam_facial.conf");
+
         const char *user = nullptr;
 
-        // Ottiene l'utente corrente
         if (pam_get_user(pamh, &user, NULL) != PAM_SUCCESS || !user) {
             pam_syslog(pamh, LOG_ERR, "Unable to get user");
             return PAM_USER_UNKNOWN;
@@ -95,9 +77,8 @@ extern "C" {
             return PAM_IGNORE; // Non bloccare, lascia passare ad altri moduli
         }
 
-        // Se è stato già autenticato (es. pam_unix ha successo), non rifare autenticazione
-        int retval = 0;
-        retval = pam_get_item(pamh, PAM_AUTHTOK, nullptr);
+        // Se è stato già autenticato, non rifare autenticazione
+        int retval = pam_get_item(pamh, PAM_AUTHTOK, nullptr);
         if (retval == PAM_SUCCESS && !(flags & PAM_SILENT)) {
             if (cfg.debug)
                 pam_syslog(pamh, LOG_DEBUG, "Authentication token already set, skipping facial auth");
@@ -113,7 +94,7 @@ extern "C" {
             return PAM_AUTH_ERR;
         }
 
-        // Creazione di FaceRecWrapper con il modello selezionato
+        // Passa anche il modello dal file di configurazione
         FaceRecWrapper fr(model_file, user, cfg.model);
 
         auto start_time = std::chrono::steady_clock::now();
