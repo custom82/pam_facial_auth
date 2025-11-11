@@ -36,6 +36,29 @@ Config load_config(const std::string &config_path, bool verbose) {
     return cfg;
 }
 
+void flush_images(const std::string &user_dir, const std::string &user, bool verbose) {
+    fs::path dir_path = user_dir + "/" + user;
+    if (!fs::exists(dir_path)) {
+        if (verbose)
+            std::cerr << "[WARN] Directory not found for user: " << user << std::endl;
+        return;
+    }
+
+    try {
+        for (const auto &entry : fs::directory_iterator(dir_path)) {
+            if (entry.is_regular_file()) {
+                fs::remove(entry);
+                if (verbose)
+                    std::cout << "[INFO] Removed: " << entry.path() << std::endl;
+            }
+        }
+    } catch (const fs::filesystem_error &e) {
+        std::cerr << "[ERROR] Error deleting images: " << e.what() << std::endl;
+    }
+
+    std::cout << "[INFO] All images for user " << user << " have been deleted." << std::endl;
+}
+
 std::string get_next_filename(const std::string &user_dir, const std::string &user, bool force, bool verbose) {
     if (force) {
         if (verbose)
@@ -57,6 +80,7 @@ int main(int argc, char **argv) {
     std::string config_path = "/etc/pam_facial_auth/pam_facial.conf";
     bool verbose = false;
     bool force = false;
+    bool flush = false;
     std::string device_override;
     int width_override = -1, height_override = -1;
 
@@ -75,6 +99,8 @@ int main(int argc, char **argv) {
             height_override = std::stoi(argv[++i]);
         } else if (arg == "-f" || arg == "--force") {
             force = true;
+        } else if (arg == "--flush" || arg == "--clean") {
+            flush = true;
         } else if (arg == "-v" || arg == "--verbose") {
             verbose = true;
         } else if (arg == "--help" || arg == "-H") {
@@ -86,6 +112,7 @@ int main(int argc, char **argv) {
             << "  -w, --width <px>        Larghezza frame\n"
             << "  -h, --height <px>       Altezza frame\n"
             << "  -f, --force             Sovrascrive immagini esistenti e riparte da 1\n"
+            << "  --flush, --clean        Elimina tutte le immagini per l'utente specificato\n"
             << "  -v, --verbose           Output dettagliato\n"
             << "  --help, -H              Mostra questo messaggio\n";
             return 0;
@@ -95,6 +122,11 @@ int main(int argc, char **argv) {
     if (user.empty()) {
         std::cerr << "[ERROR] Devi specificare un utente con -u <nome>\n";
         return 1;
+    }
+
+    if (flush) {
+        flush_images("/etc/pam_facial_auth", user, verbose);
+        return 0;
     }
 
     // Carica la configurazione
