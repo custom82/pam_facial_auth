@@ -1,151 +1,161 @@
-#include <opencv2/opencv.hpp>
 #include <iostream>
-#include <fstream>
 #include <filesystem>
+#include <fstream>
+#include <opencv2/opencv.hpp>
 #include <string>
-#include <chrono>
-#include <thread>
-#include <sstream>
-#include <vector>
+#include <unistd.h>
 
 namespace fs = std::filesystem;
 
 struct Config {
+    std::string device = "/dev/video0";
     int width = 640;
     int height = 480;
 };
 
-// Funzione per leggere width e height dal file di configurazione
-void loadConfig(const std::string &configPath, Config &cfg, bool verbose) {
-    std::ifstream file(configPath);
-    if (!file.is_open()) {
-        if (verbose) std::cerr << "[WARN] Impossibile aprire il file di configurazione: " << configPath << std::endl;
-        return;
+Config load_config(const std::string &config_path, bool verbose) {
+    Config cfg;
+    std::ifstream conf(config_path);
+    if (!conf.is_open()) {
+        if (verbose)
+            std::cerr << "[WARN] Config file not found, using defaults: " << config_path << std::endl;
+        return cfg;
     }
 
-    std::string line;
-    while (std::getline(file, line)) {
-        if (line.find("width=") == 0)
-            cfg.width = std::stoi(line.substr(6));
-        else if (line.find("height=") == 0)
-            cfg.height = std::stoi(line.substr(7));
+    std::string key, value;
+    while (conf >> key >> value) {
+        if (key == "device") cfg.device = value;
+        else if (key == "width") cfg.width = std::stoi(value);
+        else if (key == "height") cfg.height = std::stoi(value);
     }
-    file.close();
+
+    if (verbose) {
+        std::cout << "[INFO] Loaded config from " << config_path << std::endl;
+        std::cout << "[INFO] Device: " << cfg.device << ", width=" << cfg.width << ", height=" << cfg.height << std::endl;
+    }
+    return cfg;
 }
 
-// Funzione per generare il nome dell'immagine e verificare la sequenza
-std::string generateFileName(const std::string& userDir, const std::string& user, bool force) {
-    int counter = 0;
+std::string get_next_filename(const std::string &user_dir, const std::string &user, bool force, bool verbose) {
+    if (force) {
+        if (verbose)
+            std::cout << "[DEBUG] Force mode active: starting numbering from 1" << std::endl;
+        return user_dir + "/" + user + "_1.jpg";
+    }
+
+    int index = 1;
     std::string filename;
     do {
-        filename = userDir + "/" + user + "_" + std::to_string(counter++) + ".jpg";
-    } while (fs::exists(filename) && !force);
+        filename = user_dir + "/" + user + "_" + std::to_string(index) + ".jpg";
+        index++;
+    } while (fs::exists(filename));
     return filename;
-}
-
-// Mostra l’help
-void showHelp() {
-    std::cout << "Usage: facial_capture [options]\n\n"
-    << "Options:\n"
-    << "  -u, --user <name>       Nome utente (obbligatorio)\n"
-    << "  -d, --device <path>     Dispositivo webcam (default: /dev/video0)\n"
-    << "  -o, --output <dir>      Directory di output per le immagini\n"
-    << "  -n, --num <N>           Numero di immagini da catturare (default: 30)\n"
-    << "  --width <W>             Larghezza fotogramma (override da config)\n"
-    << "  --height <H>            Altezza fotogramma (override da config)\n"
-    << "  -f, --force             Sovrascrivi le immagini esistenti\n"
-    << "  --nogui                 Cattura senza mostrare anteprima\n"
-    << "  -v, --verbose           Modalità verbosa\n"
-    << "  -h, --help              Mostra questo messaggio\n";
 }
 
 int main(int argc, char **argv) {
     std::string user;
-    std::string device = "/dev/video0";
-    std::string outputDir;
-    std::string configPath = "/etc/pam_facial_auth/pam_facial.conf";
-    int numImages = 30;
+    std::string config_path = "/etc/pam_facial_auth/pam_facial.conf";
     bool verbose = false;
-    bool nogui = false;
     bool force = false;
-    Config cfg;
+    std::string device_override;
+    int width_override = -1, height_override = -1;
 
-    // Carica valori da file di configurazione
-    loadConfig(configPath, cfg, verbose);
-
-    // Parsing manuale argomenti
+    // Parse args
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
-        if ((arg == "-u" || arg == "--user") && i + 1 < argc) user = argv[++i];
-        else if ((arg == "-d" || arg == "--device") && i + 1 < argc) device = argv[++i];
-        else if ((arg == "-o" || arg == "--output") && i + 1 < argc) outputDir = argv[++i];
-        else if ((arg == "-n" || arg == "--num") && i + 1 < argc) numImages = std::stoi(argv[++i]);
-        else if ((arg == "--width" || arg == "--height") && i + 1 < argc) {
-            if (arg == "--width") cfg.width = std::stoi(argv[++i]);
-            if (arg == "--height") cfg.height = std::stoi(argv[++i]);
-        }
-        else if (arg == "--nogui") nogui = true;
-        else if (arg == "-f" || arg == "--force") force = true;
-        else if (arg == "-v" || arg == "--verbose") verbose = true;
-        else if (arg == "-h" || arg == "--help") { showHelp(); return 0; }
-        else {
-            std::cerr << "Parametro sconosciuto: " << arg << std::endl;
-            showHelp();
-            return 1;
+        if ((arg == "-u" || arg == "--user") && i + 1 < argc) {
+            user = argv[++i];
+        } else if ((arg == "-c" || arg == "--config") && i + 1 < argc) {
+            config_path = argv[++i];
+        } else if ((arg == "-d" || arg == "--device") && i + 1 < argc) {
+            device_override = argv[++i];
+        } else if ((arg == "-w" || arg == "--width") && i + 1 < argc) {
+            width_override = std::stoi(argv[++i]);
+        } else if ((arg == "-h" || arg == "--height") && i + 1 < argc) {
+            height_override = std::stoi(argv[++i]);
+        } else if (arg == "-f" || arg == "--force") {
+            force = true;
+        } else if (arg == "-v" || arg == "--verbose") {
+            verbose = true;
+        } else if (arg == "--help" || arg == "-H") {
+            std::cout << "Usage: facial_capture -u <user> [options]\n\n"
+            << "Options:\n"
+            << "  -u, --user <name>       Nome utente per cui salvare le immagini\n"
+            << "  -c, --config <file>     File di configurazione (default: /etc/pam_facial_auth/pam_facial.conf)\n"
+            << "  -d, --device <path>     Device della webcam (es: /dev/video0)\n"
+            << "  -w, --width <px>        Larghezza frame\n"
+            << "  -h, --height <px>       Altezza frame\n"
+            << "  -f, --force             Sovrascrive immagini esistenti e riparte da 1\n"
+            << "  -v, --verbose           Output dettagliato\n"
+            << "  --help, -H              Mostra questo messaggio\n";
+            return 0;
         }
     }
 
-    if (user.empty() || outputDir.empty()) {
-        std::cerr << "[ERRORE] Parametri mancanti. Usa --help per maggiori informazioni.\n";
+    if (user.empty()) {
+        std::cerr << "[ERROR] Devi specificare un utente con -u <nome>\n";
         return 1;
     }
 
-    if (verbose) {
-        std::cout << "[INFO] Utente: " << user << "\n"
-        << "[INFO] Device: " << device << "\n"
-        << "[INFO] Output dir: " << outputDir << "\n"
-        << "[INFO] Risoluzione: " << cfg.width << "x" << cfg.height << "\n"
-        << "[INFO] Numero immagini: " << numImages << "\n";
+    // Carica la configurazione
+    Config cfg = load_config(config_path, verbose);
+    if (!device_override.empty()) cfg.device = device_override;
+    if (width_override > 0) cfg.width = width_override;
+    if (height_override > 0) cfg.height = height_override;
+
+    // Directory per le immagini dell'utente
+    std::string user_dir = "/etc/pam_facial_auth/" + user;
+    if (!fs::exists(user_dir)) {
+        if (verbose) std::cout << "[INFO] Creazione directory utente: " << user_dir << std::endl;
+        fs::create_directories(user_dir);
     }
 
-    // Crea la directory di output se non esiste
-    fs::create_directories(outputDir + "/" + user);
-
-    cv::VideoCapture cap(device);
+    // Apri la webcam
+    cv::VideoCapture cap(cfg.device);
     if (!cap.isOpened()) {
-        std::cerr << "[ERRORE] Impossibile aprire la webcam: " << device << std::endl;
+        std::cerr << "[ERROR] Impossibile aprire il dispositivo: " << cfg.device << std::endl;
         return 1;
     }
 
     cap.set(cv::CAP_PROP_FRAME_WIDTH, cfg.width);
     cap.set(cv::CAP_PROP_FRAME_HEIGHT, cfg.height);
 
+    if (verbose)
+        std::cout << "[INFO] Webcam " << cfg.device << " aperta (" << cfg.width << "x" << cfg.height << ")\n"
+        << "[INFO] Premi 's' per salvare, 'q' per uscire.\n";
+
     cv::Mat frame;
-    for (int i = 0; i < numImages; ++i) {
+    int saved_count = 0;
+
+    while (true) {
         cap >> frame;
         if (frame.empty()) {
-            std::cerr << "[WARN] Frame vuoto, salto...\n";
-            continue;
+            std::cerr << "[ERROR] Frame non valido.\n";
+            break;
         }
 
-        std::string userDir = outputDir + "/" + user;
-        std::string filename = generateFileName(userDir, user, force);
+        cv::imshow("Facial Capture - Premere 's' per salvare, 'q' per uscire", frame);
+        char key = (char)cv::waitKey(1);
 
-        cv::imwrite(filename, frame);
-        if (verbose)
-            std::cout << "[DEBUG] Immagine salvata: " << filename << std::endl;
-
-        if (!nogui) {
-            cv::imshow("Facial Capture", frame);
-            if (cv::waitKey(500) == 27) break; // ESC per uscire
-        } else {
-            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        if (key == 's') {
+            std::string filename = get_next_filename(user_dir, user, force, verbose);
+            cv::imwrite(filename, frame);
+            saved_count++;
+            if (verbose) std::cout << "[INFO] Salvata immagine: " << filename << std::endl;
+            if (force) {
+                if (verbose) std::cout << "[DEBUG] Force attivo, sovrascrittura terminata dopo 1 immagine.\n";
+                break;
+            }
+        } else if (key == 'q') {
+            if (verbose) std::cout << "[INFO] Uscita richiesta dall'utente.\n";
+            break;
         }
     }
 
     cap.release();
-    if (!nogui) cv::destroyAllWindows();
-    std::cout << "[OK] Acquisizione completata con successo." << std::endl;
+    cv::destroyAllWindows();
+    if (verbose)
+        std::cout << "[INFO] Capture terminato. Immagini salvate: " << saved_count << std::endl;
 
     return 0;
 }
