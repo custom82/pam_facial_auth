@@ -4,9 +4,11 @@
 #include <opencv2/face.hpp>
 #include <iostream>
 #include <filesystem>
-#include <security/pam_modules.h>  // Include PAM
-#include <fstream>                 // Per std::ifstream
-#include <thread>                  // Per std::this_thread
+#include <security/pam_modules.h>  // Include PAM per l'autenticazione
+#include <security/pam_appl.h>    // Include PAM per il logging
+#include <fstream>                // Per std::ifstream
+#include <thread>                 // Per std::this_thread
+#include <chrono>                 // Per gestione del timeout
 
 namespace fs = std::filesystem;
 
@@ -22,7 +24,7 @@ struct Config {
 Config load_config(const std::string& config_path) {
     Config cfg;
 
-    // Legge il file di configurazione (file di esempio)
+    // Legge il file di configurazione
     std::ifstream conf(config_path);
     if (!conf.is_open()) {
         std::cerr << "Error: Cannot open config file: " << config_path << std::endl;
