@@ -7,19 +7,18 @@ include_directories(
     /usr/include/opencv4
 )
 
-# Aggiungi i file sorgenti
-set(SOURCES
+# Aggiungi i file sorgenti per la libreria
+set(LIBRARY_SOURCES
     src/pam_facial_auth.cpp
     src/FacialAuth.cpp
     src/FaceRecWrapper.cpp
     src/Utils.cpp
     src/facial_capture.cpp
-    src/facial_test.cpp
     src/facial_training.cpp
 )
 
 # Crea una libreria condivisa chiamata libfacialauth.so per il codice comune (senza main())
-add_library(facialauth SHARED ${SOURCES})
+add_library(facialauth SHARED ${LIBRARY_SOURCES})
 
 # Linka la libreria PAM per il modulo PAM
 target_link_libraries(facialauth
@@ -39,7 +38,7 @@ target_link_libraries(facialauth
     /usr/lib64/libpam.so
 )
 
-# Crea eseguibili separati per facial_test, facial_training, e facial_capture
+# Aggiungi eseguibili separati per facial_test, facial_training, e facial_capture (con funzione main)
 add_executable(facial_test src/facial_test.cpp)
 target_link_libraries(facial_test PRIVATE facialauth)
 
