@@ -1,32 +1,32 @@
 #include <security/pam_appl.h>
 #include <security/pam_misc.h>
 #include <security/pam_modules.h>
-#include <security/pam_ext.h>
+#include <security/pam_ext.h>  // Aggiunto pam_ext.h
 #include <opencv2/opencv.hpp>
-#include "FacialAuth.h"  // Include the FacialAuth header for authentication class
+#include "FacialAuth.h"  // Includi il file header per la classe FacialAuth
 #include <syslog.h>
-
 
 int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, const char **argv) {
     const char *user = NULL;
     int retval;
 
-    // Retrieve the user
+    // Ottieni l'utente da PAM
     retval = pam_get_user(pamh, &user, NULL);
     if (retval != PAM_SUCCESS) {
-        pam_syslog(pamh, LOG_ERR, "Unable to obtain user");
+        pam_syslog(pamh, LOG_ERR, "Impossibile ottenere l'utente");
         return retval;
     }
 
-    // Instantiate the FacialAuth class (Ensure this class is defined in "FacialAuth.h")
+    // Crea un'istanza della classe FacialAuth per autenticazione
     FacialAuth facialAuth;
 
-    // Authenticate the user using facial recognition
+    // Esegui l'autenticazione facciale
     if (!facialAuth.Authenticate(user)) {
-        pam_syslog(pamh, LOG_ERR, "Autenticazione facciale fallita");
+        pam_syslog(pamh, LOG_ERR, "Autenticazione facciale fallita per l'utente: %s", user);
         return PAM_AUTH_ERR;
     }
 
-    pam_syslog(pamh, LOG_INFO, "Autenticazione facciale riuscita");
+    pam_syslog(pamh, LOG_INFO, "Autenticazione facciale riuscita per l'utente: %s", user);
     return PAM_SUCCESS;
 }
+
