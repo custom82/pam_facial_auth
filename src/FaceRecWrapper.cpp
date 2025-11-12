@@ -1,39 +1,42 @@
 #include "FaceRecWrapper.h"
-#include <iostream>
+#include <filesystem>
 
-FaceRecWrapper::FaceRecWrapper(const std::string &modelPath, const std::string &name)
-: modelPath(modelPath), name(name) {
-	// Inizializzazione del riconoscitore
-	if (modelPath.empty()) {
-		std::cerr << "Model path is empty!" << std::endl;
-		return;
-	}
+namespace fs = std::filesystem;
 
-	// Carica il modello in base al tipo configurato
-	if (name == "lbph") {
-		fr = cv::face::LBPHFaceRecognizer::create();
-	} else if (name == "eigenfaces") {
+FaceRecWrapper::FaceRecWrapper(const std::string &modelPath_, const std::string &name_, const std::string &model_type)
+: modelPath(modelPath_), name(name_), type(model_type)
+{
+	// Crea recognizer
+	if (type == "eigen") {
 		fr = cv::face::EigenFaceRecognizer::create();
-	} else if (name == "fisherfaces") {
+	} else if (type == "fisher") {
 		fr = cv::face::FisherFaceRecognizer::create();
-	}
-
-	// Carica il modello dal percorso
-	if (!modelPath.empty() && fs::exists(modelPath)) {
-		fr->read(modelPath);  // Carica il modello
 	} else {
-		std::cerr << "Model file not found: " << modelPath << std::endl;
+		fr = cv::face::LBPHFaceRecognizer::create(); // default
 	}
 }
 
 void FaceRecWrapper::Load(const std::string &path) {
 	if (fs::exists(path)) {
-		fr->read(path);  // Carica il modello
+		fr->read(path);
 	}
 }
 
 int FaceRecWrapper::Predict(const cv::Mat &image, int &prediction, double &confidence) {
-	// Predizione usando il riconoscitore facciale
-	fr->predict(image, prediction, confidence);
-	return prediction;  // Return prediction for further use (not necessary, but useful if needed)
+	if (image.empty()) return -1;
+	cv::Mat gray;
+	if (image.channels() == 3) cv::cvtColor(image, gray, cv::COLOR_BGR2GRAY);
+	else gray = image;
+	// LBPH/Eigen/Fisher: predict(...) void -> out params
+	fr->predict(gray, prediction, confidence);
+	return 0;
 }
+
+bool FaceRecWrapper::SaveAll(const std::string &basePath, bool save_xml, bool save_yaml) {
+	try {
+		if (save_xml) fr->write(basePath + ".xml");
+		if (save_yaml) fr->write(basePath + ".yaml");
+		return true;
+	} catch (...) { return false; }
+}
+
