@@ -23,8 +23,9 @@ include_directories(
 # Aggiungi i file sorgente per la libreria shared (libfacialauth.so)
 set(SOURCES
     src/libfacialauth.cpp
-    src/FacialAuth.cpp
-    src/FaceRecWrapper.cpp
+    src/facial_training.cpp
+    src/facial_test.cpp
+    src/pam_facial_auth.cpp
 )
 
 # Creazione della libreria condivisa .so

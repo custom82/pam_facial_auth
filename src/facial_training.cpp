@@ -1,7 +1,7 @@
 #include <opencv2/opencv.hpp>
 #include <opencv2/face.hpp>  // Ensure the OpenCV face module is included
 
-#include "FaceRecWrapper.h"  // Include the FaceRecWrapper class header
+#include "../include/libfacialauth.h"  // Include the FaceRecWrapper class header
 
 int main(int argc, char **argv) {
 	// Check if the model path is provided
