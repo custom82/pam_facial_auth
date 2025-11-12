@@ -1,26 +1,23 @@
-#include <iostream>
 #include <opencv2/opencv.hpp>
-#include "FaceRecWrapper.h"
+#include <opencv2/face.hpp>  // Ensure the OpenCV face module is included
 
-int main(int argc, char** argv)
-{
-	// Ensure a model file and username are passed
-	if (argc < 3) {
-		std::cerr << "Usage: " << argv[0] << " <path_to_model> <username>" << std::endl;
+#include "FaceRecWrapper.h"  // Include the FaceRecWrapper class header
+
+int main(int argc, char **argv) {
+	// Check if the model path is provided
+	if (argc < 2) {
+		std::cerr << "Usage: " << argv[0] << " <model_path>" << std::endl;
 		return -1;
 	}
 
-	// Initialize FaceRecWrapper for training
-	FaceRecWrapper faceRec(argv[1], argv[2], "LBPH");  // Assuming model type is LBPH
+	// Create a FaceRecWrapper instance with 3 arguments (model path, name, and model type)
+	FaceRecWrapper faceRec("path/to/model.xml", "trainer", "LBPH");
 
-	// Collect training data
 	std::vector<cv::Mat> images;
 	std::vector<int> labels;
 
-	// Your face image collection code here
+	// Train the recognizer
+	faceRec.Train(images, labels);  // Ensure you provide image data for training
 
-	faceRec.Train(images, labels);  // Train with the collected images
-
-	std::cout << "Training completed successfully!" << std::endl;
 	return 0;
 }
