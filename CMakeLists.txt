@@ -10,8 +10,11 @@ set(CMAKE_CXX_STANDARD 20)
 find_package(OpenCV REQUIRED)
 include_directories(${OpenCV_INCLUDE_DIRS})
 
-# Trova PAM (assicurati di aver installato i pacchetti di sviluppo PAM)
-find_package(PAM REQUIRED)
+# Trova pkg-config (assicurati che sia installato)
+find_package(PkgConfig REQUIRED)
+
+# Trova PAM utilizzando pkg-config
+pkg_check_modules(PAM REQUIRED pam)
 
 # Aggiungi le directory per gli header
 include_directories(
@@ -23,6 +26,7 @@ include_directories(
 # Aggiungi i file sorgente per la libreria shared (libfacialauth.so)
 set(SOURCES
     src/libfacialauth.cpp
+    src/facial_capture.cpp
     src/facial_training.cpp
     src/facial_test.cpp
     src/pam_facial_auth.cpp
@@ -59,3 +63,9 @@ target_link_libraries(facial_capture facialauth ${OpenCV_LIBS})
 install(TARGETS pam_facial_auth
     LIBRARY DESTINATION /lib/security  # Modulo PAM
 )
+
+# Installazione degli eseguibili (facial_test, facial_training, facial_capture)
+install(TARGETS facial_test facial_training facial_capture
+    DESTINATION /usr/local/bin
+)
+

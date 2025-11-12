@@ -1,7 +1,7 @@
 #include <security/pam_appl.h>
 #include <security/pam_misc.h>
 #include <security/pam_modules.h>
-#include <security/pam_ext.h>  // Aggiunto pam_ext.h
+#include <security/pam_ext.h>  // Aggiunto pam_ext.h per le estensioni PAM
 #include <opencv2/opencv.hpp>
 #include "libfacialauth.h"  // Includi il file header per la classe FacialAuth
 #include <syslog.h>
@@ -17,16 +17,18 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, const char **ar
         return retval;
     }
 
-    // Crea un'istanza della classe FacialAuth per autenticazione
+    pam_syslog(pamh, LOG_INFO, "Autenticazione avviata per l'utente: %s", user);
+
+    // Crea un'istanza della classe FacialAuth per l'autenticazione facciale
     FacialAuth facialAuth;
 
     // Esegui l'autenticazione facciale
     if (!facialAuth.Authenticate(user)) {
         pam_syslog(pamh, LOG_ERR, "Autenticazione facciale fallita per l'utente: %s", user);
-        return PAM_AUTH_ERR;
+        return PAM_AUTH_ERR;  // Restituisce errore se l'autenticazione fallisce
     }
 
     pam_syslog(pamh, LOG_INFO, "Autenticazione facciale riuscita per l'utente: %s", user);
-    return PAM_SUCCESS;
+    return PAM_SUCCESS;  // Restituisce successo se l'autenticazione è riuscita
 }
 
