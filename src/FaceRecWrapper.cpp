@@ -1,4 +1,4 @@
-#include "FaceRecWrapper.h"
+#include "../include/FaceRecWrapper.h"
 
 FaceRecWrapper::FaceRecWrapper(const std::string& modelPath, const std::string& name, const std::string& model_type)
 : modelType(model_type) {
