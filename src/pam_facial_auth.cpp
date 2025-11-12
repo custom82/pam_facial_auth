@@ -1,6 +1,7 @@
-#include <pam_appl.h>
+#include <security/pam_appl.h>
 #include <iostream>
 #include "FaceRecWrapper.h"
+
 
 extern "C" {
 
