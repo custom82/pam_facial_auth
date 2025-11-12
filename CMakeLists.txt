@@ -1,25 +1,26 @@
-# Progetto
+# Set the minimum required version of CMake
 cmake_minimum_required(VERSION 3.10)
-project(pam_facial_auth VERSION 1.0 LANGUAGES CXX)
 
-# Imposta C++20
+# Set the project name and version
+project(PAM_Facial_Auth VERSION 1.0)
+
+# Set C++ standard to C++20
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
-# Aggiungi la directory principale come directory di inclusione
-include_directories(${CMAKE_SOURCE_DIR}/include)
-include_directories(/usr/include/opencv4)  # Aggiungi il percorso per OpenCV
+# Include directories (update with your paths)
+include_directories(${PROJECT_SOURCE_DIR}/include)
+include_directories(/usr/include/opencv4)  # Assuming OpenCV is installed at this path
+include_directories(/usr/include/security)  # Include PAM headers
 
-# Impostazioni per PAM
-find_package(PAM REQUIRED)  # Aggiungi il pacchetto PAM
-include_directories(${PAM_INCLUDE_DIRS})  # Aggiungi le directory di inclusione PAM
-
-# Aggiungi la libreria OpenCV
+# Find OpenCV package
 find_package(OpenCV REQUIRED)
-include_directories(${OpenCV_INCLUDE_DIRS})
 
-# Aggiungi i file sorgenti
-set(SOURCES
+# Find the PAM library
+find_package(PAM REQUIRED)
+
+# Add source files for the library and executables
+set(SOURCE_FILES
     src/pam_facial_auth.cpp
     src/facial_capture.cpp
     src/facial_training.cpp
@@ -29,24 +30,28 @@ set(SOURCES
     src/Utils.cpp
 )
 
-# Aggiungi l'eseguibile (se necessario) o la libreria del modulo PAM
-add_library(pam_facial_auth MODULE ${SOURCES})
+# Build the PAM module shared library (libpam_facial_auth.so)
+add_library(pam_facial_auth SHARED ${SOURCE_FILES})
 
-# Collegamento delle librerie necessarie (OpenCV, PAM, etc.)
-target_link_libraries(pam_facial_auth ${PAM_LIBRARIES} ${OpenCV_LIBS})
+# Link with OpenCV and PAM
+target_link_libraries(pam_facial_auth ${OpenCV_LIBS} ${PAM_LIBRARIES})
 
-# Impostazioni di compilazione
-set_target_properties(pam_facial_auth PROPERTIES
-    PREFIX "pam_"  # Nome del modulo PAM
-    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
-)
+# Add the facial_test executable
+add_executable(facial_test src/facial_test.cpp)
+target_link_libraries(facial_test pam_facial_auth ${OpenCV_LIBS} ${PAM_LIBRARIES})
 
-# Definisci la configurazione per l'installazione (opzionale)
+# Add the facial_training executable
+add_executable(facial_training src/facial_training.cpp)
+target_link_libraries(facial_training pam_facial_auth ${OpenCV_LIBS} ${PAM_LIBRARIES})
+
+# Set PAM-specific flags for the module
+set_target_properties(pam_facial_auth PROPERTIES PREFIX "lib" SUFFIX ".so")
+
+# Optionally, set the installation directories for your module and executables
 install(TARGETS pam_facial_auth
-    LIBRARY DESTINATION /lib/security  # Directory di destinazione per i moduli PAM
+    LIBRARY DESTINATION /lib/security  # This is where PAM expects the module to go
 )
 
-# Opzioni di debug (opzionale)
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    target_compile_options(pam_facial_auth PRIVATE -g -Wall)
-endif()
+install(TARGETS facial_test facial_training
+    RUNTIME DESTINATION /usr/local/bin
+)
