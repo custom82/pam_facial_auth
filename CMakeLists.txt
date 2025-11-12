@@ -1,88 +1,151 @@
+# Imposta la versione minima di CMake
 cmake_minimum_required(VERSION 3.10)
-project(pam_facial_auth CXX)
 
+# Definisci il nome del progetto
+project(pam_facial_auth)
+
+# Abilita C++20
 set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(OpenCV REQUIRED core imgproc objdetect videoio highgui dnn face)
+# Aggiungi le directory per l'inclusione dei file header
+include_directories(
+    ${CMAKE_SOURCE_DIR}/include
+    /usr/include/opencv4
+)
 
-# PAM (path classico su Gentoo)
-find_library(PAM_LIB pam REQUIRED)
-include_directories(${OpenCV_INCLUDE_DIRS} ${CMAKE_CURRENT_SOURCE_DIR}/include)
-
-# =========================
-# Libreria condivisa comune
-# =========================
-add_library(facialauth SHARED
-    src/Utils.cpp
+# Aggiungi i file sorgenti
+set(SOURCES
+    src/pam_facial_auth.cpp
     src/FacialAuth.cpp
     src/FaceRecWrapper.cpp
+    src/Utils.cpp
+    src/facial_capture.cpp
+    src/facial_test.cpp
+    src/facial_training.cpp
 )
 
+# Crea una libreria condivisa per il codice comune
+add_library(facialauth SHARED ${SOURCES})
+
+# Aggiungi la libreria PAM come dipendenza di link
 target_link_libraries(facialauth
     PRIVATE
-    ${OpenCV_LIBS}
+    /usr/lib64/libopencv_highgui.so
+    /usr/lib64/libopencv_face.so
+    /usr/lib64/libopencv_videoio.so
+    /usr/lib64/libopencv_imgcodecs.so
+    /usr/lib64/libopencv_objdetect.so
+    /usr/lib64/libopencv_dnn.so
+    /usr/lib64/libopencv_calib3d.so
+    /usr/lib64/libopencv_features2d.so
+    /usr/lib64/libopencv_flann.so
+    /usr/lib64/libopencv_photo.so
+    /usr/lib64/libopencv_imgproc.so
+    /usr/lib64/libopencv_core.so
+    /usr/lib64/libpam.so  # Aggiungi la libreria PAM per il modulo PAM
 )
 
-target_include_directories(facialauth PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+# Crea il modulo PAM come libreria condivisa
+add_library(pam_facial_auth MODULE src/pam_facial_auth.cpp)
 
-set_target_properties(facialauth PROPERTIES
-    OUTPUT_NAME facialauth
-    SOVERSION 1
-    VERSION 1.0.0
-)
-
-# =========================
-# Modulo PAM
-# =========================
-add_library(pam_facial_auth MODULE
-    src/pam_facial_auth.cpp
-)
-
+# Assicurati che il modulo PAM venga linkato correttamente con le librerie necessarie
 target_link_libraries(pam_facial_auth
     PRIVATE
-    facialauth
-    ${OpenCV_LIBS}
-    ${PAM_LIB}
+    facialauth  # Collega la libreria faccialauth per utilizzare le funzioni comuni
+    /usr/lib64/libpam.so  # Collega la libreria PAM per il modulo PAM
 )
 
-set_target_properties(pam_facial_auth PROPERTIES
-    PREFIX ""
-    SUFFIX ".so"
+# Imposta il percorso di output della libreria
+set_target_properties(facialauth PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
 )
 
-# =========================
-# Tool: facial_training
-# =========================
-add_executable(facial_training
-    src/facial_training.cpp
+# Definisci il percorso di output del modulo PAM
+set_target_properties(pam_facial_auth PROPERTIES
+    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
 )
-target_link_libraries(facial_training PRIVATE facialauth ${OpenCV_LIBS})
-set_target_properties(facial_training PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
-# =========================
-# Tool: facial_test
-# =========================
-add_executable(facial_test
-    src/facial_test.cpp
+# Aggiungi un eseguibile per il test
+add_executable(facial_test src/facial_test.cpp)
+
+# Linka l'eseguibile al modulo e alle librerie necessarie
+target_link_libraries(facial_test
+    PRIVATE
+    facialauth
+    /usr/lib64/libopencv_highgui.so
+    /usr/lib64/libopencv_face.so
+    /usr/lib64/libopencv_videoio.so
+    /usr/lib64/libopencv_imgcodecs.so
+    /usr/lib64/libopencv_objdetect.so
+    /usr/lib64/libopencv_dnn.so
+    /usr/lib64/libopencv_calib3d.so
+    /usr/lib64/libopencv_features2d.so
+    /usr/lib64/libopencv_flann.so
+    /usr/lib64/libopencv_photo.so
+    /usr/lib64/libopencv_imgproc.so
+    /usr/lib64/libopencv_core.so
 )
-target_link_libraries(facial_test PRIVATE facialauth ${OpenCV_LIBS})
-set_target_properties(facial_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
-# =========================
-# Tool: facial_capture
-# =========================
-add_executable(facial_capture
-    src/facial_capture.cpp
+# Aggiungi un target per il training
+add_executable(facial_training src/facial_training.cpp)
+
+# Linka l'eseguibile di training
+target_link_libraries(facial_training
+    PRIVATE
+    facialauth
+    /usr/lib64/libopencv_highgui.so
+    /usr/lib64/libopencv_face.so
+    /usr/lib64/libopencv_videoio.so
+    /usr/lib64/libopencv_imgcodecs.so
+    /usr/lib64/libopencv_objdetect.so
+    /usr/lib64/libopencv_dnn.so
+    /usr/lib64/libopencv_calib3d.so
+    /usr/lib64/libopencv_features2d.so
+    /usr/lib64/libopencv_flann.so
+    /usr/lib64/libopencv_photo.so
+    /usr/lib64/libopencv_imgproc.so
+    /usr/lib64/libopencv_core.so
 )
-target_link_libraries(facial_capture PRIVATE facialauth ${OpenCV_LIBS})
-set_target_properties(facial_capture PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
-# =========================
-# Install (opzionale)
-# =========================
-install(TARGETS facialauth DESTINATION lib)
-install(TARGETS pam_facial_auth DESTINATION lib64/security)
-install(TARGETS facial_training facial_test facial_capture RUNTIME DESTINATION bin)
-install(DIRECTORY include/ DESTINATION include)
+# Aggiungi un target per il facial capture
+add_executable(facial_capture src/facial_capture.cpp)
+
+# Linka l'eseguibile di capture
+target_link_libraries(facial_capture
+    PRIVATE
+    facialauth
+    /usr/lib64/libopencv_highgui.so
+    /usr/lib64/libopencv_face.so
+    /usr/lib64/libopencv_videoio.so
+    /usr/lib64/libopencv_imgcodecs.so
+    /usr/lib64/libopencv_objdetect.so
+    /usr/lib64/libopencv_dnn.so
+    /usr/lib64/libopencv_calib3d.so
+    /usr/lib64/libopencv_features2d.so
+    /usr/lib64/libopencv_flann.so
+    /usr/lib64/libopencv_photo.so
+    /usr/lib64/libopencv_imgproc.so
+    /usr/lib64/libopencv_core.so
+)
+
+# Installazione dei file
+install(TARGETS facialauth pam_facial_auth facial_test facial_training facial_capture
+    LIBRARY DESTINATION /usr/lib
+    RUNTIME DESTINATION /usr/bin
+)
+
+# Installazione delle man pages
+install(FILES man/pam_facial_auth.1 DESTINATION /usr/share/man/man8)
+
+# Installazione del file di configurazione
+install(FILES ${CMAKE_SOURCE_DIR}/etc/pam_facial_auth/pam_facial.conf DESTINATION /etc/pam_facial_auth)
+
+# Installazione della libreria .so
+install(TARGETS facialauth
+    LIBRARY DESTINATION /usr/lib
+)
+
+# Installazione del modulo PAM
+install(TARGETS pam_facial_auth
+    LIBRARY DESTINATION /lib/security
+)
