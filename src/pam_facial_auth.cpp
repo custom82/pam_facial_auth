@@ -1,6 +1,7 @@
 #include <security/pam_appl.h>
 #include <security/pam_misc.h>
 #include <security/pam_modules.h>
+#include <security/pam_ext.h>
 #include <opencv2/opencv.hpp>
 #include "FacialAuth.h"  // Include the FacialAuth header for authentication class
 #include <syslog.h>
