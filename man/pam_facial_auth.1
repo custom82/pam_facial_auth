@@ -1,9 +1,14 @@
-.TH PAM_FACIAL_AUTH 8 "November 2025" "1.0" "PAM Module for Facial Authentication"
+.TH PAM_FACIAL_AUTH 8 "November 2025" "pam_facial_auth" "PAM Modules"
 .SH NAME
-pam_facial_auth \- Modulo PAM per il riconoscimento facciale
+pam_facial_auth - Facial recognition authentication module for PAM
 .SH SYNOPSIS
-.B auth required pam_facial_auth.so [options]
+.PP
+pam_facial_auth.so
 .SH DESCRIPTION
-Il modulo PAM `pam_facial_auth` fornisce il riconoscimento facciale come metodo di autenticazione. Utilizza un modello addestrato per verificare l'identità dell'utente basandosi sulle caratteristiche del volto. Il modulo può essere configurato per funzionare in modalità grafica o senza GUI.
+The pam_facial_auth module is used for authenticating users using facial recognition.
+It can be configured by editing the /etc/pam_facial_auth/pam_facial.conf file.
+.SH CONFIGURATION
+The configuration file defines the webcam device, image resolution, recognition threshold, etc.
+.SH SEE ALSO
+pam.conf(5), pam.d(5)
 
-Per impostazione predefinita, il modulo cercherà il modello facciale dell'utente nella directory:

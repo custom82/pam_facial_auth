@@ -1,30 +1,41 @@
+#include <opencv2/opencv.hpp>
+#include <opencv2/face.hpp>
+#include "FaceRecWrapper.h"
 #include "Utils.h"
 #include <iostream>
 
-int main(int argc, char **argv) {
-    FacialAuthConfig cfg;
-    // piccola lettura config e override cli
-    read_kv_config("/etc/pam_facial_auth/pam_facial.conf", cfg, nullptr);
-    for (int i=1;i<argc;i++){
-        std::string a(argv[i]);
-        if (a.rfind("device=",0)==0) cfg.device = a.substr(7);
-        else if (a.rfind("width=",0)==0) cfg.width = std::stoi(a.substr(6));
-        else if (a.rfind("height=",0)==0) cfg.height = std::stoi(a.substr(7));
-        else if (a=="debug") cfg.debug = true;
-        else if (a=="nogui") cfg.nogui = true;
+int main(int argc, char** argv) {
+    cv::VideoCapture cap(0);  // apri la webcam
+
+    if (!cap.isOpened()) {
+        std::cerr << "Errore nell'aprire la webcam!" << std::endl;
+        return -1;
     }
 
-    std::string used;
-    cv::VideoCapture cap;
-    if (!open_camera(cfg, cap, used)) {
-        std::cerr << "Cannot open camera\n";
-        return 1;
-    }
-    std::cout << "Camera: " << used << " " << cfg.width << "x" << cfg.height << "\n";
+    int width = 1280;
+    int height = 720;
+    cap.set(cv::CAP_PROP_FRAME_WIDTH, width);
+    cap.set(cv::CAP_PROP_FRAME_HEIGHT, height);
+
+    FaceRecWrapper faceRec("path/to/model.xml", "root");
+
+    cv::Mat frame;
     while (true) {
-        cv::Mat f; cap >> f; if (f.empty()) continue;
-        cv::imshow("capture", f);
-        if (cv::waitKey(1)==27) break;
+        cap >> frame;  // acquisisci frame
+        if (frame.empty()) {
+            break;
+        }
+
+        int prediction = -1;
+        double confidence = 0;
+        faceRec.Predict(frame, prediction, confidence);
+
+        cv::imshow("Facial Capture", frame);
+        if (cv::waitKey(1) == 27) break; // premere ESC per uscire
     }
+
+    cap.release();
+    cv::destroyAllWindows();
+
     return 0;
 }

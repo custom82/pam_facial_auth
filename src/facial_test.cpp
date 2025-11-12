@@ -1,20 +1,21 @@
-#include "FacialAuth.h"
+#include <opencv2/opencv.hpp>
+#include <opencv2/face.hpp>
+#include "FaceRecWrapper.h"
 #include <iostream>
 
-int main(int argc, char **argv) {
-	FacialAuthConfig cfg;
-	FacialAuth::load_config(cfg, (const char**)argv+1, argc-1, nullptr);
-	if (argc < 2) {
-		std::cerr << "Usage: facial_test <user> [key=val ...]\n";
-		return 2;
+int main(int argc, char** argv) {
+	cv::Mat testImage = cv::imread("path/to/test/image.jpg");
+	if (testImage.empty()) {
+		std::cerr << "Immagine di test non trovata!" << std::endl;
+		return -1;
 	}
-	std::string user = argv[1];
-	double conf=0.0;
-	bool ok = FacialAuth::recognize_loop(cfg, user, false, nullptr, conf);
-	if (ok) {
-		std::cout << "OK conf=" << conf << "\n";
-		return 0;
-	}
-	std::cout << "FAIL\n";
-	return 1;
+
+	FaceRecWrapper faceRec("path/to/model.xml", "test");
+
+	int prediction = -1;
+	double confidence = 0;
+	faceRec.Predict(testImage, prediction, confidence);
+
+	std::cout << "Predizione: " << prediction << ", Confidenza: " << confidence << std::endl;
+	return 0;
 }

@@ -1,30 +1,27 @@
-# Aggiungi la versione minima di CMake
 cmake_minimum_required(VERSION 3.10)
 
-# Imposta il nome del progetto
 project(pam_facial_auth)
 
-# Imposta C++20
 set(CMAKE_CXX_STANDARD 20)
 
-# Aggiungi le directory di inclusione
+# Directory di inclusione
 include_directories(${CMAKE_SOURCE_DIR}/include)
 include_directories(/usr/include/opencv4)
 
-# Definisci i file sorgenti della libreria
+# Aggiungi la libreria senza gli eseguibili (senza main)
 set(LIBRARY_SOURCES
     src/pam_facial_auth.cpp
     src/FacialAuth.cpp
     src/FaceRecWrapper.cpp
     src/Utils.cpp
-    src/facial_capture.cpp
-    src/facial_training.cpp
+    src/facial_capture.cpp  # Non include main()
+    src/facial_training.cpp  # Non include main()
 )
 
-# Crea una libreria condivisa
+# Creazione della libreria condivisa
 add_library(facialauth SHARED ${LIBRARY_SOURCES})
 
-# Collega le librerie necessarie
+# Collegamento delle librerie necessarie
 target_link_libraries(facialauth
     PRIVATE
     /usr/lib64/libopencv_highgui.so
@@ -46,13 +43,13 @@ target_link_libraries(facialauth
 add_executable(facial_test src/facial_test.cpp)
 target_link_libraries(facial_test PRIVATE facialauth)
 
-add_executable(facial_training src/facial_training.cpp)
+add_executable(facial_training src/facial_training.cpp)  # Con main()
 target_link_libraries(facial_training PRIVATE facialauth)
 
-add_executable(facial_capture src/facial_capture.cpp)
+add_executable(facial_capture src/facial_capture.cpp)  # Con main()
 target_link_libraries(facial_capture PRIVATE facialauth)
 
-# Aggiungi la libreria PAM, se è necessaria
+# Aggiungi il modulo PAM
 add_library(pam_facial_auth MODULE src/pam_facial_auth.cpp)
 target_link_libraries(pam_facial_auth PRIVATE facialauth)
 
@@ -70,11 +67,11 @@ install(FILES ${CMAKE_SOURCE_DIR}/etc/pam_facial_auth/pam_facial.conf DESTINATIO
 
 # Installazione della libreria .so
 install(TARGETS facialauth
-    LIBRARY DESTINATION /usr/lib
+    LIBRARY DESTINATION /usr/lib64
     RENAME libfacialauth.so
 )
 
 # Installazione del modulo PAM
 install(TARGETS pam_facial_auth
-    LIBRARY DESTINATION /lib/security
+    LIBRARY DESTINATION /usr/lib64/security
 )
