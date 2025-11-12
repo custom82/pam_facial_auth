@@ -1,13 +1,17 @@
-# Abilita C++20
+# Aggiungi la versione minima di CMake
+cmake_minimum_required(VERSION 3.10)
+
+# Imposta il nome del progetto
+project(pam_facial_auth)
+
+# Imposta C++20
 set(CMAKE_CXX_STANDARD 20)
 
-# Aggiungi le directory per l'inclusione dei file header
-include_directories(
-    ${CMAKE_SOURCE_DIR}/include
-    /usr/include/opencv4
-)
+# Aggiungi le directory di inclusione
+include_directories(${CMAKE_SOURCE_DIR}/include)
+include_directories(/usr/include/opencv4)
 
-# Aggiungi i file sorgenti per la libreria
+# Definisci i file sorgenti della libreria
 set(LIBRARY_SOURCES
     src/pam_facial_auth.cpp
     src/FacialAuth.cpp
@@ -17,10 +21,10 @@ set(LIBRARY_SOURCES
     src/facial_training.cpp
 )
 
-# Crea una libreria condivisa chiamata libfacialauth.so per il codice comune (senza main())
+# Crea una libreria condivisa
 add_library(facialauth SHARED ${LIBRARY_SOURCES})
 
-# Linka la libreria PAM per il modulo PAM
+# Collega le librerie necessarie
 target_link_libraries(facialauth
     PRIVATE
     /usr/lib64/libopencv_highgui.so
@@ -38,7 +42,7 @@ target_link_libraries(facialauth
     /usr/lib64/libpam.so
 )
 
-# Aggiungi eseguibili separati per facial_test, facial_training, e facial_capture (con funzione main)
+# Aggiungi gli eseguibili
 add_executable(facial_test src/facial_test.cpp)
 target_link_libraries(facial_test PRIVATE facialauth)
 
@@ -48,10 +52,14 @@ target_link_libraries(facial_training PRIVATE facialauth)
 add_executable(facial_capture src/facial_capture.cpp)
 target_link_libraries(facial_capture PRIVATE facialauth)
 
-# Installazione dei file
-install(TARGETS facialauth pam_facial_auth facial_test facial_training facial_capture
-    LIBRARY DESTINATION /usr/lib
+# Aggiungi la libreria PAM, se è necessaria
+add_library(pam_facial_auth MODULE src/pam_facial_auth.cpp)
+target_link_libraries(pam_facial_auth PRIVATE facialauth)
+
+# Installazione dei binari
+install(TARGETS facialauth facial_test facial_training facial_capture
     RUNTIME DESTINATION /usr/bin
+    LIBRARY DESTINATION /usr/lib
 )
 
 # Installazione delle man pages
@@ -60,7 +68,7 @@ install(FILES man/pam_facial_auth.1 DESTINATION /usr/share/man/man8)
 # Installazione del file di configurazione
 install(FILES ${CMAKE_SOURCE_DIR}/etc/pam_facial_auth/pam_facial.conf DESTINATION /etc/pam_facial_auth)
 
-# Installazione della libreria .so con il nome corretto
+# Installazione della libreria .so
 install(TARGETS facialauth
     LIBRARY DESTINATION /usr/lib
     RENAME libfacialauth.so
