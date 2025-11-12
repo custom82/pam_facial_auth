@@ -1,15 +1,20 @@
-#include <security/pam_modules.h>
-#include <security/pam_ext.h>
-#include "FacialAuth.h"
-#include <opencv2/opencv.hpp>
+#include <pam_appl.h>
+#include <iostream>
+#include "FaceRecWrapper.h"
 
 extern "C" {
 
-    PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, const char **argv) {
-        const char* user;
-        pam_get_user(pamh, &user, NULL);
+    int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, const char **argv)
+    {
+        const char *user;
+        int retval = pam_get_user(pamh, &user, NULL);
+        if (retval != PAM_SUCCESS) {
+            pam_syslog(pamh, LOG_ERR, "Unable to obtain user");
+            return retval;
+        }
 
         FacialAuth facialAuth;
+        FaceRecWrapper faceRec("path/to/model.xml", user, "LBPH");
 
         if (!facialAuth.Authenticate(user)) {
             pam_syslog(pamh, LOG_ERR, "Autenticazione facciale fallita");
@@ -17,10 +22,6 @@ extern "C" {
         }
 
         pam_syslog(pamh, LOG_INFO, "Autenticazione facciale riuscita");
-        return PAM_SUCCESS;
-    }
-
-    PAM_EXTERN int pam_sm_setcred(pam_handle_t *pamh, int flags, int argc, const char **argv) {
         return PAM_SUCCESS;
     }
 

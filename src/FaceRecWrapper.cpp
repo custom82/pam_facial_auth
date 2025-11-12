@@ -1,42 +1,45 @@
 #include "FaceRecWrapper.h"
-#include <filesystem>
+#include <opencv2/opencv.hpp>
+#include <opencv2/face.hpp>
 
-namespace fs = std::filesystem;
-
-FaceRecWrapper::FaceRecWrapper(const std::string &modelPath_, const std::string &name_, const std::string &model_type)
-: modelPath(modelPath_), name(name_), type(model_type)
+FaceRecWrapper::FaceRecWrapper(const std::string& modelPath, const std::string& name, const std::string& model_type)
+: modelPath(modelPath), model_type(model_type)
 {
-	// Crea recognizer
-	if (type == "eigen") {
-		fr = cv::face::EigenFaceRecognizer::create();
-	} else if (type == "fisher") {
-		fr = cv::face::FisherFaceRecognizer::create();
-	} else {
-		fr = cv::face::LBPHFaceRecognizer::create(); // default
+	if (model_type == "LBPH") {
+		recognizer = cv::face::LBPHFaceRecognizer::create();
 	}
+	// Add other models as needed
 }
 
-void FaceRecWrapper::Load(const std::string &path) {
-	if (fs::exists(path)) {
-		fr->read(path);
-	}
-}
-
-int FaceRecWrapper::Predict(const cv::Mat &image, int &prediction, double &confidence) {
-	if (image.empty()) return -1;
+void FaceRecWrapper::Recognize(cv::Mat& frame)
+{
+	// Add face recognition logic
 	cv::Mat gray;
-	if (image.channels() == 3) cv::cvtColor(image, gray, cv::COLOR_BGR2GRAY);
-	else gray = image;
-	// LBPH/Eigen/Fisher: predict(...) void -> out params
-	fr->predict(gray, prediction, confidence);
-	return 0;
+	cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
+
+	// Detect face using OpenCV's face detection methods
+	// Placeholder logic for face detection
+	std::vector<cv::Rect> faces;
+	cv::CascadeClassifier faceCascade;
+	faceCascade.load("haarcascade_frontalface_default.xml");
+
+	faceCascade.detectMultiScale(gray, faces);
+
+	for (size_t i = 0; i < faces.size(); i++) {
+		cv::Mat face = gray(faces[i]);
+		int label = -1;
+		double confidence = 0.0;
+		recognizer->predict(face, label, confidence);
+
+		// Display label and confidence
+		cv::rectangle(frame, faces[i], cv::Scalar(255, 0, 0), 2);
+		std::string labelText = "ID: " + std::to_string(label);
+		cv::putText(frame, labelText, cv::Point(faces[i].x, faces[i].y - 10), cv::FONT_HERSHEY_SIMPLEX, 0.9, cv::Scalar(255, 255, 0), 2);
+	}
 }
 
-bool FaceRecWrapper::SaveAll(const std::string &basePath, bool save_xml, bool save_yaml) {
-	try {
-		if (save_xml) fr->write(basePath + ".xml");
-		if (save_yaml) fr->write(basePath + ".yaml");
-		return true;
-	} catch (...) { return false; }
+void FaceRecWrapper::Train(const std::vector<cv::Mat>& images, const std::vector<int>& labels)
+{
+	recognizer->train(images, labels);
+	recognizer->save(modelPath);  // Save model to file
 }
-

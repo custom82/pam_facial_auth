@@ -2,24 +2,24 @@
 #define FACERECWRAPPER_H
 
 #include <opencv2/opencv.hpp>
-#include <opencv2/face.hpp>
 #include <string>
 
-class FaceRecWrapper {
+class FaceRecWrapper
+{
 public:
-    // model_type: "lbph" | "eigen" | "fisher"
-    FaceRecWrapper(const std::string &modelPath, const std::string &name, const std::string &model_type);
-    void Load(const std::string &path); // carica file modello (xml/yaml)
-    // ritorna 0=OK, !=0 errore; prediction e confidence valorizzati
-    int Predict(const cv::Mat &image, int &prediction, double &confidence);
-    // Salva nei formati richiesti (xml/yaml)
-    bool SaveAll(const std::string &basePath, bool save_xml, bool save_yaml);
+    // Updated constructor with 3 parameters
+    FaceRecWrapper(const std::string& modelPath, const std::string& name, const std::string& model_type);
+
+    // Method to recognize faces
+    void Recognize(cv::Mat& frame);
+
+    // Method to train the model
+    void Train(const std::vector<cv::Mat>& images, const std::vector<int>& labels);
 
 private:
-    cv::Ptr<cv::face::FaceRecognizer> fr;
+    cv::Ptr<cv::face::LBPHFaceRecognizer> recognizer;
     std::string modelPath;
-    std::string name;
-    std::string type; // lbph/eigen/fisher
+    std::string model_type;
 };
 
 #endif

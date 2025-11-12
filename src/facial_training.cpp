@@ -1,22 +1,26 @@
-#include <opencv2/opencv.hpp>
-#include <opencv2/face.hpp>
-#include "FaceRecWrapper.h"
 #include <iostream>
-#include <vector>
+#include <opencv2/opencv.hpp>
+#include "FaceRecWrapper.h"
 
-int main(int argc, char** argv) {
+int main(int argc, char** argv)
+{
+	// Ensure a model file and username are passed
+	if (argc < 3) {
+		std::cerr << "Usage: " << argv[0] << " <path_to_model> <username>" << std::endl;
+		return -1;
+	}
+
+	// Initialize FaceRecWrapper for training
+	FaceRecWrapper faceRec(argv[1], argv[2], "LBPH");  // Assuming model type is LBPH
+
+	// Collect training data
 	std::vector<cv::Mat> images;
 	std::vector<int> labels;
 
-	// Percorso per caricare le immagini e le etichette di addestramento
-	// Dovresti implementare la logica per caricare immagini e etichette da un dataset
-	// per esempio usando un ciclo che carica le immagini da una cartella
+	// Your face image collection code here
 
-	FaceRecWrapper faceRec("path/to/model.xml", "trainer");
+	faceRec.Train(images, labels);  // Train with the collected images
 
-	// Usa l'addestramento del riconoscimento facciale
-	faceRec.Train(images, labels);
-
-	std::cout << "Addestramento completato!" << std::endl;
+	std::cout << "Training completed successfully!" << std::endl;
 	return 0;
 }

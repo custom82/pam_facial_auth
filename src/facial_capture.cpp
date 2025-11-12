@@ -1,41 +1,34 @@
-#include <opencv2/opencv.hpp>
-#include <opencv2/face.hpp>
-#include "FaceRecWrapper.h"
-#include "Utils.h"
 #include <iostream>
+#include <opencv2/opencv.hpp>
+#include "FaceRecWrapper.h"
 
-int main(int argc, char** argv) {
-    cv::VideoCapture cap(0);  // apri la webcam
-
-    if (!cap.isOpened()) {
-        std::cerr << "Errore nell'aprire la webcam!" << std::endl;
+int main(int argc, char** argv)
+{
+    // Ensure a model file and name are passed
+    if (argc < 3) {
+        std::cerr << "Usage: " << argv[0] << " <path_to_model> <username>" << std::endl;
         return -1;
     }
 
-    int width = 1280;
-    int height = 720;
-    cap.set(cv::CAP_PROP_FRAME_WIDTH, width);
-    cap.set(cv::CAP_PROP_FRAME_HEIGHT, height);
+    // Initialize FaceRecWrapper
+    FaceRecWrapper faceRec(argv[1], argv[2], "LBPH");  // Assuming model type is LBPH
 
-    FaceRecWrapper faceRec("path/to/model.xml", "root");
-
-    cv::Mat frame;
-    while (true) {
-        cap >> frame;  // acquisisci frame
-        if (frame.empty()) {
-            break;
-        }
-
-        int prediction = -1;
-        double confidence = 0;
-        faceRec.Predict(frame, prediction, confidence);
-
-        cv::imshow("Facial Capture", frame);
-        if (cv::waitKey(1) == 27) break; // premere ESC per uscire
+    // Start capturing face
+    cv::VideoCapture capture(0);
+    if (!capture.isOpened()) {
+        std::cerr << "Error: Could not open webcam." << std::endl;
+        return -1;
     }
 
-    cap.release();
-    cv::destroyAllWindows();
+    cv::Mat frame;
+    while (capture.read(frame)) {
+        // Process the frame for face recognition here
+        faceRec.Recognize(frame);
+        cv::imshow("Facial Authentication", frame);
+
+        if (cv::waitKey(1) == 27)  // Press ESC to quit
+            break;
+    }
 
     return 0;
 }
