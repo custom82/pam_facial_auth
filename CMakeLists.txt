@@ -10,26 +10,20 @@ set(CMAKE_CXX_STANDARD 20)
 find_package(OpenCV REQUIRED)
 include_directories(${OpenCV_INCLUDE_DIRS})
 
-# Trova pkg-config (assicurati che sia installato)
+# Usa pkg-config per trovare PAM
 find_package(PkgConfig REQUIRED)
-
-# Trova PAM utilizzando pkg-config
 pkg_check_modules(PAM REQUIRED pam)
 
 # Aggiungi le directory per gli header
 include_directories(
     ${PROJECT_SOURCE_DIR}/include
     ${OpenCV_INCLUDE_DIRS}
-    ${PAM_INCLUDE_DIRS}
+    ${PAM_INCLUDE_DIRS}  # Include i path di PAM da pkg-config
 )
 
 # Aggiungi i file sorgente per la libreria shared (libfacialauth.so)
 set(SOURCES
     src/libfacialauth.cpp
-    src/facial_capture.cpp
-    src/facial_training.cpp
-    src/facial_test.cpp
-    src/pam_facial_auth.cpp
 )
 
 # Creazione della libreria condivisa .so
@@ -38,34 +32,33 @@ add_library(facialauth SHARED ${SOURCES})
 # Link alla libreria OpenCV e PAM
 target_link_libraries(facialauth
     ${OpenCV_LIBS}
-    ${PAM_LIBRARIES}
+    ${PAM_LIBRARIES}  # Link con le librerie PAM
+)
+
+# Aggiungi eseguibili separati per facial_capture, facial_training e facial_test
+add_executable(facial_capture src/facial_capture.cpp)
+target_link_libraries(facial_capture
+    facialauth  # Link alla libreria shared facialauth (già include OpenCV)
+)
+
+add_executable(facial_training src/facial_training.cpp)
+target_link_libraries(facial_training
+    facialauth  # Link alla libreria shared facialauth (già include OpenCV)
+)
+
+add_executable(facial_test src/facial_test.cpp)
+target_link_libraries(facial_test
+    facialauth  # Link alla libreria shared facialauth (già include OpenCV)
 )
 
 # Modulo PAM (pam_facial_auth.so)
 add_library(pam_facial_auth MODULE src/pam_facial_auth.cpp)
 target_link_libraries(pam_facial_auth
-    facialauth  # Link al modulo PAM
-    ${OpenCV_LIBS}
-    ${PAM_LIBRARIES}
+    facialauth  # Link al modulo PAM (che dipende da facialauth)
+    ${PAM_LIBRARIES}  # Link con le librerie PAM
 )
-
-# Esegui le applicazioni di test
-add_executable(facial_test src/facial_test.cpp)
-target_link_libraries(facial_test facialauth ${OpenCV_LIBS})
-
-add_executable(facial_training src/facial_training.cpp)
-target_link_libraries(facial_training facialauth ${OpenCV_LIBS})
-
-add_executable(facial_capture src/facial_capture.cpp)
-target_link_libraries(facial_capture facialauth ${OpenCV_LIBS})
 
 # Installazione del modulo PAM
 install(TARGETS pam_facial_auth
-    LIBRARY DESTINATION /lib/security  # Modulo PAM
+    LIBRARY DESTINATION /lib64/security  # Modulo PAM
 )
-
-# Installazione degli eseguibili (facial_test, facial_training, facial_capture)
-install(TARGETS facial_test facial_training facial_capture
-    DESTINATION /usr/local/bin
-)
-

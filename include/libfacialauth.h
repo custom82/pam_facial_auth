@@ -13,20 +13,21 @@
 // ==========================================================
 class FaceRecWrapper {
 public:
-	FaceRecWrapper(const std::string& modelPath, const std::string& name, const std::string& model_type);
-	void Train(const std::vector<cv::Mat>& images, const std::vector<int>& labels);
-	void Recognize(cv::Mat& face);
-	void Load(const std::string& modelFile);
-	void Save(const std::string& modelFile);
-	void Predict(cv::Mat& face, int& prediction, double& confidence);
+    FaceRecWrapper(const std::string& modelPath, const std::string& name, const std::string& model_type);
+    void Train(const std::vector<cv::Mat>& images, const std::vector<int>& labels);
+    void Recognize(cv::Mat& face);
+    void Load(const std::string& modelFile);
+    void Save(const std::string& modelFile);
+    void Predict(cv::Mat& face, int& prediction, double& confidence);
 
-	// 🔹 Nuovo metodo per il rilevamento dei volti
-	bool DetectFace(const cv::Mat& frame, cv::Rect& faceROI, cv::CascadeClassifier &haar, cv::dnn::Net &dnn);
+    // 🔹 Nuovo metodo per il rilevamento dei volti
+    bool DetectFace(const FacialAuthConfig &cfg, const cv::Mat &frame, cv::Rect &faceROI,
+                    cv::CascadeClassifier &haar, cv::dnn::Net &dnn);
 
 private:
-	cv::Ptr<cv::face::LBPHFaceRecognizer> recognizer;
-	cv::CascadeClassifier faceCascade; // Haar cascade per il rilevamento
-	std::string modelType;
+    cv::Ptr<cv::face::LBPHFaceRecognizer> recognizer;
+    cv::CascadeClassifier faceCascade; // Haar cascade per il rilevamento
+    std::string modelType;
 };
 
 // ==========================================================
@@ -34,37 +35,37 @@ private:
 // ==========================================================
 class FacialAuth {
 public:
-	FacialAuth();
-	~FacialAuth();
+    FacialAuth();
+    ~FacialAuth();
 
-	bool Authenticate(const std::string &user);
+    bool Authenticate(const std::string &user);
 
 private:
-	bool LoadModel(const std::string &modelPath);
-	bool TrainModel(const std::vector<cv::Mat> &images, const std::vector<int> &labels);
-	bool RecognizeFace(const cv::Mat &faceImage);
+    bool LoadModel(const std::string &modelPath);
+    bool TrainModel(const std::vector<cv::Mat> &images, const std::vector<int> &labels);
+    bool RecognizeFace(const cv::Mat &faceImage);
 
-	cv::Ptr<cv::face::LBPHFaceRecognizer> recognizer;
-	std::string modelPath;
+    cv::Ptr<cv::face::LBPHFaceRecognizer> recognizer;
+    std::string modelPath;
 };
 
 // ==========================================================
 // Struttura di configurazione globale
 // ==========================================================
 struct FacialAuthConfig {
-	bool debug = false;
-	bool nogui = true;
-	double threshold = 80.0;
-	int timeout = 10;
-	std::string model_path = "/etc/pam_facial_auth";
-	std::string device = "/dev/video0";
-	int width = 640;
-	int height = 480;
-	std::string model = "lbph";
-	std::string detector = "auto";
-	std::string model_format = "both";
-	int frames = 20;
-	bool fallback_device = true;
+    bool debug = false;
+    bool nogui = true;
+    double threshold = 80.0;
+    int timeout = 10;
+    std::string model_path = "/etc/pam_facial_auth";
+    std::string device = "/dev/video0";
+    int width = 640;
+    int height = 480;
+    std::string model = "lbph";
+    std::string detector = "auto";
+    std::string model_format = "both";
+    int frames = 20;
+    bool fallback_device = true;
 };
 
 // ==========================================================
@@ -80,8 +81,8 @@ void sleep_ms(int ms);
 void log_tool(bool debug, const char* level, const char* fmt, ...);
 bool open_camera(const FacialAuthConfig &cfg, cv::VideoCapture &cap, std::string &device_used);
 bool detect_face(const FacialAuthConfig &cfg, const cv::Mat &frame, cv::Rect &face_roi,
-				 cv::CascadeClassifier &haar, cv::dnn::Net &dnn);
+                 cv::CascadeClassifier &haar, cv::dnn::Net &dnn);
 void load_detectors(const FacialAuthConfig &cfg, cv::CascadeClassifier &haar, cv::dnn::Net &dnn,
-					bool &use_dnn, std::string &log);
+                    bool &use_dnn, std::string &log);
 
 #endif // LIBFACIALAUTH_H

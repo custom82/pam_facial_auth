@@ -52,7 +52,7 @@ int main(int argc, char **argv) {
 	faceRec.Train(images, labels);  // Assicurati di fornire i dati di addestramento
 
 	// Salva il modello addestrato nel file
-	faceRec.SaveModel(modelPath);
+	faceRec.Save(modelPath);
 
 	std::cout << "Training complete. Model saved to: " << modelPath << std::endl;
 	return 0;

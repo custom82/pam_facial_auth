@@ -3,7 +3,7 @@
 #include <security/pam_modules.h>
 #include <security/pam_ext.h>  // Aggiunto pam_ext.h per le estensioni PAM
 #include <opencv2/opencv.hpp>
-#include "libfacialauth.h"  // Includi il file header per la classe FacialAuth
+#include "../include/libfacialauth.h"  // Includi il file header per la classe FacialAuth
 #include <syslog.h>
 
 int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, const char **argv) {
