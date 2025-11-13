@@ -1,87 +1,110 @@
 cmake_minimum_required(VERSION 3.10)
 
-project(pam_facial_auth)
+project(pam_facial_auth CXX)
 
 set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-# ======================================================
-# TROVA OPENCV (solo per la libreria libfacialauth)
-# ======================================================
+# -------------------------------------------------------
+# TROVA OPENCV E PAM
+# -------------------------------------------------------
 find_package(OpenCV REQUIRED)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(PAM REQUIRED pam)
 
-# ======================================================
-# DIRECTORY PER GLI HEADER
-# ======================================================
 include_directories(
     ${PROJECT_SOURCE_DIR}/include
     ${OpenCV_INCLUDE_DIRS}
+    ${PAM_INCLUDE_DIRS}
 )
 
-# ======================================================
-# LIBRERIA condivisa: libfacialauth.so
-# (contiene TUTTO: detection + LBPH + camera)
-# ======================================================
+# -------------------------------------------------------
+# LIBRERIA CONDIVISA (libfacialauth.so)
+# -------------------------------------------------------
 add_library(facialauth SHARED
     src/libfacialauth.cpp
-    include/libfacialauth.h
 )
 
 target_link_libraries(facialauth
-    ${OpenCV_LIBS}     # SOLO QUI
+    ${OpenCV_LIBS}
+    ${PAM_LIBRARIES}
 )
 
-target_include_directories(facialauth PUBLIC include)
-
-# ======================================================
-# BINARI: NON devono linkare OpenCV
-# SOLO la libreria
-# ======================================================
-
-# ---- facial_capture ----
+# -------------------------------------------------------
+# EXECUTABLE: facial_capture
+# Non include OpenCV, linka solo libfacialauth
+# -------------------------------------------------------
 add_executable(facial_capture
     src/facial_capture.cpp
 )
 
-target_link_libraries(facial_capture
-    facialauth         # SOLO libreria
+target_include_directories(facial_capture PRIVATE
+    ${PROJECT_SOURCE_DIR}/include
 )
 
-target_include_directories(facial_capture PUBLIC include)
+target_link_libraries(facial_capture
+    facialauth
+)
 
-# ---- facial_training ----
+# -------------------------------------------------------
+# EXECUTABLE: facial_training
+# -------------------------------------------------------
 add_executable(facial_training
     src/facial_training.cpp
+)
+
+target_include_directories(facial_training PRIVATE
+    ${PROJECT_SOURCE_DIR}/include
 )
 
 target_link_libraries(facial_training
     facialauth
 )
 
-target_include_directories(facial_training PUBLIC include)
+# -------------------------------------------------------
+# EXECUTABLE: facial_test (se lo usi)
+# -------------------------------------------------------
+if(EXISTS "${PROJECT_SOURCE_DIR}/src/facial_test.cpp")
+    add_executable(facial_test
+        src/facial_test.cpp
+    )
 
-# ---- facial_test ----
-add_executable(facial_test
-    src/facial_test.cpp
+    target_include_directories(facial_test PRIVATE
+        ${PROJECT_SOURCE_DIR}/include
+    )
+
+    target_link_libraries(facial_test
+        facialauth
+    )
+endif()
+
+# -------------------------------------------------------
+# MODULO PAM (pam_facial_auth.so)
+# -------------------------------------------------------
+add_library(pam_facial_auth MODULE
+    src/pam_facial_auth.cpp
 )
 
-target_link_libraries(facial_test
-    facialauth
+target_include_directories(pam_facial_auth PRIVATE
+    ${PROJECT_SOURCE_DIR}/include
 )
-
-target_include_directories(facial_test PUBLIC include)
-
-# ======================================================
-# Modulo PAM
-# ======================================================
-add_library(pam_facial_auth MODULE src/pam_facial_auth.cpp)
 
 target_link_libraries(pam_facial_auth
     facialauth
-    pam               # PAM, NON OpenCV
+    ${PAM_LIBRARIES}
 )
 
+# Installazione modulo PAM
 install(TARGETS pam_facial_auth
     LIBRARY DESTINATION /lib64/security
 )
 
+# Installazione libreria
+install(TARGETS facialauth
+    LIBRARY DESTINATION /usr/lib64
+)
+
+# Installazione binari
+install(TARGETS facial_capture facial_training
+    RUNTIME DESTINATION /usr/bin
+)

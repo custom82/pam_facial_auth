@@ -1,102 +1,176 @@
-#include <opencv2/opencv.hpp>
-#include <opencv2/face.hpp>  // Assicurati di includere il modulo facciale di OpenCV
 #include <iostream>
-#include <filesystem>  // Per leggere il contenuto di una directory
-#include "../include/libfacialauth.h"  // Includi la libreria di riconoscimento facciale
+#include <string>
+#include <unistd.h>
+#include <getopt.h>
 
-namespace fs = std::filesystem;
+#include "../include/libfacialauth.h"
 
-int main(int argc, char **argv) {
-	// Verifica se il percorso del modello è stato fornito
-	if (argc < 2) {
-		std::cerr << "Usage: " << argv[0] << " <model_path>" << std::endl;
-		return -1;
-	}
+static void print_usage(const char* prog)
+{
+	std::cout << "Usage: " << prog << " -u <user> -m <model_path> [options]\n\n"
+	<< "Options:\n"
+	<< "  -u, --user <user>        Utente da verificare (obbligatorio)\n"
+	<< "  -m, --model <path>       File modello XML (obbligatorio)\n"
+	<< "  -c, --config <file>      File configurazione (default: /etc/pam_facial_auth/pam_facial.conf)\n"
+	<< "  -d, --device <device>    Dispositivo webcam (es. /dev/video0)\n"
+	<< "      --threshold <value>  Soglia confidenza match (default: 80.0)\n"
+	<< "  -v, --verbose            Output verboso\n"
+	<< "      --nogui              Disabilita GUI\n"
+	<< "  -h, --help               Mostra questo messaggio\n";
+}
 
-	std::string modelPath = argv[1];  // Percorso del modello
+int main(int argc, char** argv)
+{
+	std::string user;
+	std::string model_path;
+	std::string config_path = "/etc/pam_facial_auth/pam_facial.conf";
 
-	// Crea un'istanza di FaceRecWrapper per il riconoscimento (tipo modello: LBPH)
-	FaceRecWrapper faceRec(modelPath, "test", "LBPH");
+	// Config di default caricata via libfacialauth
+	FacialAuthConfig cfg;
 
-	// Vettori per immagini e etichette
-	std::vector<cv::Mat> images;
-	std::vector<int> labels;
+	// Tabelle opzioni lunghe
+	static struct option long_opts[] = {
+		{"user",      required_argument, 0, 'u'},
+		{"model",     required_argument, 0, 'm'},
+		{"config",    required_argument, 0, 'c'},
+		{"device",    required_argument, 0, 'd'},
+		{"threshold", required_argument, 0, 1000},
+		{"verbose",   no_argument,       0, 'v'},
+		{"nogui",     no_argument,       0, 1001},
+		{"help",      no_argument,       0, 'h'},
+		{0,0,0,0}
+	};
 
-	// Impostiamo il percorso della cartella contenente le immagini di addestramento
-	std::string datasetPath = "dataset";  // Cambia con il percorso della tua cartella di immagini
-	int label = 0;  // Etichetta iniziale per l'utente
+	int opt, longidx;
+	while ((opt = getopt_long(argc, argv, "u:m:c:d:vh", long_opts, &longidx)) != -1)
+	{
+		switch (opt)
+		{
+			case 'u':
+				user = optarg;
+				break;
 
-	// Ciclo per leggere le immagini dalla cartella e aggiungerle ai dati di addestramento
-	for (const auto& entry : fs::directory_iterator(datasetPath)) {
-		if (entry.is_directory()) {
-			// Legge tutte le immagini in una sottocartella (una per utente)
-			for (const auto& imgEntry : fs::directory_iterator(entry.path())) {
-				if (imgEntry.is_regular_file() && imgEntry.path().extension() == ".jpg") {
-					cv::Mat img = cv::imread(imgEntry.path().string(), cv::IMREAD_GRAYSCALE);
-					if (!img.empty()) {
-						images.push_back(img);  // Aggiungi l'immagine
-						labels.push_back(label);  // Aggiungi l'etichetta
-					}
-				}
-			}
-			label++;  // Incrementa l'etichetta per il prossimo utente
+			case 'm':
+				model_path = optarg;
+				break;
+
+			case 'c':
+				config_path = optarg;
+				break;
+
+			case 'd':
+				cfg.device = optarg;
+				break;
+
+			case 1000: // --threshold
+				cfg.threshold = atof(optarg);
+				break;
+
+			case 'v':
+				cfg.debug = true;
+				break;
+
+			case 1001: // --nogui
+				cfg.nogui = true;
+				break;
+
+			case 'h':
+				print_usage(argv[0]);
+				return 0;
+
+			default:
+				print_usage(argv[0]);
+				return 1;
 		}
 	}
 
-	if (images.empty()) {
-		std::cerr << "No images found in the dataset." << std::endl;
-		return -1;
+	// Check obbligatori
+	if (user.empty() || model_path.empty()) {
+		std::cerr << "Errore: -u <user> e -m <model_path> sono obbligatori.\n";
+		print_usage(argv[0]);
+		return 1;
 	}
 
-	// Addestra il riconoscitore con le immagini e le etichette
-	faceRec.Train(images, labels);  // Assicurati di fornire i dati di addestramento
+	// Carica configurazione globale
+	std::string log;
+	read_kv_config(config_path, cfg, &log);
+	if (cfg.debug) std::cerr << log;
 
-	// Salva il modello addestrato nel file
-	faceRec.Save(modelPath);
+	// -------------------------
+	// Inizializza wrapper volto
+	// -------------------------
+	FaceRecWrapper faceRec(cfg.model_path, user, cfg.model);
 
-	std::cout << "Training complete. Model saved to: " << modelPath << std::endl;
-
-	// Carica il modello salvato per il test
-	faceRec.Load(modelPath);
-
-	// Avvia il riconoscimento facciale
-	cv::VideoCapture cap(0);  // Usa la prima fotocamera disponibile
-	if (!cap.isOpened()) {
-		std::cerr << "Could not open camera." << std::endl;
-		return -1;
+	if (!file_exists(model_path)) {
+		std::cerr << "Errore: modello non trovato: " << model_path << "\n";
+		return 1;
 	}
+
+	faceRec.Load(model_path);
+
+	// -------------------------
+	// Apri la webcam
+	// -------------------------
+	cv::VideoCapture cap;
+	std::string used_device;
+
+	if (!open_camera(cfg, cap, used_device)) {
+		std::cerr << "Errore: impossibile aprire la webcam (" << cfg.device << ")\n";
+		return 1;
+	}
+
+	if (cfg.debug)
+		std::cerr << "[DEBUG] Webcam aperta: " << used_device << "\n";
+
+	cap.set(cv::CAP_PROP_FRAME_WIDTH, cfg.width);
+	cap.set(cv::CAP_PROP_FRAME_HEIGHT, cfg.height);
+
+	// -------------------------
+	// RILEVAMENTO: usa la funzione utility detect_face()
+	// -------------------------
+	cv::CascadeClassifier haar;
+	cv::dnn::Net dnn;
+	bool use_dnn = false;
+	load_detectors(cfg, haar, dnn, use_dnn, log);
+
+	if (cfg.debug) std::cerr << log;
 
 	cv::Mat frame;
-	while (cap.read(frame)) {
-		if (frame.empty()) {
-			std::cerr << "Failed to capture image." << std::endl;
-			break;
+	cv::Rect face_roi;
+
+	std::cout << "Premi 'q' per uscire.\n";
+
+	while (true) {
+		cap >> frame;
+		if (frame.empty()) continue;
+
+		// Detect volto
+		if (detect_face(cfg, frame, face_roi, haar, dnn))
+		{
+			cv::Mat face = frame(face_roi).clone();
+
+			int predicted = -1;
+			double conf = 9999.0;
+			faceRec.Predict(face, predicted, conf);
+
+			std::cout << "User=" << predicted
+			<< " Conf=" << conf
+			<< " (threshold=" << cfg.threshold << ")\n";
+
+			if (conf < cfg.threshold)
+				std::cout << "MATCH ✔️\n";
+			else
+				std::cout << "NO MATCH ❌\n";
+
+			if (!cfg.nogui)
+				cv::rectangle(frame, face_roi, cv::Scalar(0,255,0), 2);
 		}
 
-		// Converti l'immagine in scala di grigi
-		cv::Mat gray;
-		cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
-
-		// Riconoscimento facciale
-		int prediction = -1;
-		double confidence = 0.0;
-		faceRec.Predict(gray, prediction, confidence);
-
-		// Visualizza il risultato del riconoscimento
-		std::string result = "Prediction: " + std::to_string(prediction) + " Confidence: " + std::to_string(confidence);
-		cv::putText(frame, result, cv::Point(30, 30), cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(0, 255, 0), 2);
-
-		// Mostra l'immagine
-		cv::imshow("Facial Recognition", frame);
-
-		// Interrompi se l'utente preme 'q'
-		if (cv::waitKey(1) == 'q') {
-			break;
+		if (!cfg.nogui) {
+			cv::imshow("facial_test", frame);
+			if ((char)cv::waitKey(1) == 'q') break;
 		}
 	}
-
-	cap.release();
-	cv::destroyAllWindows();
 
 	return 0;
 }
