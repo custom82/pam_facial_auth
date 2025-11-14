@@ -1,124 +1,81 @@
 #include "../include/libfacialauth.h"
-#include <opencv2/face.hpp>
+
+#include <getopt.h>
 #include <iostream>
-#include <unistd.h>
 
-using namespace std;
-
-static void show_help() {
-	cout << "Usage: facial_test -u <user> -m <model_path> [options]\n\n"
+static void print_usage(const char *prog) {
+	std::cerr
+	<< "Usage: " << prog << " -u <user> -m <model_path> [options]\n\n"
 	<< "Options:\n"
-	<< "  -u, --user <user>        Utente da verificare\n"
-	<< "  -m, --model <path>       File modello XML\n"
-	<< "  -c, --config <file>      File configurazione\n"
-	<< "  -d, --device <device>    Webcam (es. /dev/video0)\n"
-	<< "  --threshold <value>      Soglia match (default 80.0)\n"
-	<< "  --nogui                  Modalità console\n"
-	<< "  -v, --verbose            Verbose\n"
-	<< "  -h, --help               Mostra help\n";
+	<< "  -u, --user <user>        Utente da verificare (obbligatorio)\n"
+	<< "  -m, --model <path>       File modello XML (default: basedir/models/<user>.xml)\n"
+	<< "  -c, --config <file>      File di configurazione (default: /etc/pam_facial_auth/pam_facial.conf)\n"
+	<< "  -d, --device <device>    Dispositivo webcam (es. /dev/video0)\n"
+	<< "      --threshold <value>  Soglia di confidenza per il match (default: 80.0)\n"
+	<< "  -v, --verbose            Modalità verbosa\n"
+	<< "      --nogui              Disabilita la GUI (solo console)\n"
+	<< "  -h, --help               Mostra questo messaggio\n";
 }
 
-int main(int argc, char *argv[]) {
-	string user;
-	string model_path;
-	string cfgfile = "/etc/pam_facial_auth/pam_facial.conf";
-	string device = "/dev/video0";
+int main(int argc, char **argv) {
+	std::string user;
+	std::string model_path;
+	std::string config_path = "/etc/pam_facial_auth/pam_facial.conf";
 	bool verbose = false;
-	bool nogui = false;
-	double threshold = 80.0;
 
 	FacialAuthConfig cfg;
 
-	// ---------------------
-	// Parsing argomenti
-	// ---------------------
-	for (int i = 1; i < argc; i++) {
-		string a = argv[i];
+	static struct option long_opts[] = {
+		{"user",      required_argument, 0, 'u'},
+		{"model",     required_argument, 0, 'm'},
+		{"config",    required_argument, 0, 'c'},
+		{"device",    required_argument, 0, 'd'},
+		{"threshold", required_argument, 0, 1},
+		{"nogui",     no_argument,       0, 2},
+		{"verbose",   no_argument,       0, 'v'},
+		{"help",      no_argument,       0, 'h'},
+		{0,0,0,0}
+	};
 
-		if (a == "-u" || a == "--user")
-			user = argv[++i];
-		else if (a == "-m" || a == "--model")
-			model_path = argv[++i];
-		else if (a == "-c" || a == "--config")
-			cfgfile = argv[++i];
-		else if (a == "-d" || a == "--device")
-			device = argv[++i];
-		else if (a == "--threshold")
-			threshold = stod(argv[++i]);
-		else if (a == "--nogui")
-			nogui = true;
-		else if (a == "-v" || a == "--verbose")
-			verbose = true;
-		else if (a == "-h" || a == "--help") {
-			show_help();
-			return 0;
+	int opt, idx;
+	while ((opt = getopt_long(argc, argv, "u:m:c:d:vh", long_opts, &idx)) != -1) {
+		switch (opt) {
+			case 'u': user = optarg; break;
+			case 'm': model_path = optarg; break;
+			case 'c': config_path = optarg; break;
+			case 'd': cfg.device = optarg; break;
+			case 'v': verbose = true; break;
+			case 'h': print_usage(argv[0]); return 0;
+			case 1:  cfg.threshold = std::stod(optarg); break;
+			case 2:  cfg.nogui = true; break;
+			default:
+				print_usage(argv[0]);
+				return 1;
 		}
 	}
 
-	if (user.empty() || model_path.empty()) {
-		cerr << "Parametri mancanti.\n";
-		show_help();
+	if (user.empty()) {
+		std::cerr << "Errore: devi specificare l'utente con -u <user>\n";
+		print_usage(argv[0]);
 		return 1;
 	}
 
-	cfg.nogui = nogui;
-	cfg.debug = verbose;
+	std::string log;
+	read_kv_config(config_path, cfg, &log);
 
-	// -----------------------------------------
-	// Carica modello
-	// -----------------------------------------
-	cv::Ptr<cv::face::FaceRecognizer> model =
-	cv::face::LBPHFaceRecognizer::create();
-	model->read(model_path);
-
-	// -----------------------------------------
-	// Carica webcam
-	// -----------------------------------------
-	cv::VideoCapture cap(0);
-	if (!cap.isOpened()) {
-		cerr << "Impossibile aprire webcam.\n";
-		return 1;
+	if (model_path.empty()) {
+		model_path = fa_user_model_path(cfg, user);
 	}
 
-	cv::CascadeClassifier haar;
-	cv::dnn::Net dnn;
-	bool use_dnn = false;
-	string log;
+	double best_conf;
+	int best_label;
+	bool ok = fa_test_user(user, cfg, model_path, best_conf, best_label, log);
 
-	if (!load_detectors(cfg, haar, dnn, use_dnn, log)) {
-		cerr << "Errore: nessun rilevatore disponibile\n";
-		return 1;
+	if (verbose || cfg.debug) {
+		std::cerr << log;
+		std::cerr << "Best label: " << best_label << "  conf: " << best_conf
+		<< "  threshold: " << cfg.threshold << "\n";
 	}
 
-	if (verbose)
-		cout << log;
-
-	cout << "Inizio test...\n";
-
-	while (true) {
-		cv::Mat frame;
-		cap >> frame;
-		if (frame.empty())
-			continue;
-
-		cv::Rect face;
-		if (!detect_face(cfg, frame, face, haar, dnn))
-			continue;
-
-		cv::Mat crop = frame(face);
-		cv::Mat gray;
-		cv::cvtColor(crop, gray, cv::COLOR_BGR2GRAY);
-
-		int label;
-		double conf;
-		model->predict(gray, label, conf);
-
-		if (verbose)
-			cout << "Confidence: " << conf << endl;
-
-		if (conf < threshold) {
-			cout << "VALIDO\n";
-			return 0;
-		}
-	}
+	return ok ? 0 : 1;
 }

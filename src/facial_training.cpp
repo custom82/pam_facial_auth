@@ -1,113 +1,80 @@
 #include "../include/libfacialauth.h"
-#include <opencv2/face.hpp>
+
+#include <getopt.h>
 #include <iostream>
-#include <filesystem>
 
-using namespace std;
-namespace fs = std::filesystem;
-
-static void show_help() {
-	cout << "Usage: facial_training -u <user> -m <method> <training_dir> [options]\n\n"
+static void print_usage(const char *prog) {
+	std::cerr
+	<< "Usage: " << prog << " -u <user> -m <method> <training_data_directory> [options]\n\n"
 	<< "Options:\n"
-	<< "  -u, --user <name>        Username da addestrare\n"
-	<< "  -m, --method <type>      Metodo (lbph, eigen, fisher)\n"
-	<< "  -o, --output <file>      Percorso file modello XML\n"
-	<< "  -f, --force              Sovrascrive file modello esistente\n"
-	<< "  -v, --verbose            Output dettagliato\n"
-	<< "  -h, --help               Mostra help\n\n"
-	<< "Esempi:\n"
-	<< "  facial_training -u custom -m lbph /etc/pam_facial_auth/\n"
-	<< "  facial_training -u custom -m lbph /etc/pam_facial_auth/ -o /etc/pam_facial_auth/custom.xml\n";
+	<< "  -u, --user <name>           Specify the username to train the model for\n"
+	<< "  -m, --method <type>         Training method (lbph)\n"
+	<< "  -o, --output <file>         Path to save the trained model (XML)\n"
+	<< "  -c, --config <file>         Config file (default: /etc/pam_facial_auth/pam_facial.conf)\n"
+	<< "  -f, --force                 Force overwrite of existing model file\n"
+	<< "  -v, --verbose               Enable detailed output\n"
+	<< "  -h, --help                  Show this help message\n\n"
+	<< "Examples:\n"
+	<< "  " << prog << " -u custom -m lbph /etc/pam_facial_auth/images/custom -o /etc/pam_facial_auth/models/custom.xml\n";
 }
 
-int main(int argc, char *argv[]) {
-	string user;
-	string method;
-	string training_dir;
-	string output_file;
-	bool verbose = false;
+int main(int argc, char **argv) {
+	std::string user;
+	std::string method;
+	std::string output_model;
+	std::string config_path = "/etc/pam_facial_auth/pam_facial.conf";
 	bool force = false;
+	bool verbose = false;
 
-	// ---------------------
-	// Parsing argomenti
-	// ---------------------
-	for (int i = 1; i < argc; i++) {
-		string a = argv[i];
+	FacialAuthConfig cfg;
 
-		if (a == "-u" || a == "--user")
-			user = argv[++i];
-		else if (a == "-m" || a == "--method")
-			method = argv[++i];
-		else if (a == "-o" || a == "--output")
-			output_file = argv[++i];
-		else if (a == "-f" || a == "--force")
-			force = true;
-		else if (a == "-v" || a == "--verbose")
-			verbose = true;
-		else if (a == "-h" || a == "--help") {
-			show_help();
-			return 0;
-		}
-		else
-			training_dir = a;
-	}
+	static struct option long_opts[] = {
+		{"user",    required_argument, 0, 'u'},
+		{"method",  required_argument, 0, 'm'},
+		{"output",  required_argument, 0, 'o'},
+		{"config",  required_argument, 0, 'c'},
+		{"force",   no_argument,       0, 'f'},
+		{"verbose", no_argument,       0, 'v'},
+		{"help",    no_argument,       0, 'h'},
+		{0,0,0,0}
+	};
 
-	if (user.empty() || method.empty() || training_dir.empty()) {
-		cerr << "Errore: parametri insufficienti.\n";
-		show_help();
-		return 1;
-	}
-
-	if (output_file.empty())
-		output_file = "/etc/pam_facial_auth/" + user + "/models/model.xml";
-
-	if (fs::exists(output_file) && !force) {
-		cerr << "File modello esistente. Usa --force.\n";
-		return 1;
-	}
-
-	// ---------------------
-	// Carica immagini
-	// ---------------------
-	vector<cv::Mat> images;
-	vector<int> labels;
-
-	string img_dir = training_dir + "/" + user + "/images";
-	for (auto &p : fs::directory_iterator(img_dir)) {
-		if (p.path().extension() == ".png") {
-			images.push_back(cv::imread(p.path().string(), cv::IMREAD_GRAYSCALE));
-			labels.push_back(1);
-			if (verbose)
-				cout << "Caricata: " << p.path() << endl;
+	int opt, idx;
+	while ((opt = getopt_long(argc, argv, "u:m:o:c:fvh", long_opts, &idx)) != -1) {
+		switch (opt) {
+			case 'u': user = optarg; break;
+			case 'm': method = optarg; break;
+			case 'o': output_model = optarg; break;
+			case 'c': config_path = optarg; break;
+			case 'f': force = true; break;
+			case 'v': verbose = true; break;
+			case 'h': print_usage(argv[0]); return 0;
+			default:
+				print_usage(argv[0]);
+				return 1;
 		}
 	}
 
-	if (images.empty()) {
-		cerr << "Nessuna immagine trovata in: " << img_dir << "\n";
+	if (user.empty() || method.empty()) {
+		std::cerr << "Error: user and method are mandatory\n";
+		print_usage(argv[0]);
 		return 1;
 	}
 
-	// ---------------------
-	// Seleziona metodo
-	// ---------------------
-	cv::Ptr<cv::face::FaceRecognizer> model;
-
-	if (method == "lbph")
-		model = cv::face::LBPHFaceRecognizer::create();
-	else if (method == "eigen")
-		model = cv::face::EigenFaceRecognizer::create();
-	else if (method == "fisher")
-		model = cv::face::FisherFaceRecognizer::create();
-	else {
-		cerr << "Metodo sconosciuto.\n";
-		return 1;
+	std::string train_dir;
+	if (optind < argc) {
+		train_dir = argv[optind];
 	}
 
-	model->train(images, labels);
-	fs::create_directories(fs::path(output_file).parent_path());
-	model->save(output_file);
+	std::string log;
+	read_kv_config(config_path, cfg, &log);
 
-	cout << "Modello salvato in: " << output_file << endl;
+	if (output_model.empty()) {
+		output_model = fa_user_model_path(cfg, user);
+	}
 
-	return 0;
+	bool ok = fa_train_user(user, cfg, method, train_dir, output_model, force, log);
+
+	if (verbose || cfg.debug) std::cerr << log;
+	return ok ? 0 : 1;
 }
