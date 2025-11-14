@@ -87,3 +87,12 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/etc/pam_facial.conf")
 else()
     message(WARNING "pam_facial.conf non trovato, nessun file installato in /etc/security")
 endif()
+
+if(EXISTS "${CMAKE_SOURCE_DIR}/etc/haarcascade_frontalface_default.xml")
+    install(FILES etc/haarcascade_frontalface_default.xml
+        DESTINATION /etc/pam_facial_auth
+        PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ
+    )
+else()
+    message(WARNING "pam_facial.conf non trovato, nessun file installato in /etc/security")
+endif()
