@@ -4,6 +4,7 @@
 
 #include <string>
 #include <cstring>
+#include <syslog.h>   // necessario per LOG_ERR, LOG_DEBUG ecc.
 
 #include "../include/libfacialauth.h"
 
