@@ -75,7 +75,7 @@ install(TARGETS facial_capture facial_training facial_test
     RUNTIME DESTINATION /usr/sbin
 )
 
-install(DIRECTORY include/pam_facial_auth
+install(DIRECTORY include
     DESTINATION /usr/include
 )
 
