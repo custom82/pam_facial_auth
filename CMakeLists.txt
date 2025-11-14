@@ -58,23 +58,33 @@ target_link_libraries(facial_test facialauth ${OpenCV_LIBS})
 # === INSTALLAZIONE ===
 #
 
-# /lib64/security per moduli PAM su Gentoo
+# PAM module
+add_library(pam_facial_auth MODULE src/pam_facial_auth.cpp)
+target_link_libraries(pam_facial_auth PRIVATE facialauth pam)
+set_target_properties(pam_facial_auth PROPERTIES OUTPUT_NAME "pam_facial_auth")
+
 install(TARGETS pam_facial_auth
     LIBRARY DESTINATION /lib64/security
 )
 
-# libreria
 install(TARGETS facialauth
     LIBRARY DESTINATION /usr/lib64
 )
 
-# binari → /usr/sbin
 install(TARGETS facial_capture facial_training facial_test
     RUNTIME DESTINATION /usr/sbin
 )
 
-# header
-install(DIRECTORY include/ DESTINATION /usr/include/pam_facial_auth)
+install(DIRECTORY include/pam_facial_auth
+    DESTINATION /usr/include
+)
 
-# config
-install(FILES pam_facial.conf DESTINATION /etc/pam_facial_auth)
+# Installazione file di configurazione in /etc/security
+if(EXISTS "${CMAKE_SOURCE_DIR}/pam_facial.conf")
+    install(FILES pam_facial.conf
+        DESTINATION /etc/security
+        PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ
+    )
+else()
+    message(WARNING "pam_facial.conf non trovato, nessun file installato in /etc/security")
+endif()
