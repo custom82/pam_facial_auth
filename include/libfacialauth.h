@@ -1,99 +1,56 @@
-#ifndef LIBFACIALAUTH_H
-#define LIBFACIALAUTH_H
+#pragma once
 
 #include <string>
-#include <vector>
 #include <opencv2/opencv.hpp>
-#include <opencv2/face.hpp>
-#include <opencv2/objdetect.hpp>
 #include <opencv2/dnn.hpp>
 
-// ==========================================================
-// Struttura di configurazione globale
-// ==========================================================
+// -------------------------------------------------------------
+// CONFIGURAZIONE COMPLETA
+// -------------------------------------------------------------
 struct FacialAuthConfig {
+    std::string haar_path = "/usr/share/opencv4/haarcascades/haarcascade_frontalface_default.xml";
+    std::string dnn_proto = "";    // deploy.prototxt
+    std::string dnn_model = "";    // res10_300x300.caffemodel
+
+    int frame_width  = 640;
+    int frame_height = 480;
+
+    int sleep_ms = 100;
+
     bool debug = false;
-    bool nogui = true;
-    double threshold = 80.0;
-    int timeout = 10;                      // secondi (usato come sleep tra catture)
-    std::string model_path = "/etc/pam_facial_auth";
-    std::string device = "/dev/video0";
-    int width = 640;
-    int height = 480;
-    std::string model = "lbph";
-    std::string detector = "auto";
-    std::string model_format = "both";
-    int frames = 20;                       // numero di immagini da catturare
-    bool fallback_device = true;
+    bool nogui = false;
 };
 
-// ==========================================================
-// Classe per la gestione del riconoscimento facciale base
-// ==========================================================
+// -------------------------------------------------------------
+// API DELLA LIBRERIA
+// -------------------------------------------------------------
+
+bool load_detectors(
+    const FacialAuthConfig &cfg,
+    cv::CascadeClassifier &haar,
+    cv::dnn::Net &dnn,
+    bool &use_dnn,
+    std::string &log
+);
+
+bool detect_face(
+    const FacialAuthConfig &cfg,
+    const cv::Mat &frame,
+    cv::Rect &face_roi,
+    cv::CascadeClassifier &haar,
+    cv::dnn::Net &dnn
+);
+
+// -------------------------------------------------------------
+// WRAPPER PER CAPTURE / TEST
+// -------------------------------------------------------------
+
 class FaceRecWrapper {
 public:
-    FaceRecWrapper(const std::string& basePath,
-                   const std::string& name,
-                   const std::string& model_type);
 
-    void Train(const std::vector<cv::Mat>& images,
-               const std::vector<int>& labels);
+    // cattura immagini per l’utente
+    bool CaptureImages(const std::string &user, const FacialAuthConfig &cfg);
 
-    void Recognize(cv::Mat& face);
-    void Load(const std::string& modelFile);
-    void Save(const std::string& modelFile);
-    void Predict(cv::Mat& face, int& prediction, double& confidence);
-
-    // rilevamento volto su un singolo frame
-    bool DetectFace(const cv::Mat& frame, cv::Rect& faceROI);
-
-    // cattura N immagini dal device video e le salva in
-    // <model_path>/<user>/images/...
-    bool CaptureImages(const std::string &user,
-                       const FacialAuthConfig &cfg);
-
-private:
-    cv::Ptr<cv::face::LBPHFaceRecognizer> recognizer;
-    cv::CascadeClassifier faceCascade;  // Haar cascade per il rilevamento
-    std::string modelType;
-    std::string basePath;
+    // usa SOLO Haar/DNN gestito internamente dalla lib
+    bool DetectFace(const cv::Mat &frame, cv::Rect &faceROI);
 };
-
-// ==========================================================
-// Classe principale per autenticazione facciale PAM
-// ==========================================================
-class FacialAuth {
-public:
-    FacialAuth();
-    ~FacialAuth();
-
-    bool Authenticate(const std::string &user);
-
-private:
-    bool LoadModel(const std::string &modelPath);
-    bool TrainModel(const std::vector<cv::Mat> &images,
-                    const std::vector<int> &labels);
-    bool RecognizeFace(const cv::Mat &faceImage);
-
-    cv::Ptr<cv::face::LBPHFaceRecognizer> recognizer;
-    std::string modelPath;
-};
-
-// ==========================================================
-// Utility functions (config, I/O, detection helpers)
-// ==========================================================
-std::string trim(const std::string &s);
-bool str_to_bool(const std::string &s, bool defval);
-bool read_kv_config(const std::string &path,
-                    FacialAuthConfig &cfg,
-                    std::string *logbuf = nullptr);
-void ensure_dirs(const std::string &path);
-bool file_exists(const std::string &path);
-std::string join_path(const std::string &a, const std::string &b);
-void sleep_ms(int ms);
-void log_tool(bool debug, const char* level, const char* fmt, ...);
-bool open_camera(const FacialAuthConfig &cfg,
-                 cv::VideoCapture &cap,
-                 std::string &device_used);
-
-#endif // LIBFACIALAUTH_H
