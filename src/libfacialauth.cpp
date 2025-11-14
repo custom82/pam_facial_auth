@@ -62,7 +62,6 @@ bool read_kv_config(const std::string &path, FacialAuthConfig &cfg, std::string 
 			else if (key == "frames") cfg.frames = std::max(1, std::stoi(val));
 			else if (key == "fallback_device") cfg.fallback_device = str_to_bool(val, cfg.fallback_device);
 			else if (key == "sleep_ms") cfg.sleep_ms = std::max(0, std::stoi(val));
-			else if (key == "model_path") cfg.model_path = val;  // Added model_path config
 		} catch (const std::exception &e) {
 			if (logbuf) *logbuf += "Error parsing line: " + line + " (" + e.what() + ")\n";
 		}
@@ -111,8 +110,7 @@ bool open_camera(const FacialAuthConfig &cfg, cv::VideoCapture &cap, std::string
 	device_used = cfg.device;
 	cap.open(cfg.device);
 	if (!cap.isOpened() && cfg.fallback_device) {
-		log_tool(cfg.debug, "WARN", "Primary device %s failed, trying /dev/video1",
-				 cfg.device.c_str());
+		log_tool(cfg.debug, "WARN", "Primary device %s failed, trying /dev/video1", cfg.device.c_str());
 		cap.open("/dev/video1");
 		if (cap.isOpened()) device_used = "/dev/video1";
 	}
@@ -129,7 +127,7 @@ std::string fa_user_image_dir(const FacialAuthConfig &cfg, const std::string &us
 }
 
 std::string fa_user_model_path(const FacialAuthConfig &cfg, const std::string &user) {
-	return join_path(cfg.model_path, user + ".xml");  // Use model_path from config
+	return join_path(join_path(cfg.basedir, "models"), user + ".xml");
 }
 
 // ==========================================================

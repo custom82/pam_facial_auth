@@ -22,7 +22,6 @@ struct FacialAuthConfig {
     int frames           = 5;                    // quanti frame provare
     bool fallback_device = true;                 // prova /dev/video1 se /dev/video0 fallisce
     int sleep_ms         = 500;                  // pausa tra catture (ms)
-    std::string model_path = "/etc/pam_facial_auth/models";  // Added model_path
 };
 
 // ==========================================================
