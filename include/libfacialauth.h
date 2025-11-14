@@ -22,7 +22,7 @@ struct FacialAuthConfig {
     int frames           = 5;                    // quanti frame provare
     bool fallback_device = true;                 // prova /dev/video1 se /dev/video0 fallisce
     int sleep_ms         = 500;                  // pausa tra catture (ms)
-    std::string model_path;  // New member to store model path
+    std::string model_path;                      // Model path (added)
 };
 
 // ==========================================================
