@@ -3,7 +3,7 @@ project(pam_facial_auth CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 
-# Output directory
+# Output dir
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 
@@ -19,7 +19,7 @@ include_directories(${PAM_INCLUDE_DIRS})
 include_directories(include)
 
 #
-# === LIBRERIA: libfacialauth.so ===
+# === LIBRERIA PRINCIPALE ===
 #
 add_library(facialauth SHARED
     src/libfacialauth.cpp
@@ -28,13 +28,13 @@ add_library(facialauth SHARED
 target_link_libraries(facialauth ${OpenCV_LIBS})
 
 #
-# === MODULO PAM: pam_facial_auth.so ===
+# === MODULO PAM ===
 #
 add_library(pam_facial_auth SHARED
     src/pam_facial_auth.cpp
 )
 
-# RENAME: tolgo il prefisso "lib" → genera pam_facial_auth.so
+# Rimuove il prefisso "lib" → pam_facial_auth.so
 set_target_properties(pam_facial_auth PROPERTIES PREFIX "")
 
 target_link_libraries(pam_facial_auth
@@ -58,7 +58,7 @@ target_link_libraries(facial_test facialauth ${OpenCV_LIBS})
 # === INSTALLAZIONE ===
 #
 
-# /lib64/security per moduli PAM (Gentoo)
+# /lib64/security per moduli PAM su Gentoo
 install(TARGETS pam_facial_auth
     LIBRARY DESTINATION /lib64/security
 )
@@ -73,7 +73,7 @@ install(TARGETS facial_capture facial_training facial_test
     RUNTIME DESTINATION /usr/sbin
 )
 
-# include
+# header
 install(DIRECTORY include/ DESTINATION /usr/include/pam_facial_auth)
 
 # config
