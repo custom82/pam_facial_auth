@@ -80,7 +80,7 @@ install(DIRECTORY include
 )
 
 # Installazione file di configurazione in /etc/security
-if(EXISTS "${CMAKE_SOURCE_DIR}/pam_facial.conf")
+if(EXISTS "${CMAKE_SOURCE_DIR}/etc/pam_facial.conf")
     install(FILES pam_facial.conf
         DESTINATION /etc/security
         PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ
