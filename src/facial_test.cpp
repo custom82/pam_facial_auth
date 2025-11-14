@@ -9,7 +9,7 @@ static void print_usage(const char *prog) {
 	<< "Options:\n"
 	<< "  -u, --user <user>        Utente da verificare (obbligatorio)\n"
 	<< "  -m, --model <path>       File modello XML (default: basedir/models/<user>.xml)\n"
-	<< "  -c, --config <file>      File di configurazione (default: /etc/pam_facial_auth/pam_facial.conf)\n"
+	<< "  -c, --config <file>      File di configurazione (default: /etc/security/pam_facial.conf)\n"
 	<< "  -d, --device <device>    Dispositivo webcam (es. /dev/video0)\n"
 	<< "      --threshold <value>  Soglia di confidenza per il match (default: 80.0)\n"
 	<< "  -v, --verbose            Modalità verbosa\n"
@@ -20,7 +20,7 @@ static void print_usage(const char *prog) {
 int main(int argc, char **argv) {
 	std::string user;
 	std::string model_path;
-	std::string config_path = "/etc/pam_facial_auth/pam_facial.conf";
+	std::string config_path = "/etc/security/pam_facial.conf";
 	bool verbose = false;
 
 	FacialAuthConfig cfg;

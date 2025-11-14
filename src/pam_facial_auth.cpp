@@ -17,7 +17,7 @@ extern "C" {
         (void)flags;
         FacialAuthConfig cfg; // con default
 
-        std::string config_path = "/etc/pam_facial_auth/pam_facial.conf";
+        std::string config_path = "/etc/security/pam_facial.conf";
 
         // parametri PAM aggiuntivi (es: config=/path, threshold=...)
         for (int i = 0; i < argc; ++i) {

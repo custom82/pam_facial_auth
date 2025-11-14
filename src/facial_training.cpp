@@ -10,7 +10,7 @@ static void print_usage(const char *prog) {
 	<< "  -u, --user <name>           Specify the username to train the model for\n"
 	<< "  -m, --method <type>         Training method (lbph)\n"
 	<< "  -o, --output <file>         Path to save the trained model (XML)\n"
-	<< "  -c, --config <file>         Config file (default: /etc/pam_facial_auth/pam_facial.conf)\n"
+	<< "  -c, --config <file>         Config file (default: /etc/security/pam_facial.conf)\n"
 	<< "  -f, --force                 Force overwrite of existing model file\n"
 	<< "  -v, --verbose               Enable detailed output\n"
 	<< "  -h, --help                  Show this help message\n\n"
@@ -22,7 +22,7 @@ int main(int argc, char **argv) {
 	std::string user;
 	std::string method;
 	std::string output_model;
-	std::string config_path = "/etc/pam_facial_auth/pam_facial.conf";
+	std::string config_path = "/etc/security/pam_facial.conf";
 	bool force = false;
 	bool verbose = false;
 

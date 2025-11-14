@@ -11,7 +11,7 @@ static void print_usage(const char *prog) {
     << "Usage: " << prog << " -u <user> [options]\n\n"
     << "Options:\n"
     << "  -u, --user <name>       Nome utente (obbligatorio)\n"
-    << "  -c, --config <file>     File di configurazione (default: /etc/pam_facial_auth/pam_facial.conf)\n"
+    << "  -c, --config <file>     File di configurazione (default: /etc/security/pam_facial.conf)\n"
     << "  -d, --device <path>     Device della webcam (es: /dev/video0)\n"
     << "      --width <px>        Larghezza frame\n"
     << "      --height <px>       Altezza frame\n"
@@ -36,7 +36,7 @@ static void list_devices() {
 
 int main(int argc, char **argv) {
     std::string user;
-    std::string config_path = "/etc/pam_facial_auth/pam_facial.conf";
+    std::string config_path = "/etc/security/pam_facial.conf";
     bool force = false;
     bool flush = false;
     bool verbose = false;
