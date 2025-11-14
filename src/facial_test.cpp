@@ -63,6 +63,7 @@ int main(int argc, char **argv) {
 	std::string log;
 	read_kv_config(config_path, cfg, &log);
 
+	// Use the default model path if not provided
 	if (model_path.empty()) {
 		model_path = fa_user_model_path(cfg, user);
 	}

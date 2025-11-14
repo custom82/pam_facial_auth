@@ -37,12 +37,13 @@ static void list_devices() {
 int main(int argc, char **argv) {
     std::string user;
     std::string config_path = "/etc/security/pam_facial.conf";
+    std::string model_path = "/etc/pam_facial_auth"; // Default model path
     bool force = false;
     bool flush = false;
     bool verbose = false;
     bool listdev = false;
 
-    FacialAuthConfig cfg; // con default
+    FacialAuthConfig cfg; // Default config
 
     static struct option long_opts[] = {
         {"user",          required_argument, 0, 'u'},
@@ -54,7 +55,6 @@ int main(int argc, char **argv) {
         {"sleep",         required_argument, 0, 3},
         {"force",         no_argument,       0, 'f'},
         {"flush",         no_argument,       0, 4},
-        {"clean",         no_argument,       0, 4},
         {"list-devices",  no_argument,       0, 5},
         {"nogui",         no_argument,       0, 6},
         {"debug",         no_argument,       0, 7},
@@ -100,6 +100,11 @@ int main(int argc, char **argv) {
 
     std::string log;
     read_kv_config(config_path, cfg, &log);
+
+    // Load the model path from config (added line)
+    if (cfg.model_path.empty()) {
+        cfg.model_path = model_path;
+    }
 
     if (flush) {
         std::string dir = fa_user_image_dir(cfg, user);

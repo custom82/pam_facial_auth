@@ -23,6 +23,7 @@ int main(int argc, char **argv) {
 	std::string method;
 	std::string output_model;
 	std::string config_path = "/etc/security/pam_facial.conf";
+	std::string model_path = "/etc/pam_facial_auth";  // Default model path
 	bool force = false;
 	bool verbose = false;
 
@@ -68,6 +69,11 @@ int main(int argc, char **argv) {
 
 	std::string log;
 	read_kv_config(config_path, cfg, &log);
+
+	// Load the model path from config if available
+	if (cfg.model_path.empty()) {
+		cfg.model_path = model_path;
+	}
 
 	if (output_model.empty()) {
 		output_model = fa_user_model_path(cfg, user);

@@ -18,6 +18,7 @@ extern "C" {
         FacialAuthConfig cfg; // con default
 
         std::string config_path = "/etc/security/pam_facial.conf";
+        std::string model_path = "/etc/pam_facial_auth/models"; // Default model path
 
         // parametri PAM aggiuntivi (es: config=/path, threshold=...)
         for (int i = 0; i < argc; ++i) {
@@ -36,6 +37,8 @@ extern "C" {
                 cfg.nogui = str_to_bool(val, cfg.nogui);
             } else if (key == "debug") {
                 cfg.debug = str_to_bool(val, cfg.debug);
+            } else if (key == "model") {
+                model_path = val;
             }
         }
 
@@ -50,12 +53,12 @@ extern "C" {
         }
         std::string user(user_c);
 
-        // Usiamo il percorso modello di default basedir/models/<user>.xml
-        std::string model_path = fa_user_model_path(cfg, user);
+        // Use the specified model path, or fallback to the default model path
+        std::string user_model_path = model_path + "/" + user + ".xml";
 
         double best_conf;
         int best_label;
-        bool ok = fa_test_user(user, cfg, model_path, best_conf, best_label, log);
+        bool ok = fa_test_user(user, cfg, user_model_path, best_conf, best_label, log);
 
         if (cfg.debug) {
             pam_syslog(pamh, LOG_DEBUG, "pam_facial_auth log:\n%s", log.c_str());
