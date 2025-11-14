@@ -23,7 +23,6 @@ include_directories(include)
 #
 add_library(facialauth SHARED
     src/libfacialauth.cpp
-    src/config_parser.cpp
 )
 
 target_link_libraries(facialauth ${OpenCV_LIBS})
