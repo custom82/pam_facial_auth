@@ -66,6 +66,9 @@ bool read_kv_config(const std::string &path, FacialAuthConfig &cfg, std::string 
 			if (logbuf) *logbuf += "Error parsing line: " + line + " (" + e.what() + ")\n";
 		}
 	}
+
+	// Set the model path (combines basedir and user)
+	cfg.model_path = fa_user_model_path(cfg, "user");  // Using default user, can be overridden
 	return true;
 }
 
@@ -129,83 +132,3 @@ std::string fa_user_image_dir(const FacialAuthConfig &cfg, const std::string &us
 std::string fa_user_model_path(const FacialAuthConfig &cfg, const std::string &user) {
 	return join_path(join_path(cfg.basedir, "models"), user + ".xml");
 }
-
-// ==========================================================
-// FaceRecWrapper
-// ==========================================================
-
-FaceRecWrapper::FaceRecWrapper(const std::string &modelType_)
-: modelType(modelType_)
-{
-	// Per ora solo LBPH
-	recognizer = cv::face::LBPHFaceRecognizer::create();
-}
-
-bool FaceRecWrapper::Load(const std::string &modelFile) {
-	try {
-		recognizer->read(modelFile);
-		return true;
-	} catch (const std::exception &e) {
-		std::cerr << "Error loading model: " << e.what() << std::endl;
-		return false;
-	}
-}
-
-bool FaceRecWrapper::Save(const std::string &modelFile) const {
-	try {
-		ensure_dirs(fs::path(modelFile).parent_path().string());
-		recognizer->write(modelFile);
-		return true;
-	} catch (const std::exception &e) {
-		std::cerr << "Error saving model: " << e.what() << std::endl;
-		return false;
-	}
-}
-
-bool FaceRecWrapper::Train(const std::vector<cv::Mat> &images,
-						   const std::vector<int> &labels) {
-	if (images.empty() || labels.empty() || images.size() != labels.size())
-		return false;
-	try {
-		recognizer->train(images, labels);
-		return true;
-	} catch (const std::exception &e) {
-		std::cerr << "Error training model: " << e.what() << std::endl;
-		return false;
-	}
-						   }
-
-						   bool FaceRecWrapper::Predict(const cv::Mat &face, int &prediction, double &confidence) const {
-							   if (face.empty()) return false;
-							   try {
-								   recognizer->predict(face, prediction, confidence);
-								   return true;
-							   } catch (const std::exception &e) {
-								   std::cerr << "Error predicting: " << e.what() << std::endl;
-								   return false;
-							   }
-						   }
-
-						   bool FaceRecWrapper::DetectFace(const cv::Mat &frame, cv::Rect &faceROI) {
-							   if (frame.empty()) return false;
-
-							   if (faceCascade.empty()) {
-								   // usa il classifier di default di OpenCV (installato nel path dei dati)
-								   std::string cascadePath = cv::samples::findFile("haarcascade_frontalface_default.xml", false);
-								   if (cascadePath.empty() || !faceCascade.load(cascadePath)) {
-									   std::cerr << "Failed to load Haar cascade (haarcascade_frontalface_default.xml)\n";
-									   return false;
-								   }
-							   }
-
-							   cv::Mat gray;
-							   cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
-							   cv::equalizeHist(gray, gray);
-
-							   std::vector<cv::Rect> faces;
-							   faceCascade.detectMultiScale(gray, faces, 1.1, 3, 0, cv::Size(80, 80));
-
-							   if (faces.empty()) return false;
-							   faceROI = faces[0];
-							   return true;
-						   }
