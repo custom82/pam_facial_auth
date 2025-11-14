@@ -3,7 +3,7 @@ project(pam_facial_auth CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 
-# Output dir
+# Output dirs
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 
@@ -30,7 +30,7 @@ target_link_libraries(facialauth ${OpenCV_LIBS})
 #
 # === MODULO PAM ===
 #
-add_library(pam_facial_auth SHARED
+add_library(pam_facial_auth MODULE
     src/pam_facial_auth.cpp
 )
 
@@ -59,28 +59,27 @@ target_link_libraries(facial_test facialauth ${OpenCV_LIBS})
 #
 
 # PAM module
-add_library(pam_facial_auth MODULE src/pam_facial_auth.cpp)
-target_link_libraries(pam_facial_auth PRIVATE facialauth pam)
-set_target_properties(pam_facial_auth PROPERTIES OUTPUT_NAME "pam_facial_auth")
-
 install(TARGETS pam_facial_auth
     LIBRARY DESTINATION /lib64/security
 )
 
+# Main library
 install(TARGETS facialauth
     LIBRARY DESTINATION /usr/lib64
 )
 
+# CLI tools
 install(TARGETS facial_capture facial_training facial_test
     RUNTIME DESTINATION /usr/sbin
 )
 
-install(DIRECTORY include
+# Headers
+install(DIRECTORY include/
     DESTINATION /usr/include
 )
 
-# Installazione file di configurazione in /etc/security
-if(EXISTS "${CMAKE_SOURCE_DIR}/etc/pam_facial.conf")
+# Install config file
+if(EXISTS "${CMAKE_SOURCE_DIR}/pam_facial.conf")
     install(FILES pam_facial.conf
         DESTINATION /etc/security
         PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ
