@@ -45,33 +45,40 @@ bool read_kv_config(const std::string &path, FacialAuthConfig &cfg, std::string 
 		line = trim(line);
 		if (line.empty() || line[0] == '#') continue;
 		if (logbuf) *logbuf += "LINE: " + line + "\n";
-		std::istringstream iss(line);
+
+		// Normalize key/value: allow "key value" or "key = value"
+		size_t pos = line.find('=');
 		std::string key, val;
-		if (!(iss >> key)) continue;
-		std::getline(iss, val);
-		val = trim(val);
+		if (pos != std::string::npos) {
+			key = trim(line.substr(0, pos));
+			val = trim(line.substr(pos + 1));
+		} else {
+			std::istringstream iss(line);
+			iss >> key;
+			std::getline(iss, val);
+			val = trim(val);
+		}
 
 		try {
 			if (key == "basedir") cfg.basedir = val;
 			else if (key == "device") cfg.device = val;
-			else if (key == "width") cfg.width = std::max(64, std::stoi(val));
-			else if (key == "height") cfg.height = std::max(64, std::stoi(val));
+			else if (key == "width" || key == "frame_width") cfg.width = std::max(64, std::stoi(val));
+			else if (key == "height" || key == "frame_height") cfg.height = std::max(64, std::stoi(val));
 			else if (key == "threshold") cfg.threshold = std::stod(val);
 			else if (key == "timeout") cfg.timeout = std::max(1, std::stoi(val));
-			else if (key == "nogui") cfg.nogui = str_to_bool(val, cfg.nogui);
-			else if (key == "debug") cfg.debug = str_to_bool(val, cfg.debug);
+			else if (key == "nogui" || key == "disable_gui") cfg.nogui = str_to_bool(val, cfg.nogui);
+			else if (key == "debug" || key == "verbose") cfg.debug = str_to_bool(val, cfg.debug);
 			else if (key == "frames") cfg.frames = std::max(1, std::stoi(val));
 			else if (key == "fallback_device") cfg.fallback_device = str_to_bool(val, cfg.fallback_device);
 			else if (key == "sleep_ms") cfg.sleep_ms = std::max(0, std::stoi(val));
+			else if (key == "model_path") cfg.basedir = val; // optional override
 		} catch (const std::exception &e) {
 			if (logbuf) *logbuf += "Error parsing line: " + line + " (" + e.what() + ")\n";
 		}
 	}
-
-	// Set the model path (combines basedir and user)
-	cfg.model_path = fa_user_model_path(cfg, "user");  // Using default user, can be overridden
 	return true;
 }
+
 
 void ensure_dirs(const std::string &path) {
 	if (path.empty()) return;
