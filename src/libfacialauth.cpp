@@ -2,6 +2,7 @@
 
 #include <opencv2/imgproc.hpp>
 #include <opencv2/imgcodecs.hpp>
+#include <opencv2/opencv.hpp>
 #include <cstdarg>
 #include <iostream>
 #include <fstream>
@@ -131,4 +132,51 @@ std::string fa_user_image_dir(const FacialAuthConfig &cfg, const std::string &us
 
 std::string fa_user_model_path(const FacialAuthConfig &cfg, const std::string &user) {
 	return join_path(join_path(cfg.basedir, "models"), user + ".xml");
+}
+
+// In libfacialauth.cpp
+
+
+bool fa_capture_images(const std::string &user,
+					   const FacialAuthConfig &cfg,
+					   bool force,
+					   std::string &log)
+{
+	// Open the camera
+	cv::VideoCapture cap(cfg.device);
+	if (!cap.isOpened()) {
+		log += "Failed to open camera: " + cfg.device + "\n";
+		return false;
+	}
+
+	cv::Mat frame;
+	int captured = 0;
+	std::string img_dir = fa_user_image_dir(cfg, user);
+
+	// Ensure the directory exists
+	ensure_dirs(img_dir);
+
+	// Capture the specified number of frames
+	while (captured < cfg.frames) {
+		cap >> frame; // Capture a frame
+		if (frame.empty()) {
+			log += "Empty frame captured.\n";
+			break;
+		}
+
+		// Save the image to disk
+		char filename[64];
+		snprintf(filename, sizeof(filename), "img_%03d.png", captured);
+		std::string path = join_path(img_dir, filename);
+
+		if (!cv::imwrite(path, frame)) {
+			log += "Failed to save image: " + path + "\n";
+			return false;
+		}
+
+		log += "Captured image: " + path + "\n";
+		++captured;
+	}
+
+	return captured > 0; // Return true if any images were captured
 }
