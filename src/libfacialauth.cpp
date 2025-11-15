@@ -180,3 +180,169 @@ bool fa_capture_images(const std::string &user,
 
 	return captured > 0; // Return true if any images were captured
 }
+
+
+bool fa_train_user(const std::string &user,
+				   const FacialAuthConfig &cfg,
+				   const std::string &method,
+				   const std::string &inputDir,
+				   const std::string &outputModel,
+				   bool force,
+				   std::string &log)
+{
+	log += "Training user: " + user + "\n";
+	log += "Input dir: " + inputDir + "\n";
+	log += "Output model: " + outputModel + "\n";
+
+	// Ensure directory exists
+	if (!fs::exists(inputDir)) {
+		log += "Input directory does not exist: " + inputDir + "\n";
+		return false;
+	}
+
+	// Collect training images
+	std::vector<cv::Mat> images;
+	std::vector<int> labels;
+	int label_id = 0;
+
+	for (const auto &entry : fs::directory_iterator(inputDir)) {
+		if (!entry.is_regular_file()) continue;
+		std::string path = entry.path().string();
+
+		cv::Mat img = cv::imread(path, cv::IMREAD_GRAYSCALE);
+		if (img.empty()) {
+			log += "Failed to read image: " + path + "\n";
+			continue;
+		}
+
+		images.push_back(img);
+		labels.push_back(label_id);
+	}
+
+	if (images.empty()) {
+		log += "No valid training images found.\n";
+		return false;
+	}
+
+	// Create recognizer
+	auto recognizer = cv::face::LBPHFaceRecognizer::create();
+	recognizer->train(images, labels);
+
+	// Ensure output directory exists
+	ensure_dirs(fs::path(outputModel).parent_path().string());
+
+	recognizer->save(outputModel);
+	log += "Training completed. Model saved to " + outputModel + "\n";
+
+	return true;
+}
+
+bool fa_test_user(const std::string &user,
+				  const FacialAuthConfig &cfg,
+				  const std::string &modelPath,
+				  double &best_conf,
+				  int &best_label,
+				  std::string &log)
+{
+	log += "Testing user: " + user + "\n";
+
+	std::string model = modelPath.empty()
+	? join_path(join_path(cfg.basedir, "models"), user + ".xml")
+	: modelPath;
+
+	if (!file_exists(model)) {
+		log += "Model file not found: " + model + "\n";
+		return false;
+	}
+
+	// Load trained model
+	cv::Ptr<cv::face::LBPHFaceRecognizer> recognizer = cv::face::LBPHFaceRecognizer::create();
+	try {
+		recognizer->read(model);
+	} catch (const std::exception &e) {
+		log += "Error loading model: " + std::string(e.what()) + "\n";
+		return false;
+	}
+
+	// Open the webcam
+	cv::VideoCapture cap(cfg.device);
+	if (!cap.isOpened()) {
+		log += "Failed to open camera: " + cfg.device + "\n";
+		return false;
+	}
+	log += "Camera opened successfully.\n";
+
+	cv::CascadeClassifier faceCascade;
+	std::string cascadePath = cv::samples::findFile("haarcascade_frontalface_default.xml", false);
+	if (cascadePath.empty() || !faceCascade.load(cascadePath)) {
+		log += "Failed to load Haar cascade.\n";
+		return false;
+	}
+
+	best_conf = 1e9;
+	best_label = -1;
+	bool matched = false;
+
+	auto start = static_cast<int>(::time(nullptr));
+	int frames_tried = 0;
+
+	cv::Mat frame;
+	while (frames_tried < cfg.frames) {
+		cap >> frame;
+		if (frame.empty()) {
+			log += "Empty frame captured.\n";
+			break;
+		}
+
+		cv::Mat gray;
+		cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
+		cv::equalizeHist(gray, gray);
+
+		std::vector<cv::Rect> faces;
+		faceCascade.detectMultiScale(gray, faces, 1.1, 3, 0, cv::Size(80, 80));
+
+		if (!faces.empty()) {
+			cv::Rect roi = faces[0];
+			cv::Mat face = gray(roi).clone();
+
+			int label = -1;
+			double conf = 0.0;
+			recognizer->predict(face, label, conf);
+
+			log += "Prediction: label=" + std::to_string(label) +
+			", confidence=" + std::to_string(conf) + "\n";
+
+			if (conf < best_conf) {
+				best_conf = conf;
+				best_label = label;
+			}
+
+			if (conf <= cfg.threshold) {
+				matched = true;
+				if (!cfg.nogui) {
+					cv::rectangle(frame, roi, cv::Scalar(0, 255, 0), 2);
+					cv::imshow("facial_test", frame);
+					cv::waitKey(300);
+				}
+				break;
+			}
+		} else if (cfg.debug) {
+			log += "No face detected in this frame.\n";
+		}
+
+		if (!cfg.nogui) {
+			cv::imshow("facial_test", frame);
+			if (cv::waitKey(1) == 'q') break;
+		}
+
+		++frames_tried;
+		int now = static_cast<int>(::time(nullptr));
+		if (now - start >= cfg.timeout) {
+			log += "Timeout reached.\n";
+			break;
+		}
+	}
+
+	if (!cfg.nogui) cv::destroyAllWindows();
+	return matched;
+}
