@@ -1,71 +1,101 @@
 #include "../include/libfacialauth.h"
-#include <getopt.h>
 #include <iostream>
+#include <filesystem>
 
-static void print_usage(const char *prog) {
-	std::cerr << "Usage: " << prog << " -u <user> [options]\n\n"
-	<< "Options:\n"
-	<< "  -u, --user <user>        User name (required)\n"
-	<< "  -i, --input <dir>        Directory of training images\n"
-	<< "  -m, --model <file>       Output model path (default: basedir/models/<user>.xml)\n"
-	<< "  -c, --config <file>      Config file (default: /etc/security/pam_facial.conf)\n"
-	<< "  -f, --force              Overwrite existing model\n"
-	<< "  -v, --verbose            Verbose/debug output\n"
-	<< "  -h, --help               Show this message\n";
-}
+namespace fs = std::filesystem;
 
-int main(int argc, char **argv) {
+int main(int argc, char **argv)
+{
 	std::string user;
-	std::string input_dir;
-	std::string model_path;
 	std::string config_path = "/etc/security/pam_facial.conf";
-	bool verbose = false;
 	bool force = false;
+	std::string input_dir;
+	std::string output_model;
+	std::string method = "lbph";
+	bool debug = false;
 
-	FacialAuthConfig cfg;
-
-	static struct option long_opts[] = {
-		{"user", required_argument, 0, 'u'},
-		{"input", required_argument, 0, 'i'},
-		{"model", required_argument, 0, 'm'},
-		{"config", required_argument, 0, 'c'},
-		{"force", no_argument, 0, 'f'},
-		{"verbose", no_argument, 0, 'v'},
-		{"help", no_argument, 0, 'h'},
-		{0,0,0,0}
-	};
-
-	int opt, idx;
-	while ((opt = getopt_long(argc, argv, "u:i:m:c:fvh", long_opts, &idx)) != -1) {
-		switch (opt) {
-			case 'u': user = optarg; break;
-			case 'i': input_dir = optarg; break;
-			case 'm': model_path = optarg; break;
-			case 'c': config_path = optarg; break;
-			case 'f': force = true; break;
-			case 'v': verbose = true; break;
-			case 'h': print_usage(argv[0]); return 0;
-			default: print_usage(argv[0]); return 1;
+	// --------------------------------------------------
+	// Parse CLI arguments
+	// --------------------------------------------------
+	for (int i = 1; i < argc; ++i)
+	{
+		std::string arg = argv[i];
+		if ((arg == "-u" || arg == "--user") && i + 1 < argc)
+			user = argv[++i];
+		else if ((arg == "-c" || arg == "--config") && i + 1 < argc)
+			config_path = argv[++i];
+		else if ((arg == "-i" || arg == "--input") && i + 1 < argc)
+			input_dir = argv[++i];
+		else if ((arg == "-o" || arg == "--output") && i + 1 < argc)
+			output_model = argv[++i];
+		else if ((arg == "-m" || arg == "--method") && i + 1 < argc)
+			method = argv[++i];
+		else if (arg == "-f" || arg == "--force")
+			force = true;
+		else if (arg == "-v" || arg == "--debug")
+			debug = true;
+		else if (arg == "-h" || arg == "--help")
+		{
+			std::cout <<
+			"Usage: facial_training [options]\n"
+			"Options:\n"
+			"  -u, --user <name>         Username to train\n"
+			"  -i, --input <dir>         Input directory with training images\n"
+			"  -o, --output <file>       Output model file path\n"
+			"  -c, --config <file>       Config file path (default: /etc/security/pam_facial.conf)\n"
+			"  -m, --method <lbph>       Training method (default: lbph)\n"
+			"  -f, --force               Force overwrite of model\n"
+			"  -v, --debug               Enable debug messages\n"
+			"  -h, --help                Show this help\n";
+			return 0;
 		}
 	}
 
-	if (user.empty()) {
-		std::cerr << "Error: user is required.\n";
-		print_usage(argv[0]);
+	if (user.empty())
+	{
+		std::cerr << "Error: missing --user <name>\n";
 		return 1;
 	}
 
-	read_kv_config(config_path, cfg);
-	if (verbose) cfg.debug = true;
-
-	// Determina il path del modello
-	if (model_path.empty()) {
-		model_path = fa_user_model_path(cfg, user);
-	}
+	// --------------------------------------------------
+	// Read configuration file
+	// --------------------------------------------------
+	FacialAuthConfig cfg;
+	cfg.debug = debug;
 
 	std::string log;
-	bool ok = fa_train_user(user, cfg, "lbph", input_dir, model_path, force, log);
+	read_kv_config(config_path, cfg, &log);
+	if (cfg.debug)
+		std::cerr << log;
 
-	std::cerr << log;
-	return ok ? 0 : 1;
+	if (cfg.model_path.empty())
+	{
+		cfg.model_path = fs::path(cfg.basedir) / "models";
+	}
+
+	ensure_dirs(cfg.model_path);
+	std::string model_path = output_model.empty()
+	? fa_user_model_path(cfg, user)
+	: output_model;
+
+	// --------------------------------------------------
+	// Run training
+	// --------------------------------------------------
+	std::string effective_input_dir = input_dir.empty()
+	? fa_user_image_dir(cfg, user)
+	: input_dir;
+
+	std::string train_log;
+	bool ok = fa_train_user(user, cfg, method, effective_input_dir, model_path, force, train_log);
+
+	std::cout << train_log;
+
+	if (!ok)
+	{
+		std::cerr << "Training failed for user: " << user << "\n";
+		return 2;
+	}
+
+	std::cout << "✅ Model successfully trained: " << model_path << std::endl;
+	return 0;
 }
