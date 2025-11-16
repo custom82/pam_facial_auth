@@ -3,7 +3,8 @@
 #include <iostream>
 
 static void print_usage(const char *prog) {
-    std::cerr << "Usage: " << prog << " -u <user> [options]\n\n"
+    std::cerr
+    << "Usage: " << prog << " -u <user> [options]\n\n"
     << "Options:\n"
     << "  -u, --user <name>       User name (required)\n"
     << "  -d, --device <dev>      Video device (default: /dev/video0)\n"
@@ -67,12 +68,19 @@ int main(int argc, char **argv) {
 
     std::string log;
     read_kv_config(config_path, cfg, &log);
+
     if (verbose) cfg.debug = true;
 
+    // Mostra solo il log iniziale di configurazione
     std::cerr << log;
+    log.clear();
 
+    // Esegue la cattura con log runtime
     bool ok = fa_capture_images(user, cfg, force, log);
-    std::cerr << log;
+
+    // Mostra eventuali messaggi finali, solo se ci sono
+    if (!log.empty())
+        std::cerr << log;
 
     return ok ? 0 : 1;
 }
