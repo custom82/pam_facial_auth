@@ -44,21 +44,29 @@ bool read_kv_config(const std::string &path, FacialAuthConfig &cfg, std::string 
 		line = trim(line);
 		if (line.empty() || line[0] == '#') continue;
 		if (logbuf) *logbuf += "LINE: " + line + "\n";
-		std::istringstream iss(line);
+
+		// Split key and value manually to handle lines like "key = value"
 		std::string key, val;
-		if (!(iss >> key)) continue;
-		std::getline(iss, val);
-		val = trim(val);
+		size_t eq = line.find('=');
+		if (eq != std::string::npos) {
+			key = trim(line.substr(0, eq));
+			val = trim(line.substr(eq + 1));
+		} else {
+			std::istringstream iss(line);
+			if (!(iss >> key)) continue;
+			std::getline(iss, val);
+			val = trim(val);
+		}
 
 		try {
 			if (key == "basedir") cfg.basedir = val;
 			else if (key == "device") cfg.device = val;
-			else if (key == "width") cfg.width = std::max(64, std::stoi(val));
-			else if (key == "height") cfg.height = std::max(64, std::stoi(val));
+			else if (key == "width" || key == "frame_width") cfg.width = std::max(64, std::stoi(val));
+			else if (key == "height" || key == "frame_height") cfg.height = std::max(64, std::stoi(val));
 			else if (key == "threshold") cfg.threshold = std::stod(val);
 			else if (key == "timeout") cfg.timeout = std::max(1, std::stoi(val));
-			else if (key == "nogui") cfg.nogui = str_to_bool(val, cfg.nogui);
-			else if (key == "debug") cfg.debug = str_to_bool(val, cfg.debug);
+			else if (key == "nogui" || key == "disable_gui") cfg.nogui = str_to_bool(val, cfg.nogui);
+			else if (key == "debug" || key == "verbose") cfg.debug = str_to_bool(val, cfg.debug);
 			else if (key == "frames") cfg.frames = std::max(1, std::stoi(val));
 			else if (key == "fallback_device") cfg.fallback_device = str_to_bool(val, cfg.fallback_device);
 			else if (key == "sleep_ms") cfg.sleep_ms = std::max(0, std::stoi(val));
@@ -74,6 +82,7 @@ bool read_kv_config(const std::string &path, FacialAuthConfig &cfg, std::string 
 	}
 	return true;
 }
+
 
 void ensure_dirs(const std::string &path) {
 	if (path.empty()) return;
