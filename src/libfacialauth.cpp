@@ -206,6 +206,7 @@ bool FaceRecWrapper::Train(const std::vector<cv::Mat> &images,
 							   if (faceCascade.empty()) {
 								   std::string cascadePath;
 
+								   // Priorità: config, env, fallback
 								   const char *envPath = std::getenv("FACIAL_HAAR_PATH");
 								   if (envPath) cascadePath = envPath;
 
@@ -227,21 +228,54 @@ bool FaceRecWrapper::Train(const std::vector<cv::Mat> &images,
 								   }
 							   }
 
+							   // Preprocess: grayscale + equalize
 							   cv::Mat gray;
 							   cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
 							   cv::equalizeHist(gray, gray);
 
+							   // Ridimensiona per maggiore velocità e robustezza
+							   cv::Mat small;
+							   double scale = 0.5;
+							   cv::resize(gray, small, cv::Size(), scale, scale, cv::INTER_LINEAR);
+
 							   std::vector<cv::Rect> faces;
-							   faceCascade.detectMultiScale(gray, faces, 1.1, 3, 0, cv::Size(80, 80));
+							   faceCascade.detectMultiScale(
+								   small,
+								   faces,
+								   1.08,       // scaleFactor (meno aggressivo)
+							   3,          // minNeighbors (ridotto)
+							   0,          // flags
+							   cv::Size(60, 60) // minSize
+							   );
 
 							   if (faces.empty()) {
-								   log_tool(true, "DEBUG", "No face detected");
+								   log_tool(true, "DEBUG", "No face detected (scale=%.2f, w=%d, h=%d)", scale, frame.cols, frame.rows);
 								   return false;
 							   }
 
-							   faceROI = faces[0];
+							   // Prendi la prima faccia e riscalala alle dimensioni originali
+							   faceROI = cv::Rect(
+								   cvRound(faces[0].x / scale),
+												  cvRound(faces[0].y / scale),
+												  cvRound(faces[0].width / scale),
+												  cvRound(faces[0].height / scale)
+							   );
+
+							   log_tool(true, "DEBUG", "Detected face at x=%d y=%d w=%d h=%d",
+										faceROI.x, faceROI.y, faceROI.width, faceROI.height);
+
+							   // Debug opzionale: salva il frame con rettangolo
+							   try {
+								   cv::Mat debugFrame = frame.clone();
+								   cv::rectangle(debugFrame, faceROI, cv::Scalar(0, 255, 0), 2);
+								   cv::imwrite("/tmp/debug_face.png", debugFrame);
+							   } catch (...) {
+								   // ignore
+							   }
+
 							   return true;
 						   }
+
 
 						   // ==========================================================
 						   // High-level API
