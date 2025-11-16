@@ -31,7 +31,8 @@ bool str_to_bool(const std::string &s, bool defval) {
 	return defval;
 }
 
-bool read_kv_config(const std::string &path, FacialAuthConfig &cfg, std::string *logbuf) {
+bool read_kv_config(const std::string &path, FacialAuthConfig &cfg, std::string *logbuf)
+{
 	std::ifstream in(path);
 	if (!in.is_open()) {
 		if (logbuf) *logbuf += "Config not found: " + path + "\n";
@@ -42,33 +43,55 @@ bool read_kv_config(const std::string &path, FacialAuthConfig &cfg, std::string 
 	std::string line;
 	while (std::getline(in, line)) {
 		line = trim(line);
-		if (line.empty() || line[0] == '#') continue;
+		if (line.empty() || line[0] == '#')
+			continue;
+
 		if (logbuf) *logbuf += "LINE: " + line + "\n";
+
 		std::istringstream iss(line);
 		std::string key, val;
-		if (!(iss >> key)) continue;
+		if (!(iss >> key))
+			continue;
+
 		std::getline(iss, val);
 		val = trim(val);
+
+		// NEW: handle "key = value" syntax
+		if (!val.empty() && val[0] == '=') {
+			val = trim(val.substr(1));
+		}
 
 		try {
 			if (key == "basedir") cfg.basedir = val;
 			else if (key == "device") cfg.device = val;
-			else if (key == "width") cfg.width = std::max(64, std::stoi(val));
-			else if (key == "height") cfg.height = std::max(64, std::stoi(val));
+			else if (key == "width" || key == "frame_width") cfg.width = std::max(64, std::stoi(val));
+			else if (key == "height" || key == "frame_height") cfg.height = std::max(64, std::stoi(val));
 			else if (key == "threshold") cfg.threshold = std::stod(val);
 			else if (key == "timeout") cfg.timeout = std::max(1, std::stoi(val));
-			else if (key == "nogui") cfg.nogui = str_to_bool(val, cfg.nogui);
-			else if (key == "debug") cfg.debug = str_to_bool(val, cfg.debug);
+			else if (key == "nogui" || key == "disable_gui") cfg.nogui = str_to_bool(val, cfg.nogui);
+			else if (key == "debug" || key == "verbose") cfg.debug = str_to_bool(val, cfg.debug);
 			else if (key == "frames") cfg.frames = std::max(1, std::stoi(val));
 			else if (key == "fallback_device") cfg.fallback_device = str_to_bool(val, cfg.fallback_device);
 			else if (key == "sleep_ms") cfg.sleep_ms = std::max(0, std::stoi(val));
-		} catch (const std::exception &e) {
-			if (logbuf) *logbuf += "Error parsing line: " + line + " (" + e.what() + ")\n";
+			else if (key == "model_path") cfg.model_path = val;
+			else if (key == "haar_cascade_path") cfg.haar_cascade_path = val;
+			else if (key == "training_method") cfg.training_method = val;
+			else if (key == "log_file") cfg.log_file = val;
+			else if (key == "force_overwrite") cfg.force_overwrite = str_to_bool(val, false);
+			else if (key == "face_detection_method") cfg.face_detection_method = val;
+			else {
+				if (logbuf) *logbuf += "Unknown key: " + key + "\n";
+			}
+		}
+		catch (const std::exception &e) {
+			if (logbuf)
+				*logbuf += "Error parsing line: " + line + " (" + e.what() + ")\n";
 		}
 	}
 
 	return true;
 }
+
 
 void ensure_dirs(const std::string &path) {
 	if (path.empty()) return;
