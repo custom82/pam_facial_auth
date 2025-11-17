@@ -88,3 +88,10 @@ else()
     message(WARNING "pam_facial.conf non trovato, nessun file installato in /etc/security")
 endif()
 
+
+add_custom_target(man ALL DEPENDS
+    man/facial_capture.1
+    man/facial_training.1
+    man/facial_test.1
+    man/pam_facial_auth.8
+)
