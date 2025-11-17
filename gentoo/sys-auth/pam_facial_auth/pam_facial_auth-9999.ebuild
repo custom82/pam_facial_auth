@@ -25,7 +25,7 @@ KEYWORDS="~amd64"
 IUSE=""
 
 DEPEND="
-		media-libs/opencv
+		media-libs/opencv[contrib]
 		sys-libs/pam
 "
 
