@@ -32,6 +32,7 @@ How it Work
 - Capture Face Images
 
 facial_capture -u user -d /dev/video0 -g -n 500 -v
+more images you capture more efficiently is authentication
 
 - Train your images
 
