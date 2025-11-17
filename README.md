@@ -18,11 +18,11 @@ git clone https://github.com/custom82/pam_facial_auth.git
 Build and install facial auth module
 ------------------------------------
 
-cd pam_facial_auth
-mkdir build
-cmake ..
-make
-make install
+- cd pam_facial_auth
+- mkdir build
+- cmake ..
+- make
+- make install
 
 How it Work
 -----------
