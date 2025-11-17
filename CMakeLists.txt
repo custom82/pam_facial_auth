@@ -89,9 +89,27 @@ else()
 endif()
 
 
-add_custom_target(man ALL DEPENDS
-    man/facial_capture.1
-    man/facial_training.1
-    man/facial_test.1
-    man/pam_facial_auth.8
+# ============================================================
+# Install man pages
+# ============================================================
+
+# Fix prefix for Gentoo (defaults to /usr/local otherwise)
+if (CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+    set(CMAKE_INSTALL_PREFIX "/usr" CACHE PATH "Install prefix" FORCE)
+endif()
+
+# Man1 files
+install(
+    FILES
+        ${CMAKE_SOURCE_DIR}/man/facial_capture.1
+        ${CMAKE_SOURCE_DIR}/man/facial_training.1
+        ${CMAKE_SOURCE_DIR}/man/facial_test.1
+    DESTINATION share/man/man1
+)
+
+# Man8 files
+install(
+    FILES
+        ${CMAKE_SOURCE_DIR}/man/pam_facial_auth.8
+    DESTINATION share/man/man8
 )
