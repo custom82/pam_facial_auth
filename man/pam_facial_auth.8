@@ -1,82 +1,72 @@
-.TH PAM_FACIAL_AUTH 8 "2025" "pam_facial_auth" "PAM Modules"
+.TH PAM_FACIAL_AUTH 8 "2025-01" "pam_facial_auth" "PAM Module"
 .SH NAME
-pam_facial_auth \- PAM module for facial authentication using OpenCV LBPH
+pam_facial_auth \- PAM module for facial recognition authentication
 
 .SH SYNOPSIS
-.B auth  required  pam_facial_auth.so
-[\fIdebug\fR] [\fInogui\fR] [\fIthreshold=<val>\fR]
-[\fIdevice=/dev/videoX\fR]
+Add the following line to a PAM stack:
+
+.PP
+.B auth required pam_facial_auth.so
+[options]
 
 .SH DESCRIPTION
-\fBpam_facial_auth\fR è un modulo PAM che aggiunge autenticazione
-facciale basata su OpenCV (LBPH) come fattore di autenticazione
-addizionale.
-Può essere usato:
+The
+.B pam_facial_auth
+module performs facial recognition authentication using the LBPH model
+trained using the provided tools.
 
- - dopo \fIpam_unix.so\fR (password → volto)
- - oppure prima di esso (volto → password)
- - come \fBrequired\fR per MFA reale
- - come \fBsufficient\fR per login passwordless
+It loads the user’s model from
+.BR /etc/pam_facial_auth/models .
+The module uses OpenCV to open the webcam, detect a face, and match it
+against the stored model.
 
-Il modello facciale deve essere stato generato tramite:
-\fIfacial_capture(1)\fR e \fIfacial_training(1)\fR.
+This module is intended to be used as an additional authentication factor
+after the standard PAM password check.
 
 .SH OPTIONS
 .TP
-.B debug
-Abilita logging dettagliato tramite syslog.
-
-.TP
-.B nogui
-Disabilita eventuali GUI.
+.B config=/path/file
+Configuration file (default:
+/etc/security/pam_facial.conf).
 
 .TP
 .B device=/dev/videoX
-Specifica la webcam.
+Webcam device path.
 
 .TP
-.B threshold=<val>
-Soglia LBPH personalizzata.
+.B threshold=value
+LBPH confidence threshold (lower values = better match).
 
 .TP
-.B config=/path
-Percorso alternativo al file di configurazione
-(/etc/security/pam_facial.conf).
+.B nogui=on|off
+Disable GUI windows (default: on for PAM).
 
 .TP
-.B models=/path/to/models
-Percorso dei modelli LBPH.
+.B debug=on|off
+Enable debug logging in syslog.
+
+.TP
+.B model=/path/dir
+Custom model directory containing USER.xml.
 
 .SH FILES
 .TP
-\fI/etc/security/pam_facial.conf\fR
-Configurazione globale.
+.B /etc/pam_facial_auth/
+Base directory for images and models.
 
 .TP
-\fI/etc/pam_facial_auth/models/<user>.xml\fR
-Modello LBPH utente.
+.B /etc/security/pam_facial.conf
+Global configuration file.
 
 .TP
-\fI/etc/pam_facial_auth/images/<user>\fR
-Dataset immagini.
+.B /var/log/pam_facial_auth.log
+Optional debug log if configured.
 
-.SH EXAMPLES
-.TP
-Dopo password (MFA reale):
-.br
-auth  required  pam_unix.so
-.br
-auth  required  pam_facial_auth.so debug
-
-.TP
-Prima della password:
-.br
-auth  sufficient  pam_facial_auth.so
+.SH AUTHOR
+Andrea Postiglione
 
 .SH SEE ALSO
 .BR facial_capture (1),
 .BR facial_training (1),
-.BR facial_test (1)
-
-.SH AUTHOR
-Andrea Postiglione & ChatGPT
+.BR facial_test (1),
+.BR pam (8)

@@ -1,57 +1,68 @@
-.TH FACIAL_TRAINING 1 "2025" "pam_facial_auth" "User Commands"
+.TH FACIAL_TRAINING 1 "2025-01" "pam_facial_auth" "User Commands"
 .SH NAME
-facial_training \- train a facial recognition model for an user
+facial_training \- train the facial recognition model
 
 .SH SYNOPSIS
 .B facial_training
-\-u \fIuser\fR [options]
+\-u USER
+[\-i DIR] [\-o FILE]
+[\-f] [\-v] [\-c FILE]
 
 .SH DESCRIPTION
-\fBfacial_training\fR addestra un modello LBPH utilizzando le immagini
-acquisite tramite \fBfacial_capture\fR.
-Il modello risultante viene salvato nel percorso:
-\fI/etc/pam_facial_auth/models/<user>.xml\fR.
+The
+.B facial_training
+tool loads previously captured face images for a user and trains an LBPH
+(Local Binary Patterns Histograms) facial recognition model.
+
+The resulting model is stored as an XML file under
+.BR /etc/pam_facial_auth/models .
+
+This model is used by the PAM module for authentication.
 
 .SH OPTIONS
 .TP
-.BR -u ", " --user " " \fIuser\fR
-Utente per cui addestrare il modello (obbligatorio).
+.B \-u, --user USER
+User for which to train the model. Required.
 
 .TP
-.BR -i ", " --input " " \fIdir\fR
-Directory alternativa contenente le immagini.
+.B \-i, --input DIR
+Input directory containing training images
+(default:
+.BR /etc/pam_facial_auth/images/USER ).
 
 .TP
-.BR -o ", " --output " " \fIfile.xml\fR
-Percorso alternativo del modello LBPH.
+.B \-o, --output FILE
+Output model file
+(default:
+/etc/pam_facial_auth/models/USER.xml).
 
 .TP
-.BR -f ", " --force
-Sovrascrive eventuali modelli preesistenti.
+.B \-f, --force
+Overwrite an existing model file.
 
 .TP
-.BR -v ", " --verbose
-Debug dettagliato.
+.B \-v, --verbose
+Enable verbose/debug logging.
 
 .TP
-.BR -c ", " --config " " \fIfile\fR
-Percorso del file di configurazione.
-Default: \fI/etc/security/pam_facial.conf\fR.
+.B \-c, --config FILE
+Configuration file (default:
+/etc/security/pam_facial.conf).
 
 .TP
-.BR --help
-Mostra l'help.
+.B --help
+Show usage and exit.
 
 .SH FILES
 .TP
-\fI/etc/security/pam_facial.conf\fR
-File di configurazione principale.
-
+.B /etc/pam_facial_auth/images/USER
+Training image directory.
 .TP
-\fI/etc/pam_facial_auth/models/<user>.xml\fR
-Modello LBPH generato.
+.B /etc/pam_facial_auth/models/USER.xml
+Generated LBPH model.
+.TP
+.B /etc/security/pam_facial.conf
+Global configuration.
 
-.SH SEE ALSO
-.BR facial_capture (1),
-.BR facial_test (1),
-.BR pam_facial_auth (8)
+.SH AUTHOR
+Andrea Postiglione

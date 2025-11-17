@@ -1,51 +1,62 @@
-.TH FACIAL_TEST 1 "2025" "pam_facial_auth" "User Commands"
+.TH FACIAL_TEST 1 "2025-01" "pam_facial_auth" "User Commands"
 .SH NAME
-facial_test \- manually test facial authentication
+facial_test \- test facial recognition for a given user
 
 .SH SYNOPSIS
 .B facial_test
-\-u \fIuser\fR [options]
+\-u USER
+[\-d DEVICE] [\-g] [\-v]
+[\-m FILE] [\-c FILE]
 
 .SH DESCRIPTION
-\fBfacial_test\fR esegue un test interattivo di riconoscimento facciale
-utilizzando il modello LBPH dell’utente.
-È utile per eseguire debug prima di configurare PAM.
+The
+.B facial_test
+utility loads the trained XML facial model for the specified user and attempts
+to authenticate using the webcam.
+
+This is the standalone test tool and does not interact with PAM.
 
 .SH OPTIONS
 .TP
-.BR -u ", " --user " " \fIuser\fR
-Utente da verificare (obbligatorio).
+.B \-u, --user USER
+User whose model will be tested. Required.
 
 .TP
-.BR -m ", " --model " " \fIfile.xml\fR
-Percorso alternativo del modello.
+.B \-d, --device DEVICE
+Webcam device (default:
+/dev/video0).
 
 .TP
-.BR -d ", " --device " " \fI/dev/videoX\fR
-Dispositivo video da utilizzare.
+.B \-m, --model FILE
+Model file path
+(default:
+/etc/pam_facial_auth/models/USER.xml).
 
 .TP
-.BR -c ", " --config " " \fIfile\fR
-File di configurazione. Default:
-\fI/etc/security/pam_facial.conf\fR.
+.B \-g, --nogui
+Disable GUI preview windows.
 
 .TP
-.BR --threshold " " \fIvalue\fR
-Soglia LBPH personalizzata.
+.B \-v, --verbose
+Enable verbose logging.
 
 .TP
-.BR --nogui
-Disabilità la GUI.
+.B \-c, --config FILE
+Load settings from a configuration file
+(default:
+/etc/security/pam_facial.conf).
 
 .TP
-.BR -v ", " --verbose
-Output dettagliato.
+.B --help
+Show help and exit.
 
+.SH FILES
 .TP
-.BR --help
-Mostra la guida.
+.B /etc/pam_facial_auth/models/USER.xml
+Model file.
+.TP
+.B /etc/security/pam_facial.conf
+Configuration file.
 
-.SH SEE ALSO
-.BR facial_capture (1),
-.BR facial_training (1),
-.BR pam_facial_auth (8)
+.SH AUTHOR
+Andrea Postiglione
