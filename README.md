@@ -46,3 +46,7 @@ facial_test -u user -n -v
 
 example 
 auth pam_facial_auth.so debug=true nogui=true
+
+
+- Legal Information
+pam_facial_auth is released under the GNU GPL 3
