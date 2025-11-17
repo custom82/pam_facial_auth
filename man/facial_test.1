@@ -1,37 +1,51 @@
-.TH FACIAL_TEST 1 "November 2025" "1.0" "Facial Authentication"
+.TH FACIAL_TEST 1 "2025" "pam_facial_auth" "User Commands"
 .SH NAME
-facial_test \- Test del modello di riconoscimento facciale
+facial_test \- manually test facial authentication
+
 .SH SYNOPSIS
 .B facial_test
-[\fIoptions\fR] \fItest\fR \fIimage_path\fR
+\-u \fIuser\fR [options]
 
 .SH DESCRIPTION
-Questo comando permette di testare un'immagine usando il modello di riconoscimento facciale addestrato. Può essere eseguito in modalità grafica o tramite console.
+\fBfacial_test\fR esegue un test interattivo di riconoscimento facciale
+utilizzando il modello LBPH dell’utente.
+È utile per eseguire debug prima di configurare PAM.
 
 .SH OPTIONS
-.B \-\-no\-gui
-Non apre una finestra grafica durante il test del riconoscimento facciale. Utile quando il comando è eseguito in ambienti senza display grafico.
+.TP
+.BR -u ", " --user " " \fIuser\fR
+Utente da verificare (obbligatorio).
 
-.B \-\-classifier lbph|fisher|eigen
-Specifica il tipo di classificatore da utilizzare per il riconoscimento facciale.
-- lbph: Local Binary Patterns Histograms (default)
-- fisher: Fisherfaces
-- eigen: Eigenfaces
+.TP
+.BR -m ", " --model " " \fIfile.xml\fR
+Percorso alternativo del modello.
 
-.SH ARGOMENTI
-\fIimage_path\fR
-Il percorso dell'immagine da testare. L'immagine deve essere un'immagine JPEG contenente un volto.
+.TP
+.BR -d ", " --device " " \fI/dev/videoX\fR
+Dispositivo video da utilizzare.
 
-.SH ESEMPIO
-Testare un'immagine con il classificatore Fisher:
-.B facial_test test /path/to/image.jpg --classifier fisher
+.TP
+.BR -c ", " --config " " \fIfile\fR
+File di configurazione. Default:
+\fI/etc/security/pam_facial.conf\fR.
 
-Testare un'immagine senza GUI:
-.B facial_test test /path/to/image.jpg --no-gui
+.TP
+.BR --threshold " " \fIvalue\fR
+Soglia LBPH personalizzata.
 
-.SH FILES
-face_model.xml
-Il modello salvato dopo l'allenamento, utilizzato per il riconoscimento facciale.
+.TP
+.BR --nogui
+Disabilità la GUI.
 
-.SH AUTHOR
-Sviluppato da [Il Tuo Nome].
+.TP
+.BR -v ", " --verbose
+Output dettagliato.
+
+.TP
+.BR --help
+Mostra la guida.
+
+.SH SEE ALSO
+.BR facial_capture (1),
+.BR facial_training (1),
+.BR pam_facial_auth (8)

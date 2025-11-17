@@ -1,0 +1,82 @@
+.TH PAM_FACIAL_AUTH 8 "2025" "pam_facial_auth" "PAM Modules"
+.SH NAME
+pam_facial_auth \- PAM module for facial authentication using OpenCV LBPH
+
+.SH SYNOPSIS
+.B auth  required  pam_facial_auth.so
+[\fIdebug\fR] [\fInogui\fR] [\fIthreshold=<val>\fR]
+[\fIdevice=/dev/videoX\fR]
+
+.SH DESCRIPTION
+\fBpam_facial_auth\fR è un modulo PAM che aggiunge autenticazione
+facciale basata su OpenCV (LBPH) come fattore di autenticazione
+addizionale.
+Può essere usato:
+
+ - dopo \fIpam_unix.so\fR (password → volto)
+ - oppure prima di esso (volto → password)
+ - come \fBrequired\fR per MFA reale
+ - come \fBsufficient\fR per login passwordless
+
+Il modello facciale deve essere stato generato tramite:
+\fIfacial_capture(1)\fR e \fIfacial_training(1)\fR.
+
+.SH OPTIONS
+.TP
+.B debug
+Abilita logging dettagliato tramite syslog.
+
+.TP
+.B nogui
+Disabilita eventuali GUI.
+
+.TP
+.B device=/dev/videoX
+Specifica la webcam.
+
+.TP
+.B threshold=<val>
+Soglia LBPH personalizzata.
+
+.TP
+.B config=/path
+Percorso alternativo al file di configurazione
+(/etc/security/pam_facial.conf).
+
+.TP
+.B models=/path/to/models
+Percorso dei modelli LBPH.
+
+.SH FILES
+.TP
+\fI/etc/security/pam_facial.conf\fR
+Configurazione globale.
+
+.TP
+\fI/etc/pam_facial_auth/models/<user>.xml\fR
+Modello LBPH utente.
+
+.TP
+\fI/etc/pam_facial_auth/images/<user>\fR
+Dataset immagini.
+
+.SH EXAMPLES
+.TP
+Dopo password (MFA reale):
+.br
+auth  required  pam_unix.so
+.br
+auth  required  pam_facial_auth.so debug
+
+.TP
+Prima della password:
+.br
+auth  sufficient  pam_facial_auth.so
+
+.SH SEE ALSO
+.BR facial_capture (1),
+.BR facial_training (1),
+.BR facial_test (1)
+
+.SH AUTHOR
+Andrea Postiglione & ChatGPT

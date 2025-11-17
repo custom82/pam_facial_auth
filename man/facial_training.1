@@ -1,38 +1,57 @@
-.TH FACIAL_TRAINING 1 "November 2025" "1.0" "Facial Authentication"
+.TH FACIAL_TRAINING 1 "2025" "pam_facial_auth" "User Commands"
 .SH NAME
-facial_training \- Allena il modello di riconoscimento facciale
+facial_training \- train a facial recognition model for an user
+
 .SH SYNOPSIS
 .B facial_training
-[\fIoptions\fR] \fItrain\fR \fIdata_dir\fR
+\-u \fIuser\fR [options]
 
 .SH DESCRIPTION
-Questo comando allena un modello di riconoscimento facciale usando le immagini presenti nella directory dei dati. Le immagini devono essere etichettate correttamente e contenere volti di utenti diversi. Supporta diversi classificatori (LBPH, Fisherfaces, Eigenfaces).
+\fBfacial_training\fR addestra un modello LBPH utilizzando le immagini
+acquisite tramite \fBfacial_capture\fR.
+Il modello risultante viene salvato nel percorso:
+\fI/etc/pam_facial_auth/models/<user>.xml\fR.
 
 .SH OPTIONS
-.B \-\-no\-gui
-Non apre una finestra grafica durante l'allenamento. Utile quando il comando è eseguito in ambienti senza display grafico.
+.TP
+.BR -u ", " --user " " \fIuser\fR
+Utente per cui addestrare il modello (obbligatorio).
 
-.B \-\-classifier lbph|fisher|eigen
-Specifica il tipo di classificatore da utilizzare per l'allenamento del modello.
-- lbph: Local Binary Patterns Histograms (default)
-- fisher: Fisherfaces
-- eigen: Eigenfaces
+.TP
+.BR -i ", " --input " " \fIdir\fR
+Directory alternativa contenente le immagini.
 
-.SH ARGOMENTI
-\fIdata_dir\fR
-Il percorso alla directory contenente le immagini da utilizzare per l'allenamento. Le immagini devono essere etichettate correttamente con il nome del file nel formato `ID_Utente_XX.jpg`.
+.TP
+.BR -o ", " --output " " \fIfile.xml\fR
+Percorso alternativo del modello LBPH.
 
-.SH ESEMPIO
-Allenare un modello utilizzando il classificatore Fisherfaces:
-.B facial_training train /path/to/data/directory --classifier fisher
+.TP
+.BR -f ", " --force
+Sovrascrive eventuali modelli preesistenti.
 
-Allenare un modello senza GUI:
-.B facial_training train /path/to/data/directory --no-gui
+.TP
+.BR -v ", " --verbose
+Debug dettagliato.
+
+.TP
+.BR -c ", " --config " " \fIfile\fR
+Percorso del file di configurazione.
+Default: \fI/etc/security/pam_facial.conf\fR.
+
+.TP
+.BR --help
+Mostra l'help.
 
 .SH FILES
-face_model.xml
-Il modello di riconoscimento facciale salvato dopo l'allenamento.
+.TP
+\fI/etc/security/pam_facial.conf\fR
+File di configurazione principale.
 
-.SH AUTHOR
-Sviluppato da [Il Tuo Nome].
+.TP
+\fI/etc/pam_facial_auth/models/<user>.xml\fR
+Modello LBPH generato.
 
+.SH SEE ALSO
+.BR facial_capture (1),
+.BR facial_test (1),
+.BR pam_facial_auth (8)

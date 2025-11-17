@@ -1,0 +1,77 @@
+.TH FACIAL_CAPTURE 1 "2025" "pam_facial_auth" "User Commands"
+.SH NAME
+facial_capture \- capture face images for facial authentication
+
+.SH SYNOPSIS
+.B facial_capture
+\-u \fIuser\fR [options]
+
+.SH DESCRIPTION
+\fBfacial_capture\fR acquisisce una serie di fotogrammi dalla webcam
+e salva le immagini del volto dell'utente nel percorso configurato
+(direttòrio immagini sotto \fI/etc/pam_facial_auth/images/<user>\fR).
+Le immagini verranno utilizzate come dataset di addestramento per
+il riconoscimento facciale tramite LBPH.
+
+.SH OPTIONS
+.TP
+.BR -u ", " --user " " \fIuser\fR
+Nome dell'utente (obbligatorio).
+
+.TP
+.BR -d ", " --device " " \fI/dev/videoX\fR
+Dispositivo video da utilizzare. Default: \fI/dev/video0\fR.
+
+.TP
+.BR -w ", " --width " " \fIpx\fR
+Larghezza dei fotogrammi. Default: 640.
+
+.TP
+.BR -h ", " --height " " \fIpx\fR
+Altezza dei fotogrammi. Default: 480.
+
+.TP
+.BR -n ", " --frames " " \fInum\fR
+Numero di frame da acquisire. Default: 5.
+
+.TP
+.BR -s ", " --sleep " " \fIms\fR
+Delay tra un frame e il successivo in millisecondi. Default: 500.
+
+.TP
+.BR -f ", " --force
+Sovrascrive eventuali immagini preesistenti.
+
+.TP
+.BR -g ", " --nogui
+Disabilita l'anteprima video GUI.
+
+.TP
+.BR -v ", " --verbose
+Abilita output dettagliato / debug.
+
+.TP
+.BR -c ", " --config " " \fIfile\fR
+Percorso del file di configurazione. Default:
+\fI/etc/security/pam_facial.conf\fR.
+
+.TP
+.BR --help
+Mostra l'help.
+
+.SH FILES
+.TP
+\fI/etc/security/pam_facial.conf\fR
+File di configurazione principale.
+
+.TP
+\fI/etc/pam_facial_auth/images/<user>\fR
+Percorso delle immagini catturate.
+
+.SH SEE ALSO
+.BR facial_training (1),
+.BR facial_test (1),
+.BR pam_facial_auth (8)
+
+.SH AUTHOR
+Andrea Postiglione & ChatGPT
