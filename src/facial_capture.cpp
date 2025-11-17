@@ -26,7 +26,6 @@ static void print_usage(const char *prog) {
     << "  -g, --nogui             Disable GUI preview\n"
     << "  -v, --verbose           Enable verbose/debug output\n"
     << "  -c, --config <file>     Config file (default: /etc/security/pam_facial.conf)\n"
-    << "  -n, --number <frames>   Number of frames to capture\n"
     << "  --help                  Show this help message\n";
 }
 
