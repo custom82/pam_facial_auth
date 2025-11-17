@@ -31,11 +31,11 @@ How it Work
 
 - Capture Face Images
 
-facial_capture -u user -d /dev/video0 -g -v
+facial_capture -u user -d /dev/video0 -g -n 500 -v
 
 - Train your images
 
-facial_training -u user -m lpbh -v 
+facial_training -u user -i /etc/pam_facial_auth/images/user -m lpbh -v 
 
 - Test Authentication
 
