@@ -1,0 +1,13 @@
+Source: pam-facial-auth
+Section: utils
+Priority: optional
+Maintainer: Andrea Postiglione <your@email>
+Build-Depends: debhelper-compat (= 13), cmake, g++, libpam0g-dev, libopencv-dev
+Standards-Version: 4.6.0
+
+Package: pam-facial-auth
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, libpam-modules
+Description: PAM module providing facial recognition authentication
+ This package contains the PAM module pam_facial_auth, along with
+ CLI tools to capture, train and test facial models using OpenCV.

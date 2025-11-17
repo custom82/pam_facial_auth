@@ -1,0 +1,11 @@
+usr/lib/libfacialauth.so usr/lib64/
+usr/lib/security/pam_facial_auth.so usr/lib64/security/
+usr/bin/facial_capture usr/sbin/
+usr/bin/facial_training usr/sbin/
+usr/bin/facial_test usr/sbin/
+usr/share/man/man1/facial_capture.1
+usr/share/man/man1/facial_training.1
+usr/share/man/man1/facial_test.1
+usr/share/man/man8/pam_facial_auth.8
+etc/security/pam_facial.conf
+etc/pam_facial_auth/
