@@ -48,5 +48,7 @@ example
 auth pam_facial_auth.so debug=true nogui=true
 
 
-- Legal Information
+Legal Information
+-----------------
+
 pam_facial_auth is released under the GNU GPL 3
