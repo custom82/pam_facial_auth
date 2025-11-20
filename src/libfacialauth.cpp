@@ -97,8 +97,9 @@ bool read_kv_config(const std::string &path, FacialAuthConfig &cfg, std::string 
 // Logging utility
 // ==========================================================
 
-void log_tool(const FacialAuthConfig &cfg, const char* level, const char* fmt, ...) {
-	if (!cfg.debug && std::string(level) == "DEBUG") return;
+void log_tool(const FacialAuthConfig &cfg, const char* level, const char* fmt, ...)
+{
+	std::string lvl(level ? level : "");
 
 	char buf[1024];
 	va_list ap;
@@ -106,12 +107,16 @@ void log_tool(const FacialAuthConfig &cfg, const char* level, const char* fmt, .
 	vsnprintf(buf, sizeof(buf), fmt, ap);
 	va_end(ap);
 
-	std::string msg = std::string("[") + level + "] " + buf + "\n";
+	std::string msg = "[" + lvl + "] " + buf + "\n";
 
-	// stderr
-	std::fwrite(msg.c_str(), 1, msg.size(), stderr);
+	bool is_error = (lvl == "ERROR");
 
-	// log file
+	// stderr → solo se debug attivo OPPURE se è un errore
+	if (cfg.debug || is_error) {
+		std::fwrite(msg.c_str(), 1, msg.size(), stderr);
+	}
+
+	// File di log → sempre se definito
 	if (!cfg.log_file.empty()) {
 		std::ofstream logf(cfg.log_file, std::ios::app);
 		if (logf.is_open()) {
@@ -119,6 +124,7 @@ void log_tool(const FacialAuthConfig &cfg, const char* level, const char* fmt, .
 		}
 	}
 }
+
 
 void ensure_dirs(const std::string &path) {
 	if (path.empty()) return;
