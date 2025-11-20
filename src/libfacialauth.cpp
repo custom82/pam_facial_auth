@@ -12,11 +12,12 @@
 #include <unistd.h>
 #include <chrono>
 #include <thread>
+#include <cctype>
 
 namespace fs = std::filesystem;
 
 // ==========================================================
-// Utility
+// Utility helpers
 // ==========================================================
 
 static bool file_exists(const std::string &path) {
@@ -46,11 +47,11 @@ static std::string trim(const std::string &s) {
 	return s.substr(start, end - start + 1);
 }
 
-static std::string to_lower(const std::string &s) {
+static std::string to_lower_str(const std::string &s) {
 	std::string out;
 	out.reserve(s.size());
 	for (unsigned char c : s)
-		out.push_back(std::tolower(c));
+		out.push_back(static_cast<char>(std::tolower(c)));
 	return out;
 }
 
@@ -111,7 +112,7 @@ bool fa_load_config(const std::string &path,
 			continue;
 		std::string key = trim(line.substr(0, pos));
 		std::string val = trim(line.substr(pos + 1));
-		std::string k   = to_lower(key);
+		std::string k   = to_lower_str(key);
 
 		if (k == "basedir")              cfg.basedir = val;
 		else if (k == "device")          cfg.device = val;
@@ -119,16 +120,18 @@ bool fa_load_config(const std::string &path,
 		else if (k == "frames")          cfg.frames = std::stoi(val);
 		else if (k == "width")           cfg.width  = std::stoi(val);
 		else if (k == "height")          cfg.height = std::stoi(val);
+		else if (k == "frame_width")     cfg.width  = std::stoi(val);
+		else if (k == "frame_height")    cfg.height = std::stoi(val);
 		else if (k == "sleep_ms")        cfg.sleep_ms = std::stoi(val);
 		else if (k == "threshold")       cfg.threshold = std::stod(val);
-		else if (k == "debug")           cfg.debug = (val == "1" || to_lower(val) == "true");
-		else if (k == "force_overwrite") cfg.force_overwrite = (val == "1" || to_lower(val) == "true");
+		else if (k == "debug")           cfg.debug = (val == "1" || to_lower_str(val) == "true");
+		else if (k == "force_overwrite") cfg.force_overwrite = (val == "1" || to_lower_str(val) == "true");
 
 		// DNN
-		else if (k == "dnn_type")        cfg.dnn_type = to_lower(val);
+		else if (k == "dnn_type")        cfg.dnn_type = to_lower_str(val);
 		else if (k == "dnn_model")       cfg.dnn_model_path = val;
 		else if (k == "dnn_proto")       cfg.dnn_proto_path = val;
-		else if (k == "dnn_device")      cfg.dnn_device = to_lower(val);
+		else if (k == "dnn_device")      cfg.dnn_device = to_lower_str(val);
 		else if (k == "dnn_threshold")   cfg.dnn_threshold = std::stod(val);
 	}
 
@@ -173,7 +176,7 @@ static bool open_camera(const FacialAuthConfig &cfg,
 }
 
 // ==========================================================
-// DNN helpers
+// DNN helpers (Caffe / TensorFlow / ONNX / OpenVINO)
 // ==========================================================
 
 namespace {
@@ -182,7 +185,7 @@ namespace {
 								   const std::string &model,
 								const std::string &proto)
 	{
-		std::string t = to_lower(dnn_type);
+		std::string t = to_lower_str(dnn_type);
 
 		if (t == "caffe") {
 			if (proto.empty())
@@ -208,7 +211,7 @@ namespace {
 	void fa_set_dnn_backend_and_target(cv::dnn::Net &net,
 									   const std::string &dnn_device)
 	{
-		std::string dev = to_lower(dnn_device);
+		std::string dev = to_lower_str(dnn_device);
 
 		if (dev == "cuda") {
 			#ifdef HAVE_OPENCV_DNN_CUDA
@@ -250,7 +253,7 @@ FaceRecWrapper::FaceRecWrapper()
 }
 
 FaceRecWrapper::FaceRecWrapper(const std::string &modelType_)
-: modelType(to_lower(modelType_))
+: modelType(to_lower_str(modelType_))
 {
 	if (modelType == "lbph" || modelType.empty()) {
 		recognizer = cv::face::LBPHFaceRecognizer::create();
@@ -262,7 +265,8 @@ FaceRecWrapper::FaceRecWrapper(const std::string &modelType_)
 		recognizer = cv::face::FisherFaceRecognizer::create();
 	}
 	else if (modelType == "dnn") {
-		recognizer = cv::face::LBPHFaceRecognizer::create(); // dummy per l'XML
+		// Per DNN usiamo un riconoscitore LBPH "dummy" per avere un XML valido
+		recognizer = cv::face::LBPHFaceRecognizer::create();
 		use_dnn = true;
 	}
 	else {
@@ -328,7 +332,7 @@ bool FaceRecWrapper::load_dnn_from_model_file(const std::string &modelFile)
 bool FaceRecWrapper::Load(const std::string &modelFile) {
 	try {
 		recognizer->read(modelFile);
-		// prova a leggere meta DNN
+		// prova a leggere meta DNN (se presenti)
 		load_dnn_from_model_file(modelFile);
 		return true;
 	} catch (const std::exception &e) {
@@ -346,6 +350,7 @@ bool FaceRecWrapper::Save(const std::string &modelFile) const {
 			cv::FileStorage fs(modelFile, cv::FileStorage::APPEND);
 			if (fs.isOpened()) {
 				fs << "fa_dnn_enabled"   << 1;
+				fs << "fa_algorithm"     << "dnn";
 				fs << "fa_dnn_type"      << dnn_type;
 				fs << "fa_dnn_model"     << dnn_model_path;
 				fs << "fa_dnn_proto"     << dnn_proto_path;
@@ -366,9 +371,7 @@ bool FaceRecWrapper::Train(const std::vector<cv::Mat> &images,
 	if (images.empty() || labels.empty() || images.size() != labels.size())
 		return false;
 
-	// Per un DNN puro pre-addestrato potremmo anche non fare nulla,
-	// ma per semplicità alleniamo comunque il recognizer classico
-	// (o saltiamo se use_dnn).
+	// Per un DNN puro pre-addestrato possiamo saltare il training
 	if (use_dnn)
 		return true;
 
@@ -405,10 +408,23 @@ bool FaceRecWrapper::Train(const std::vector<cv::Mat> &images,
 
 							   float best_score = 0.0f;
 
+							   // Caso classico SSD: [1, 1, N, 7]
 							   if (out.dims == 4 && out.size[2] > 0 && out.size[3] >= 7) {
 								   int N = out.size[2];
+								   const float* data = out.ptr<float>(0, 0); // [N][7]
+
 								   for (int i = 0; i < N; ++i) {
-									   float score = out.at<float>(0, 0, i, 2);
+									   float score = data[i * 7 + 2]; // confidence
+									   if (score > best_score)
+										   best_score = score;
+								   }
+							   }
+							   // Fallback generico: [N,7]
+							   else if (out.rows > 0 && out.cols >= 7) {
+								   int N = out.rows;
+								   for (int i = 0; i < N; ++i) {
+									   const float* row = out.ptr<float>(i);
+									   float score = row[2];
 									   if (score > best_score)
 										   best_score = score;
 								   }
@@ -480,7 +496,6 @@ bool FaceRecWrapper::Train(const std::vector<cv::Mat> &images,
 							   if (faces.empty())
 								   return false;
 
-							   // Prendi la faccia più grande
 							   auto best = faces[0];
 							   for (const auto &r : faces) {
 								   if (r.area() > best.area())
@@ -501,6 +516,8 @@ bool FaceRecWrapper::Train(const std::vector<cv::Mat> &images,
 								std::string &log,
 								const std::string &img_format)
 						   {
+							   (void)log;
+
 							   std::string device_used;
 							   cv::VideoCapture cap;
 							   if (!open_camera(cfg, cap, device_used)) {
@@ -591,7 +608,8 @@ bool fa_train_user(const std::string &user,
 				   bool force,
 				   std::string &log)
 {
-	(void)force; // non usato attualmente: gestito a livello superiore
+	(void)force;
+	(void)log;
 
 	std::string train_dir = inputDir.empty()
 						  ? fa_user_image_dir(cfg, user)
@@ -623,11 +641,10 @@ bool fa_train_user(const std::string &user,
 		return false;
 	}
 
-	std::string mt = to_lower(method);
+	std::string mt = to_lower_str(method);
 	FaceRecWrapper rec(mt);
 
 	if (mt == "dnn") {
-		// Per DNN puro: nessun training, solo salvataggio meta nel modello
 		rec.ConfigureDNN(cfg);
 	}
 
@@ -656,6 +673,8 @@ bool fa_test_user(const std::string &user,
 				  int &best_label,
 				  std::string &log)
 {
+	(void)log;
+
 	std::string model_file = modelPath.empty()
 						   ? fa_user_model_path(cfg, user)
 						   : modelPath;
@@ -730,7 +749,6 @@ bool fa_test_user(const std::string &user,
 			 "Facial authentication FAILED for user %s (best_conf=%.4f thr=%.4f)",
 			 user.c_str(), best_conf, cfg.threshold);
 
-	(void)log; // log esterno non usato per ora
 	return false;
 }
 
