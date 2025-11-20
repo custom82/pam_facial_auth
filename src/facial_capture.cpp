@@ -222,7 +222,7 @@ int main(int argc, char *argv[]) {
 
     std::cout << "[INFO] Starting capture for user: " << user << "\n";
 
-    if (!fa_capture_images(user, cfg, force, log)) {
+    if (!fa_capture_images(user, cfg, force, log, img_format)) {
         std::cerr << "[ERROR] Capture failed\n";
         return 1;
     }
