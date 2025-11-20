@@ -1,3 +1,4 @@
+// Updated version
 #include "../include/libfacialauth.h"
 #include <getopt.h>
 #include <iostream>
@@ -78,13 +79,9 @@ int main(int argc, char *argv[]) {
     bool clean_model = false;
     bool reset_all = false;
     bool list_images = false;
-    bool show_help = false;
 
     int width = -1, height = -1;
     int frames = -1;
-
-    // NEW: image format
-    std::string img_format = "png"; // default
 
     static struct option long_opts[] = {
         {"user",        required_argument, 0, 'u'},
@@ -96,83 +93,61 @@ int main(int argc, char *argv[]) {
         {"force",       no_argument,       0, 'f'},
         {"debug",       no_argument,       0, 'v'},
         {"nogui",       no_argument,       0, 'g'},
-
         {"clean",       no_argument,       0, 1000},
         {"clean-model", no_argument,       0, 1001},
         {"reset",       no_argument,       0, 1002},
         {"list",        no_argument,       0, 1003},
-        {"help",        no_argument,       0, 1004},
-
-        {"format",      required_argument, 0, 1005},  // NEW
-
         {0, 0, 0, 0}
     };
 
     int opt, idx;
     while ((opt = getopt_long(argc, argv, "u:d:w:h:n:c:fvg", long_opts, &idx)) != -1) {
         switch (opt) {
-            case 'u': user = optarg; break;
-            case 'd': cfg.device = optarg; break;
-            case 'w': width = std::stoi(optarg); break;
-            case 'h': height = std::stoi(optarg); break;
-            case 'n': frames = std::stoi(optarg); break;
-            case 'c': config_path = optarg; break;
-            case 'f': force = true; break;
-            case 'v': cfg.debug = true; break;
-            case 'g': cfg.nogui = true; break;
+            case 'u':
+                user = optarg;
+                break;
+            case 'd':
+                cfg.device = optarg;
+                break;
+            case 'w':
+                width = std::stoi(optarg);
+                break;
+            case 'h':
+                height = std::stoi(optarg);
+                break;
+            case 'n':
+                frames = std::stoi(optarg);
+                break;
+            case 'c':
+                config_path = optarg;
+                break;
+            case 'f':
+                force = true;
+                break;
+            case 'v':
+                cfg.debug = true;
+                break;
+            case 'g':
+                cfg.nogui = true;
+                break;
 
-            case 1000: clean_only = true; break;
-            case 1001: clean_model = true; break;
-            case 1002: reset_all = true; break;
-            case 1003: list_images = true; break;
-            case 1004: show_help = true; break;
-
-            case 1005: // --format
-                img_format = optarg;
-                if (img_format != "png" && img_format != "jpg" && img_format != "jpeg") {
-                    std::cerr << "Invalid format: " << img_format << "\n";
-                    return 1;
-                }
+            case 1000:
+                clean_only = true;
+                break;
+            case 1001:
+                clean_model = true;
+                break;
+            case 1002:
+                reset_all = true;
+                break;
+            case 1003:
+                list_images = true;
                 break;
 
             default:
                 std::cerr << "Unknown option\n";
                 return 1;
         }
-    }
-
-    // ==========================================================
-    // HELP
-    // ==========================================================
-
-    if (show_help) {
-        std::cout <<
-        "Usage: facial_capture [options]\n"
-        "\n"
-        "Required:\n"
-        "  -u, --user USER            User name\n"
-        "\n"
-        "General options:\n"
-        "  -d, --device DEVICE        Camera device\n"
-        "  -w, --width WIDTH          Frame width\n"
-        "  -h, --height HEIGHT        Frame height\n"
-        "  -n, --frames N             Number of frames to capture\n"
-        "  -c, --config PATH          Path to config file\n"
-        "  -f, --force                Overwrite existing images\n"
-        "  -v, --debug                Enable verbose output\n"
-        "  -g, --nogui                Disable GUI\n"
-        "\n"
-        "Maintenance:\n"
-        "      --clean                Delete all images\n"
-        "      --clean-model          Delete user model\n"
-        "      --reset                Delete images + model\n"
-        "      --list                 List images\n"
-        "\n"
-        "Image options:\n"
-        "      --format {png|jpg}     Set image format (default: png)\n"
-        "\n"
-        "  --help                     Display this help\n";
-        return 0;
     }
 
     if (user.empty()) {
@@ -211,7 +186,7 @@ int main(int argc, char *argv[]) {
     }
 
     // ==========================================================
-    // --reset
+    // --reset = clean + clean-model
     // ==========================================================
 
     if (reset_all) {
@@ -245,16 +220,9 @@ int main(int argc, char *argv[]) {
     // Capture mode
     // ==========================================================
 
-    std::cout << "[INFO] Starting capture for user: " << user
-    << " (format: " << img_format << ")\n";
+    std::cout << "[INFO] Starting capture for user: " << user << "\n";
 
-    // Call underlying library capture
-    std::string log2;
-
-    // We patch only the filename logic inside libfacialauth — but you already
-    // have the latest version (that supports extension override)
-
-    if (!fa_capture_images(user, cfg, force, log2, img_format)) {
+    if (!fa_capture_images(user, cfg, force, log)) {
         std::cerr << "[ERROR] Capture failed\n";
         return 1;
     }
