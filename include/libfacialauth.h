@@ -8,6 +8,21 @@
 #include <opencv2/face.hpp>
 
 // ==========================================================
+// Default config file path
+// ==========================================================
+#ifndef FACIALAUTH_CONFIG_DEFAULT
+#define FACIALAUTH_CONFIG_DEFAULT "/etc/security/pam_facial.conf"
+#endif
+
+// ==========================================================
+// Extra utility helpers
+// ==========================================================
+
+// Valid image formats: .jpg .jpeg .png
+bool fa_is_valid_image(const std::string &path);
+
+
+// ==========================================================
 // Global configuration structure
 // ==========================================================
 struct FacialAuthConfig {

@@ -139,6 +139,25 @@ bool file_exists(const std::string &path) {
 }
 
 // ==========================================================
+// Validate that a file is an image (.jpg/.jpeg/.png)
+// ==========================================================
+bool fa_is_valid_image(const std::string &path) {
+	std::string lower;
+
+	lower.reserve(path.size());
+	for (char c : path)
+		lower.push_back(std::tolower(c));
+
+	return (
+		lower.ends_with(".jpg") ||
+		lower.ends_with(".jpeg") ||
+		lower.ends_with(".png")
+	);
+}
+
+
+
+// ==========================================================
 // Camera & Paths
 // ==========================================================
 
