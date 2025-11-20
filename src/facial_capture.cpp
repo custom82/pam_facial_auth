@@ -78,6 +78,7 @@ int main(int argc, char *argv[]) {
     bool clean_model = false;
     bool reset_all = false;
     bool list_images = false;
+    bool show_help = false;
 
     int width = -1, height = -1;
     int frames = -1;
@@ -92,10 +93,13 @@ int main(int argc, char *argv[]) {
         {"force",       no_argument,       0, 'f'},
         {"debug",       no_argument,       0, 'v'},
         {"nogui",       no_argument,       0, 'g'},
+
         {"clean",       no_argument,       0, 1000},
         {"clean-model", no_argument,       0, 1001},
         {"reset",       no_argument,       0, 1002},
         {"list",        no_argument,       0, 1003},
+        {"help",        no_argument,       0, 1004},
+
         {0, 0, 0, 0}
     };
 
@@ -142,11 +146,45 @@ int main(int argc, char *argv[]) {
             case 1003:
                 list_images = true;
                 break;
+            case 1004:
+                show_help = true;
+                break;
 
             default:
                 std::cerr << "Unknown option\n";
                 return 1;
         }
+    }
+
+    // ==========================================================
+    // HELP
+    // ==========================================================
+
+    if (show_help) {
+        std::cout <<
+        "Usage: facial_capture [options]\n"
+        "\n"
+        "Required:\n"
+        "  -u, --user USER            User name\n"
+        "\n"
+        "General options:\n"
+        "  -d, --device DEVICE        Camera device\n"
+        "  -w, --width WIDTH          Frame width\n"
+        "  -h, --height HEIGHT        Frame height\n"
+        "  -n, --frames N             Number of frames to capture\n"
+        "  -c, --config PATH          Path to config file\n"
+        "  -f, --force                Overwrite existing images\n"
+        "  -v, --debug                Enable verbose output\n"
+        "  -g, --nogui                Disable GUI\n"
+        "\n"
+        "Maintenance:\n"
+        "      --clean                Delete all images\n"
+        "      --clean-model          Delete user model\n"
+        "      --reset                Delete images + model\n"
+        "      --list                 List images\n"
+        "\n"
+        "  --help                     Display this help\n";
+        return 0;
     }
 
     if (user.empty()) {
