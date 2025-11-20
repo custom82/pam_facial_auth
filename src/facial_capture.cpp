@@ -1,4 +1,3 @@
-// Updated version
 #include "../include/libfacialauth.h"
 #include <getopt.h>
 #include <iostream>
@@ -97,6 +96,7 @@ int main(int argc, char *argv[]) {
         {"clean-model", no_argument,       0, 1001},
         {"reset",       no_argument,       0, 1002},
         {"list",        no_argument,       0, 1003},
+        {"format", required_argument, 0, 1005},
         {0, 0, 0, 0}
     };
 
@@ -144,6 +144,8 @@ int main(int argc, char *argv[]) {
                 list_images = true;
                 break;
 
+
+            case 1005: img_format = optarg; break;
             default:
                 std::cerr << "Unknown option\n";
                 return 1;
