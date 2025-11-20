@@ -83,6 +83,9 @@ int main(int argc, char *argv[]) {
     int width = -1, height = -1;
     int frames = -1;
 
+    // NEW: image format
+    std::string img_format = "png"; // default
+
     static struct option long_opts[] = {
         {"user",        required_argument, 0, 'u'},
         {"device",      required_argument, 0, 'd'},
@@ -100,54 +103,36 @@ int main(int argc, char *argv[]) {
         {"list",        no_argument,       0, 1003},
         {"help",        no_argument,       0, 1004},
 
+        {"format",      required_argument, 0, 1005},  // NEW
+
         {0, 0, 0, 0}
     };
 
     int opt, idx;
     while ((opt = getopt_long(argc, argv, "u:d:w:h:n:c:fvg", long_opts, &idx)) != -1) {
         switch (opt) {
-            case 'u':
-                user = optarg;
-                break;
-            case 'd':
-                cfg.device = optarg;
-                break;
-            case 'w':
-                width = std::stoi(optarg);
-                break;
-            case 'h':
-                height = std::stoi(optarg);
-                break;
-            case 'n':
-                frames = std::stoi(optarg);
-                break;
-            case 'c':
-                config_path = optarg;
-                break;
-            case 'f':
-                force = true;
-                break;
-            case 'v':
-                cfg.debug = true;
-                break;
-            case 'g':
-                cfg.nogui = true;
-                break;
+            case 'u': user = optarg; break;
+            case 'd': cfg.device = optarg; break;
+            case 'w': width = std::stoi(optarg); break;
+            case 'h': height = std::stoi(optarg); break;
+            case 'n': frames = std::stoi(optarg); break;
+            case 'c': config_path = optarg; break;
+            case 'f': force = true; break;
+            case 'v': cfg.debug = true; break;
+            case 'g': cfg.nogui = true; break;
 
-            case 1000:
-                clean_only = true;
-                break;
-            case 1001:
-                clean_model = true;
-                break;
-            case 1002:
-                reset_all = true;
-                break;
-            case 1003:
-                list_images = true;
-                break;
-            case 1004:
-                show_help = true;
+            case 1000: clean_only = true; break;
+            case 1001: clean_model = true; break;
+            case 1002: reset_all = true; break;
+            case 1003: list_images = true; break;
+            case 1004: show_help = true; break;
+
+            case 1005: // --format
+                img_format = optarg;
+                if (img_format != "png" && img_format != "jpg" && img_format != "jpeg") {
+                    std::cerr << "Invalid format: " << img_format << "\n";
+                    return 1;
+                }
                 break;
 
             default:
@@ -182,6 +167,9 @@ int main(int argc, char *argv[]) {
         "      --clean-model          Delete user model\n"
         "      --reset                Delete images + model\n"
         "      --list                 List images\n"
+        "\n"
+        "Image options:\n"
+        "      --format {png|jpg}     Set image format (default: png)\n"
         "\n"
         "  --help                     Display this help\n";
         return 0;
@@ -223,7 +211,7 @@ int main(int argc, char *argv[]) {
     }
 
     // ==========================================================
-    // --reset = clean + clean-model
+    // --reset
     // ==========================================================
 
     if (reset_all) {
@@ -257,9 +245,16 @@ int main(int argc, char *argv[]) {
     // Capture mode
     // ==========================================================
 
-    std::cout << "[INFO] Starting capture for user: " << user << "\n";
+    std::cout << "[INFO] Starting capture for user: " << user
+    << " (format: " << img_format << ")\n";
 
-    if (!fa_capture_images(user, cfg, force, log)) {
+    // Call underlying library capture
+    std::string log2;
+
+    // We patch only the filename logic inside libfacialauth — but you already
+    // have the latest version (that supports extension override)
+
+    if (!fa_capture_images(user, cfg, force, log2, img_format)) {
         std::cerr << "[ERROR] Capture failed\n";
         return 1;
     }

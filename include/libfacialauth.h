@@ -76,10 +76,13 @@ private:
 // ==========================================================
 // High-level API (funzioni principali)
 // ==========================================================
-bool fa_capture_images(const std::string &user,
-                       const FacialAuthConfig &cfg,
-                       bool force,
-                       std::string &log);
+bool fa_capture_images(
+    const std::string &user,
+    const FacialAuthConfig &cfg,
+    bool force,
+    std::string &log,
+    const std::string &format
+);
 
 bool fa_train_user(const std::string &user,
                    const FacialAuthConfig &cfg,
