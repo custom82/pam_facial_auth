@@ -234,10 +234,8 @@ bool FaceRecWrapper::Train(const std::vector<cv::Mat> &images,
 								   if (!file_exists(cascadePath) || !faceCascade.load(cascadePath)) {
 									   std::cerr << "[FA-ERROR] Failed to load Haar cascade file: " << cascadePath << "\n";
 									   return false;
-								   } else {
-									   std::cerr << "[FA-INFO] Using Haar cascade: " << cascadePath << "\n";
 								   }
-							   }
+							   	}
 
 							   cv::Mat gray;
 							   cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
