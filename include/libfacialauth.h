@@ -32,6 +32,13 @@ struct FacialAuthConfig {
     std::string haar_cascade_path = "/usr/share/opencv4/haarcascades/haarcascade_frontalface_default.xml";
     std::string training_method = "lbph";
     std::string face_detection_method = "haar";
+
+    // DNN-based face detector configuration
+    // If face_detection_method == "dnn", these must point to valid model files.
+    std::string dnn_proto;   // e.g. deploy.prototxt
+    std::string dnn_model;   // e.g. res10_300x300_ssd.caffemodel
+    double dnn_confidence = 0.5; // min confidence [0,1] for detections
+
     std::string log_file = "/var/log/pam_facial_auth.log";
 
     int width = 640;
