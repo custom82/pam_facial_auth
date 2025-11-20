@@ -73,6 +73,7 @@ int main(int argc, char *argv[]) {
     std::string config_path = "/etc/pam_facial_auth/pam_facial.conf";
     std::string user;
     bool force = false;
+    std::string img_format = "jpg";
 
     bool clean_only = false;
     bool clean_model = false;
@@ -80,10 +81,29 @@ int main(int argc, char *argv[]) {
     bool list_images = false;
 
     int width = -1, height = -1;
-    int frames = -1;
 
-    // formato immagini (nuovo) - default png
-    std::string img_format = "png";
+    auto print_help = []() {
+        std::cout <<
+        "Usage: facial_capture [OPTIONS]\n"
+        "Options:\n"
+        "  -u, --user <name>            User name (REQUIRED)\n"
+        "  -d, --device <dev>           Video device (/dev/video0)\n"
+        "  -w, --width <px>             Width\n"
+        "  -h, --height <px>            Height\n"
+        "  -n, --frames <num>           Number of frames\n"
+        "  -c, --config <file>          Config file path\n"
+        "  -f, --force                  Overwrite existing images\n"
+        "  -v, --debug                  Debug logs\n"
+        "  -g, --nogui                  Disable preview window\n"
+        "      --clean                  Delete images\n"
+        "      --clean-model            Delete model\n"
+        "      --reset                  Delete images + model\n"
+        "      --list                   List images\n"
+        "      --format <png|jpg>       Image format\n"
+        "      --help                   Show help\n";
+    };
+
+    int frames = -1;
 
     static struct option long_opts[] = {
         {"user",        required_argument, 0, 'u'},
@@ -100,6 +120,7 @@ int main(int argc, char *argv[]) {
         {"reset",       no_argument,       0, 1002},
         {"list",        no_argument,       0, 1003},
         {"format",      required_argument, 0, 1005},
+        {"help",        no_argument,       0, 2000},
         {0, 0, 0, 0}
     };
 
@@ -145,10 +166,6 @@ int main(int argc, char *argv[]) {
                 break;
             case 1003:
                 list_images = true;
-                break;
-
-            case 1005:
-                img_format = optarg;
                 break;
 
             default:
@@ -229,7 +246,7 @@ int main(int argc, char *argv[]) {
 
     std::cout << "[INFO] Starting capture for user: " << user << "\n";
 
-    if (!fa_capture_images(user, cfg, force, log, img_format)) {
+    if (!fa_capture_images(user, cfg, force, log)) {
         std::cerr << "[ERROR] Capture failed\n";
         return 1;
     }
