@@ -14,103 +14,68 @@ extern "C" {
     // =======================================================================
     //
     //  - Config predefinito: /etc/security/pam_facial.conf
-    //  - Argomenti PAM (config=, debug=) hanno precedenza sul file
-    //  - Senza debug: modulo silenzioso (niente output a terminale)
-    //  - Con debug: log solo su syslog (pam_syslog), mai su stdout/stderr
-    //  - In caso di fallimento: sempre PAM_AUTH_ERR
+    //  - Usa libfacialauth::fa_test_user per fare l’autenticazione
+    //  - Non gestiamo per ora parametri PAM extra (optional, debug, ecc.)
     // =======================================================================
 
-    int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, const char **argv)
+    static int get_pam_user(pam_handle_t *pamh, std::string &user)
     {
-        const char *user = nullptr;
-
-        // default fisso del config
-        const char *config_path = "/etc/security/pam_facial.conf";
-
-        FacialAuthConfig cfg;      // con i default definiti in libfacialauth.h
-        std::string logbuf;
-
-        // Per fare sì che debug= passato via PAM abbia precedenza sul file
-        bool debug_override_set = false;
-        bool debug_override_val = false;
-
-        // -------------------------------------------------------------------
-        // Parse MODULE ARGUMENTS (stack PAM)
-        // -------------------------------------------------------------------
-        for (int i = 0; i < argc; i++) {
-            if (std::strncmp(argv[i], "config=", 7) == 0) {
-                config_path = argv[i] + 7;
-            } else if (std::strncmp(argv[i], "debug=", 6) == 0) {
-                debug_override_set = true;
-                debug_override_val = str_to_bool(argv[i] + 6, false);
-            }
-            // altri argomenti vengono ignorati dal modulo PAM
+        const char *puser = nullptr;
+        int pam_err = pam_get_user(pamh, &puser, "login: ");
+        if (pam_err != PAM_SUCCESS || !puser || !*puser) {
+            pam_syslog(pamh, LOG_ERR, "Unable to get PAM user");
+            return PAM_USER_UNKNOWN;
         }
-
-        // -------------------------------------------------------------------
-        // Ottiene l'utente
-        // -------------------------------------------------------------------
-        if (pam_get_user(pamh, &user, nullptr) != PAM_SUCCESS || !user || !*user) {
-            // errore serio: lo logghiamo sempre
-            pam_syslog(pamh, LOG_ERR, "Unable to obtain username");
-            return PAM_AUTH_ERR;
-        }
-
-        // -------------------------------------------------------------------
-        // Carica configurazione da file
-        // -------------------------------------------------------------------
-        if (!read_kv_config(config_path, cfg, &logbuf)) {
-            // impossibile leggere la configurazione → fallisce sempre
-            pam_syslog(pamh, LOG_ERR, "Cannot read config file: %s", config_path);
-            return PAM_AUTH_ERR;
-        }
-
-        // debug= nello stack PAM ha precedenza sul file
-        if (debug_override_set) {
-            cfg.debug = debug_override_val;
-        }
-
-        // -------------------------------------------------------------------
-        // Prepara il percorso del modello utente
-        // -------------------------------------------------------------------
-        std::string model_path = fa_user_model_path(cfg, user);
-
-        double best_conf  = 9999.0;
-        int    best_label = -1;
-
-        // -------------------------------------------------------------------
-        // Esegue la verifica biometrica
-        // -------------------------------------------------------------------
-        bool ok = fa_test_user(user, cfg, model_path, best_conf, best_label, logbuf);
-
-        // Log di dettaglio solo se debug attivo
-        if (cfg.debug) {
-            pam_syslog(pamh, LOG_DEBUG,
-                       "FaceAuth user=%s conf=%.2f label=%d",
-                       user, best_conf, best_label);
-        }
-
-        if (!ok) {
-            // Fallimento autenticazione: blocca sempre (comportamento A)
-            pam_syslog(pamh, LOG_NOTICE,
-                       "Face authentication FAILED for user %s", user);
-            return PAM_AUTH_ERR;
-        }
-
-        // Successo: messaggio info solo se debug attivo (per mantenere quiet di default)
-        if (cfg.debug) {
-            pam_syslog(pamh, LOG_INFO,
-                       "Face authentication SUCCESSFUL for user %s", user);
-        }
-
+        user = puser;
         return PAM_SUCCESS;
     }
 
-    // =======================================================================
-    // PAM SETCRED / ACCT_MGMT: moduli "no-op", sempre success
-    // =======================================================================
+    PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
+                                       int flags,
+                                       int argc,
+                                       const char **argv)
+    {
+        (void)flags;
+        (void)argc;
+        (void)argv;
 
-    int pam_sm_setcred(pam_handle_t *pamh, int flags, int argc, const char **argv)
+        std::string user;
+        int ret = get_pam_user(pamh, user);
+        if (ret != PAM_SUCCESS)
+            return ret;
+
+        FacialAuthConfig cfg;
+        std::string log;
+
+        // Carica config predefinita
+        fa_load_config(FACIALAUTH_CONFIG_DEFAULT, cfg, log);
+
+        double best_conf = 0.0;
+        int best_label   = -1;
+
+        bool ok = fa_test_user(user, cfg, "", best_conf, best_label, log);
+
+        if (cfg.debug) {
+            pam_syslog(pamh, LOG_DEBUG,
+                       "FaceAuth user=%s conf=%.4f label=%d",
+                       user.c_str(), best_conf, best_label);
+        }
+
+        if (!ok) {
+            pam_syslog(pamh, LOG_NOTICE,
+                       "Face authentication FAILED for user %s (conf=%.4f thr=%.4f)",
+                       user.c_str(), best_conf, cfg.threshold);
+            return PAM_AUTH_ERR;
+        }
+
+        pam_syslog(pamh, LOG_INFO,
+                   "Face authentication SUCCESS for user %s (conf=%.4f thr=%.4f)",
+                   user.c_str(), best_conf, cfg.threshold);
+        return PAM_SUCCESS;
+    }
+
+    PAM_EXTERN int pam_sm_setcred(pam_handle_t *pamh, int flags,
+                                  int argc, const char **argv)
     {
         (void)pamh;
         (void)flags;
@@ -119,7 +84,28 @@ extern "C" {
         return PAM_SUCCESS;
     }
 
-    int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags, int argc, const char **argv)
+    PAM_EXTERN int pam_sm_open_session(pam_handle_t *pamh, int flags,
+                                       int argc, const char **argv)
+    {
+        (void)pamh;
+        (void)flags;
+        (void)argc;
+        (void)argv;
+        return PAM_SUCCESS;
+    }
+
+    PAM_EXTERN int pam_sm_close_session(pam_handle_t *pamh, int flags,
+                                        int argc, const char **argv)
+    {
+        (void)pamh;
+        (void)flags;
+        (void)argc;
+        (void)argv;
+        return PAM_SUCCESS;
+    }
+
+    PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags,
+                                    int argc, const char **argv)
     {
         (void)pamh;
         (void)flags;

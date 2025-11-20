@@ -1,100 +1,117 @@
 #include "../include/libfacialauth.h"
+
 #include <getopt.h>
 #include <iostream>
 #include <filesystem>
 
 namespace fs = std::filesystem;
 
-int main(int argc, char *argv[]) {
+static void usage(const char *prog)
+{
+	std::cerr <<
+	"Usage: " << prog << " [options]\n"
+	"  -u, --user USER             User name\n"
+	"  -m, --method METHOD         lbph|eigen|fisher|dnn [default: lbph]\n"
+	"  -i, --input-dir DIR         Training images dir\n"
+	"  -o, --output-model FILE     Output model XML\n"
+	"  -c, --config FILE           Config file (default " FACIALAUTH_CONFIG_DEFAULT ")\n"
+	"  -f, --force                 Force overwrite\n"
+	"      --dnn-type T            caffe|tensorflow|onnx|openvino\n"
+	"      --dnn-model PATH        DNN model path\n"
+	"      --dnn-proto PATH        DNN proto/config path\n"
+	"      --dnn-device DEV        cpu|cuda|opencl|openvino\n"
+	"      --dnn-threshold VAL     DNN threshold [0-1], default 0.6\n"
+	"      --debug                 Enable debug logging\n";
+}
 
+int main(int argc, char *argv[])
+{
 	FacialAuthConfig cfg;
 
 	std::string user;
 	std::string input_dir;
 	std::string method = "lbph";
 	std::string log;
-
+	std::string output_model;
 	std::string config_path = FACIALAUTH_CONFIG_DEFAULT;
 	bool force = false;
 
 	static struct option long_opts[] = {
-		{"user",   required_argument, 0, 'u'},
-		{"input",  required_argument, 0, 'i'},
-		{"method", required_argument, 0, 'm'},
-		{"config", required_argument, 0, 'c'},
-		{"force",  no_argument,       0, 'f'},
-		{"debug",  no_argument,       0, 'v'},
-		{0,0,0,0}
+		{"user",          required_argument, nullptr, 'u'},
+		{"method",        required_argument, nullptr, 'm'},
+		{"input-dir",     required_argument, nullptr, 'i'},
+		{"output-model",  required_argument, nullptr, 'o'},
+		{"config",        required_argument, nullptr, 'c'},
+		{"force",         no_argument,       nullptr, 'f'},
+		{"dnn-type",      required_argument, nullptr,  1 },
+		{"dnn-model",     required_argument, nullptr,  2 },
+		{"dnn-proto",     required_argument, nullptr,  3 },
+		{"dnn-device",    required_argument, nullptr,  4 },
+		{"dnn-threshold", required_argument, nullptr,  5 },
+		{"debug",         no_argument,       nullptr,  6 },
+		{nullptr,         0,                 nullptr,  0 }
 	};
 
-	int opt, idx = 0;
-
-	while ((opt = getopt_long(argc, argv, "u:i:m:c:fv", long_opts, &idx)) != -1) {
+	int opt, idx;
+	while ((opt = getopt_long(argc, argv, "u:m:i:o:c:f", long_opts, &idx)) != -1) {
 		switch (opt) {
-			case 'u': user = optarg; break;
-			case 'i': input_dir = optarg; break;
-			case 'm': method = optarg; break;
-			case 'c': config_path = optarg; break;
-			case 'f': force = true; break;
-			case 'v': cfg.debug = true; break;
+			case 'u':
+				user = optarg;
+				break;
+			case 'm':
+				method = optarg;
+				break;
+			case 'i':
+				input_dir = optarg;
+				break;
+			case 'o':
+				output_model = optarg;
+				break;
+			case 'c':
+				config_path = optarg;
+				break;
+			case 'f':
+				force = true;
+				cfg.force_overwrite = true;
+				break;
+			case 1:
+				cfg.dnn_type = optarg;
+				break;
+			case 2:
+				cfg.dnn_model_path = optarg;
+				break;
+			case 3:
+				cfg.dnn_proto_path = optarg;
+				break;
+			case 4:
+				cfg.dnn_device = optarg;
+				break;
+			case 5:
+				cfg.dnn_threshold = std::stod(optarg);
+				break;
+			case 6:
+				cfg.debug = true;
+				break;
 			default:
-				std::cerr << "Unknown option\n";
+				usage(argv[0]);
 				return 1;
 		}
 	}
 
 	if (user.empty()) {
-		std::cerr << "[ERROR] --user is required\n";
+		usage(argv[0]);
 		return 1;
 	}
 
-	if (input_dir.empty()) {
-		std::cerr << "[ERROR] --input is required\n";
+	fa_load_config(config_path, cfg, log);
+
+	// Se input_dir non specificata, useremo quella di default dentro fa_train_user
+
+	if (!fa_train_user(user, cfg, method, input_dir, output_model, force, log)) {
+		std::cerr << "[ERROR] Training failed for user " << user << "\n";
 		return 1;
 	}
 
-	// Load config file
-	read_kv_config(config_path, cfg, &log);
-
-	// Determine model path
-	std::string model_path = fa_user_model_path(cfg, user);
-
-	if (fs::exists(model_path) && !force) {
-		std::cerr << "[ERROR] Model already exists: "
-		<< model_path << "\nUse --force to overwrite.\n";
-		return 1;
-	}
-
-	if (fs::exists(model_path) && force) {
-		std::cout << "[INFO] Overwriting model: " << model_path << "\n";
-	}
-
-	if (!fs::exists(input_dir)) {
-		std::cerr << "[ERROR] Input directory does not exist: "
-		<< input_dir << "\n";
-		return 1;
-	}
-
-	int valid_images = 0;
-
-	for (auto &entry : fs::directory_iterator(input_dir)) {
-		if (entry.is_regular_file()) {
-			if (fa_is_valid_image(entry.path().string()))
-				valid_images++;
-		}
-	}
-
-	if (valid_images == 0) {
-		std::cerr << "[ERROR] No valid images found in "
-		<< input_dir << "\n";
-		return 1;
-	}
-
-	if (!fa_train_user(user, cfg, method, input_dir, model_path, force, log)) {
-		std::cerr << "[ERROR] Training failed\n";
-		return 1;
-	}
-
-	std::cout << "✅ Model successfully trained: " << model_path << "\n";
+	std::cout << "[INFO] Training completed for user " << user << "\n";
 	return 0;
 }

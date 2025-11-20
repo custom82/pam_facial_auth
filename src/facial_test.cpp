@@ -1,96 +1,75 @@
 #include "../include/libfacialauth.h"
+
+#include <getopt.h>
 #include <iostream>
 
-
-
-int main(int argc, char **argv)
+static void usage(const char *prog)
 {
-	if (!fa_check_root("facial_test"))
-		return 1;
+	std::cerr <<
+	"Usage: " << prog << " [options]\n"
+	"  -u, --user USER             User name\n"
+	"  -m, --model FILE            Model XML (default: basedir/models/<user>.xml)\n"
+	"  -c, --config FILE           Config file (default " FACIALAUTH_CONFIG_DEFAULT ")\n"
+	"      --frames N              Number of frames\n"
+	"      --debug                 Enable debug logging\n";
+}
 
-
+int main(int argc, char *argv[])
+{
+	FacialAuthConfig cfg;
+	std::string config_path = FACIALAUTH_CONFIG_DEFAULT;
 	std::string user;
-	std::string config_path = "/etc/security/pam_facial.conf";
 	std::string model_path;
-	bool debug = false;
-	bool nogui = false;
-	bool verbose = false;
+	std::string log;
 
-	// --------------------------------------------------
-	// Parse CLI arguments
-	// --------------------------------------------------
-	for (int i = 1; i < argc; ++i)
-	{
-		std::string arg = argv[i];
-		if ((arg == "-u" || arg == "--user") && i + 1 < argc)
-			user = argv[++i];
-		else if ((arg == "-c" || arg == "--config") && i + 1 < argc)
-			config_path = argv[++i];
-		else if ((arg == "-m" || arg == "--model") && i + 1 < argc)
-			model_path = argv[++i];
-		else if (arg == "-v" || arg == "--debug")
-			debug = true;
-		else if (arg == "-n" || arg == "--nogui")
-			nogui = true;
-		else if (arg == "-V" || arg == "--verbose")
-			verbose = true;
-		else if (arg == "-h" || arg == "--help")
-		{
-			std::cout <<
-			"Usage: facial_test [options]\n"
-			"Options:\n"
-			"  -u, --user <name>         Username to test\n"
-			"  -m, --model <path>        Model XML path (optional)\n"
-			"  -c, --config <file>       Config file path (default: /etc/security/pam_facial.conf)\n"
-			"  -n, --nogui               Disable GUI preview\n"
-			"  -v, --debug               Enable debug logs\n"
-			"  -V, --verbose             Verbose output\n"
-			"  -h, --help                Show this help\n";
-			return 0;
+	static struct option long_opts[] = {
+		{"user",   required_argument, nullptr, 'u'},
+		{"model",  required_argument, nullptr, 'm'},
+		{"config", required_argument, nullptr, 'c'},
+		{"frames", required_argument, nullptr,  1 },
+		{"debug",  no_argument,       nullptr,  2 },
+		{nullptr,  0,                 nullptr,  0 }
+	};
+
+	int opt, idx;
+	while ((opt = getopt_long(argc, argv, "u:m:c:", long_opts, &idx)) != -1) {
+		switch (opt) {
+			case 'u':
+				user = optarg;
+				break;
+			case 'm':
+				model_path = optarg;
+				break;
+			case 'c':
+				config_path = optarg;
+				break;
+			case 1:
+				cfg.frames = std::stoi(optarg);
+				break;
+			case 2:
+				cfg.debug = true;
+				break;
+			default:
+				usage(argv[0]);
+				return 1;
 		}
 	}
 
-	if (user.empty())
-	{
-		std::cerr << "Error: missing --user <name>\n";
+	if (user.empty()) {
+		usage(argv[0]);
 		return 1;
 	}
 
-	// --------------------------------------------------
-	// Load configuration
-	// --------------------------------------------------
-	FacialAuthConfig cfg;
-	cfg.debug = debug;
-	cfg.nogui = nogui;
+	fa_load_config(config_path, cfg, log);
 
-	std::string log;
-	read_kv_config(config_path, cfg, &log);
-
-	if (cfg.debug || verbose)
-		std::cerr << log;
-
-	if (model_path.empty())
-		model_path = fa_user_model_path(cfg, user);
-
-	// --------------------------------------------------
-	// Run face test
-	// --------------------------------------------------
 	double best_conf = 0.0;
-	int best_label = -1;
-	std::string test_log;
+	int best_label   = -1;
 
-	bool ok = fa_test_user(user, cfg, model_path, best_conf, best_label, test_log);
+	bool ok = fa_test_user(user, cfg, model_path, best_conf, best_label, log);
 
-	std::cout << test_log;
+	std::cout << "Result: " << (ok ? "SUCCESS" : "FAIL") << "\n"
+	<< "  best_conf = " << best_conf << "\n"
+	<< "  best_label = " << best_label << "\n";
 
-	if (!ok)
-	{
-		std::cerr << "❌ Face recognition failed for user: " << user
-		<< " (best confidence=" << best_conf << ")\n";
-		return 2;
-	}
-
-	std::cout << "✅ Authentication success for user: " << user
-	<< " (confidence=" << best_conf << ")\n";
-	return 0;
+	return ok ? 0 : 1;
 }
