@@ -3,11 +3,12 @@
 
 #include <string>
 #include <vector>
+
 #include <opencv2/opencv.hpp>
 #include <opencv2/face.hpp>
 
 // ==========================================================
-// Struttura di configurazione globale
+// Global configuration structure
 // ==========================================================
 struct FacialAuthConfig {
     std::string basedir = "/etc/pam_facial_auth";
@@ -30,11 +31,11 @@ struct FacialAuthConfig {
     bool nogui = false;
     bool fallback_device = true;
     bool force_overwrite = false;
-    bool ignore_failure = false; // ✅ nuovo campo
+    bool ignore_failure = false;
 };
 
 // ==========================================================
-// Funzioni di utility
+// Utility functions
 // ==========================================================
 std::string trim(const std::string &s);
 bool str_to_bool(const std::string &s, bool defval);
@@ -44,18 +45,16 @@ bool file_exists(const std::string &path);
 std::string join_path(const std::string &a, const std::string &b);
 void sleep_ms(int ms);
 
-// Logging (aggiornata)
-void log_tool(const FacialAuthConfig &cfg, const char* level, const char* fmt, ...);
+// Logging
+void log_tool(const FacialAuthConfig &cfg, const char *level, const char *fmt, ...);
 
-// ==========================================================
-// Percorsi e Camera helper
-// ==========================================================
+// Camera / path helpers
 bool open_camera(const FacialAuthConfig &cfg, cv::VideoCapture &cap, std::string &device_used);
 std::string fa_user_image_dir(const FacialAuthConfig &cfg, const std::string &user);
 std::string fa_user_model_path(const FacialAuthConfig &cfg, const std::string &user);
 
 // ==========================================================
-// Wrapper per OpenCV FaceRecognizer
+// OpenCV FaceRecognizer wrapper
 // ==========================================================
 class FaceRecWrapper {
 public:
@@ -74,13 +73,13 @@ private:
 };
 
 // ==========================================================
-// High-level API (funzioni principali)
+// High-level API
 // ==========================================================
 bool fa_capture_images(const std::string &user,
                        const FacialAuthConfig &cfg,
                        bool force,
                        std::string &log,
-                       const std::string &format);
+                       const std::string &img_format = "png");
 
 bool fa_train_user(const std::string &user,
                    const FacialAuthConfig &cfg,
@@ -96,5 +95,11 @@ bool fa_test_user(const std::string &user,
                   double &best_conf,
                   int &best_label,
                   std::string &log);
+
+// Maintenance helpers and root check
+bool fa_clean_images(const FacialAuthConfig &cfg, const std::string &user);
+bool fa_clean_model(const FacialAuthConfig &cfg, const std::string &user);
+void fa_list_images(const FacialAuthConfig &cfg, const std::string &user);
+bool fa_check_root(const char *tool_name);
 
 #endif // LIBFACIALAUTH_H

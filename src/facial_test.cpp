@@ -1,22 +1,13 @@
 #include "../include/libfacialauth.h"
 #include <iostream>
-#include <filesystem>
-#include <unistd.h>
 
-namespace fs = std::filesystem;
 
-static inline bool must_be_root() {
-	if (geteuid() != 0) {
-		std::cerr << "Error: facial_training must be run as root.\n";
-		return false;
-	}
-	return true;
-}
 
 int main(int argc, char **argv)
 {
-	if (!must_be_root())
+	if (!fa_check_root("facial_test"))
 		return 1;
+
 
 	std::string user;
 	std::string config_path = "/etc/security/pam_facial.conf";

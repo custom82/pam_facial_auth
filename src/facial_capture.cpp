@@ -2,66 +2,6 @@
 #include <getopt.h>
 #include <iostream>
 #include <cstring>
-#include <filesystem>
-
-namespace fs = std::filesystem;
-
-// ==========================================================
-// Remove all face images for a given user
-// ==========================================================
-
-static bool fa_clean_images(const FacialAuthConfig &cfg, const std::string &user) {
-    std::string imgdir = fa_user_image_dir(cfg, user);
-    if (!fs::exists(imgdir)) return true;
-
-    try {
-        for (auto &entry : fs::directory_iterator(imgdir)) {
-            if (entry.is_regular_file()) {
-                fs::remove(entry.path());
-            }
-        }
-        return true;
-    } catch (...) {
-        return false;
-    }
-}
-
-// ==========================================================
-// Remove model file
-// ==========================================================
-
-static bool fa_clean_model(const FacialAuthConfig &cfg, const std::string &user) {
-    std::string model = fa_user_model_path(cfg, user);
-    if (!fs::exists(model)) return true;
-
-    try {
-        fs::remove(model);
-        return true;
-    } catch (...) {
-        return false;
-    }
-}
-
-// ==========================================================
-// List all face images
-// ==========================================================
-
-static void fa_list_images(const FacialAuthConfig &cfg, const std::string &user) {
-    std::string imgdir = fa_user_image_dir(cfg, user);
-
-    if (!fs::exists(imgdir)) {
-        std::cout << "[INFO] No images for user: " << user << "\n";
-        return;
-    }
-
-    std::cout << "[INFO] Images for user " << user << ":\n";
-
-    for (auto &entry : fs::directory_iterator(imgdir)) {
-        if (entry.is_regular_file()) {
-            std::cout << "  " << entry.path().filename().string() << "\n";
-        }
-    }
-}
 
 // ==========================================================
 // MAIN
@@ -167,11 +107,23 @@ int main(int argc, char *argv[]) {
             case 1003:
                 list_images = true;
                 break;
+            case 1005:
+                img_format = optarg;
+                break;
+
+            case 2000:
+                print_help();
+                return 0;
+
 
             default:
                 std::cerr << "Unknown option\n";
                 return 1;
         }
+    }
+
+    if (!fa_check_root("facial_capture")) {
+        return 1;
     }
 
     if (user.empty()) {
