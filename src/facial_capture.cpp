@@ -82,6 +82,9 @@ int main(int argc, char *argv[]) {
     int width = -1, height = -1;
     int frames = -1;
 
+    // formato immagini (nuovo) - default png
+    std::string img_format = "png";
+
     static struct option long_opts[] = {
         {"user",        required_argument, 0, 'u'},
         {"device",      required_argument, 0, 'd'},
@@ -96,7 +99,7 @@ int main(int argc, char *argv[]) {
         {"clean-model", no_argument,       0, 1001},
         {"reset",       no_argument,       0, 1002},
         {"list",        no_argument,       0, 1003},
-        {"format", required_argument, 0, 1005},
+        {"format",      required_argument, 0, 1005},
         {0, 0, 0, 0}
     };
 
@@ -144,8 +147,10 @@ int main(int argc, char *argv[]) {
                 list_images = true;
                 break;
 
+            case 1005:
+                img_format = optarg;
+                break;
 
-            case 1005: img_format = optarg; break;
             default:
                 std::cerr << "Unknown option\n";
                 return 1;
