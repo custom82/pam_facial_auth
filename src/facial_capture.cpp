@@ -38,6 +38,8 @@ int main(int argc, char *argv[])
     bool reset = false;
     bool list_images = false;
 
+    bool debug_cli = false;
+
     int width = 0, height = 0, frames = 0;
 
     static struct option long_opts[] = {
@@ -71,7 +73,11 @@ int main(int argc, char *argv[])
             case 'f': force = true; cfg.force_overwrite = true; break;
 
             case 1: img_format = optarg; break;
-            case 2: cfg.debug = true; break;
+
+            case 2:
+                debug_cli = true;
+                break;
+
             case 3: clean = true; break;
             case 4: reset = true; break;
             case 5: list_images = true; break;
@@ -91,6 +97,14 @@ int main(int argc, char *argv[])
 
     std::string log;
     fa_load_config(config_path, cfg, log);
+
+    // ======================================================
+    //  CLI DEBUG OVERRIDE (sempre dopo il load del config)
+    // ======================================================
+    if (debug_cli) {
+        cfg.debug = true;
+        std::cout << "[DEBUG] Debug mode FORZATO da CLI (--debug)\n";
+    }
 
     if (width > 0)  cfg.width = width;
     if (height > 0) cfg.height = height;
