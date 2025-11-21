@@ -26,7 +26,6 @@ struct FacialAuthConfig {
     // Directory base per immagini e modelli
     //  images: <basedir>/images/<user>/
     //  models: <basedir>/models/<user>.xml
-    // Di default: /etc/pam_facial_auth come da tua richiesta
     std::string basedir = "/etc/pam_facial_auth";
 
     // Dispositivo video (se vuoto, usa camera_index)
@@ -54,18 +53,12 @@ struct FacialAuthConfig {
     bool force_overwrite = false;
 
     // ======================================================
-    // Parametri DNN (validi per TUTTI i backend DNN)
+    // Parametri DNN (validi per tutti i backend)
     // ======================================================
-
-    // backend logico (solo etichetta, es: "yunet", "sface",
-    // "fast", "lresnet100", "openface", "emotion", ecc.)
-    // Valore letto da "dnn_backend" nel file di config.
-    std::string dnn_backend;
-
     // "caffe", "tensorflow", "onnx", "openvino"
     std::string dnn_type = "caffe";
 
-    // path al file modello (caffemodel, .pb, .onnx, .xml, .tflite, ...)
+    // path al file modello (caffemodel, .pb, .onnx, .xml)
     std::string dnn_model_path;
 
     // path al file di “config” (prototxt, pbtxt, .bin IR, opzionale)
@@ -120,30 +113,26 @@ public:
     void ConfigureDNN(const FacialAuthConfig &cfg);
 
 private:
-    // "lbph", "eigen", "fisher", "dnn"
-    std::string modelType;
+    std::string modelType; // "lbph","eigen","fisher","dnn"
     cv::Ptr<cv::face::FaceRecognizer> recognizer;
 
     // --- Stato DNN ---
     bool        use_dnn        = false;
     bool        dnn_loaded     = false;
 
-    // Copia dei parametri DNN (per header e runtime)
-    std::string dnn_backend;      // es. "yunet", "sface", "fast", ...
-    std::string dnn_type;         // caffe/tensorflow/onnx/openvino
-    std::string dnn_model_path;   // path completo al modello
-    std::string dnn_proto_path;   // path completo al proto/config
-    std::string dnn_device;       // cpu/cuda/opencl/openvino
+    std::string dnn_type;
+    std::string dnn_model_path;
+    std::string dnn_proto_path;
+    std::string dnn_device;
     double      dnn_threshold  = 0.6;
     cv::dnn::Net dnn_net;
 
     // Stato detector (Haar Cascade)
     mutable cv::CascadeClassifier faceCascade;
 
-    // Legge meta-info (header) dal modello XML e carica il DNN se abilitato
+    // Helpers interni
+    void init_recognizer_for_algorithm(const std::string &algo);
     bool load_dnn_from_model_file(const std::string &modelFile);
-
-    // Predizione usando la rete DNN
     bool predict_with_dnn(const cv::Mat &faceGray,
                           int &label,
                           double &confidence);

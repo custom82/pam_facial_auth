@@ -18,9 +18,9 @@ static void usage(const char *prog)
 	"  -f, --force                 Force overwrite\n"
 	"      --dnn-type T            caffe|tensorflow|onnx|openvino\n"
 	"      --dnn-model PATH        DNN model path\n"
-	"      --dnn-proto PATH        DNN proto path\n"
+	"      --dnn-proto PATH        DNN proto/config path\n"
 	"      --dnn-device DEV        cpu|cuda|opencl|openvino\n"
-	"      --dnn-threshold VAL     DNN threshold\n"
+	"      --dnn-threshold VAL     DNN threshold [0-1], default 0.6\n"
 	"      --debug                 Enable debug logging\n";
 }
 
@@ -31,10 +31,9 @@ int main(int argc, char *argv[])
 	std::string user;
 	std::string input_dir;
 	std::string method = "lbph";
+	std::string log;
 	std::string output_model;
 	std::string config_path = FACIALAUTH_CONFIG_DEFAULT;
-	std::string log;
-
 	bool force = false;
 
 	static struct option long_opts[] = {
@@ -44,18 +43,17 @@ int main(int argc, char *argv[])
 		{"output-model",  required_argument, nullptr, 'o'},
 		{"config",        required_argument, nullptr, 'c'},
 		{"force",         no_argument,       nullptr, 'f'},
-		{"dnn-type",      required_argument, nullptr,  1},
-		{"dnn-model",     required_argument, nullptr,  2},
-		{"dnn-proto",     required_argument, nullptr,  3},
-		{"dnn-device",    required_argument, nullptr,  4},
-		{"dnn-threshold", required_argument, nullptr,  5},
-		{"debug",         no_argument,       nullptr,  6},
-		{nullptr,         0,                 nullptr,  0}
+		{"dnn-type",      required_argument, nullptr,  1 },
+		{"dnn-model",     required_argument, nullptr,  2 },
+		{"dnn-proto",     required_argument, nullptr,  3 },
+		{"dnn-device",    required_argument, nullptr,  4 },
+		{"dnn-threshold", required_argument, nullptr,  5 },
+		{"debug",         no_argument,       nullptr,  6 },
+		{nullptr,         0,                 nullptr,  0 }
 	};
 
 	int opt, idx;
-	while ((opt = getopt_long(argc, argv, "u:m:i:o:c:f", long_opts, &idx)) != -1)
-	{
+	while ((opt = getopt_long(argc, argv, "u:m:i:o:c:f", long_opts, &idx)) != -1) {
 		switch (opt) {
 			case 'u':
 				user = optarg;
@@ -76,8 +74,6 @@ int main(int argc, char *argv[])
 				force = true;
 				cfg.force_overwrite = true;
 				break;
-
-				// Override DNN values from CLI if present
 			case 1:
 				cfg.dnn_type = optarg;
 				break;
@@ -96,7 +92,6 @@ int main(int argc, char *argv[])
 			case 6:
 				cfg.debug = true;
 				break;
-
 			default:
 				usage(argv[0]);
 				return 1;
@@ -108,13 +103,11 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	// Load config file (always)
+	// Carica config (può sovrascrivere i parametri DNN se presenti nel file)
 	fa_load_config(config_path, cfg, log);
 
-	// Normalizza metodo in minuscolo
-	for (auto &c : method) c = std::tolower(c);
+	// Se input_dir non specificata, useremo quella di default dentro fa_train_user
 
-	// TRAINING ---------------------------------------------------
 	if (!fa_train_user(user, cfg, method, input_dir, output_model, force, log)) {
 		std::cerr << "[ERROR] Training failed for user " << user << "\n";
 		return 1;

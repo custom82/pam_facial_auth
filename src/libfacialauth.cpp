@@ -128,7 +128,6 @@ bool fa_load_config(const std::string &path,
 		else if (k == "force_overwrite") cfg.force_overwrite = (val == "1" || to_lower_str(val) == "true");
 
 		// DNN
-		else if (k == "dnn_backend")     cfg.dnn_backend = to_lower_str(val);
 		else if (k == "dnn_type")        cfg.dnn_type = to_lower_str(val);
 		else if (k == "dnn_model")       cfg.dnn_model_path = val;
 		else if (k == "dnn_proto")       cfg.dnn_proto_path = val;
@@ -248,44 +247,52 @@ namespace {
 // FaceRecWrapper
 // ==========================================================
 
+void FaceRecWrapper::init_recognizer_for_algorithm(const std::string &algo)
+{
+	std::string a = to_lower_str(algo);
+
+	if (a == "eigen") {
+		recognizer = cv::face::EigenFaceRecognizer::create();
+		use_dnn = false;
+	}
+	else if (a == "fisher") {
+		recognizer = cv::face::FisherFaceRecognizer::create();
+		use_dnn = false;
+	}
+	else if (a == "dnn") {
+		// Per DNN usiamo un riconoscitore LBPH "dummy" per avere un XML valido
+		recognizer = cv::face::LBPHFaceRecognizer::create();
+		use_dnn = true;
+	}
+	else { // default LBPH
+		recognizer = cv::face::LBPHFaceRecognizer::create();
+		use_dnn = false;
+	}
+
+	modelType = a;
+	dnn_loaded = false;
+}
+
 FaceRecWrapper::FaceRecWrapper()
 : FaceRecWrapper("lbph")
 {
 }
 
 FaceRecWrapper::FaceRecWrapper(const std::string &modelType_)
-: modelType(to_lower_str(modelType_))
 {
-	if (modelType == "lbph" || modelType.empty()) {
-		recognizer = cv::face::LBPHFaceRecognizer::create();
-		modelType = "lbph";
-	}
-	else if (modelType == "eigen") {
-		recognizer = cv::face::EigenFaceRecognizer::create();
-	}
-	else if (modelType == "fisher") {
-		recognizer = cv::face::FisherFaceRecognizer::create();
-	}
-	else if (modelType == "dnn") {
-		// Per DNN usiamo un riconoscitore LBPH "dummy" per avere un XML valido
-		recognizer = cv::face::LBPHFaceRecognizer::create();
-		use_dnn = true;
-	}
-	else {
-		recognizer = cv::face::LBPHFaceRecognizer::create();
-		modelType = "lbph";
-	}
+	init_recognizer_for_algorithm(modelType_);
 }
 
 void FaceRecWrapper::ConfigureDNN(const FacialAuthConfig &cfg)
 {
-	dnn_backend    = cfg.dnn_backend;
 	dnn_type       = cfg.dnn_type;
 	dnn_model_path = cfg.dnn_model_path;
 	dnn_proto_path = cfg.dnn_proto_path;
 	dnn_device     = cfg.dnn_device;
 	dnn_threshold  = cfg.dnn_threshold;
-	use_dnn        = true;
+
+	// se stiamo usando algoritmo "dnn", abilita DNN
+	use_dnn = true;
 
 	try {
 		dnn_net = fa_create_dnn_net(dnn_type, dnn_model_path, dnn_proto_path);
@@ -304,40 +311,16 @@ bool FaceRecWrapper::load_dnn_from_model_file(const std::string &modelFile)
 	if (!fs.isOpened())
 		return false;
 
-	// Leggi algoritmo se presente (header generico)
-	{
-		cv::FileNode n_algo = fs["fa_algorithm"];
-		if (!n_algo.empty() && n_algo.isString()) {
-			std::string algo;
-			n_algo >> algo;
-			modelType = to_lower_str(algo);
-		}
-	}
-
-	// Verifica se il DNN è abilitato (nuovi modelli)
 	int enabled = 0;
-	{
-		cv::FileNode n_enabled = fs["fa_dnn_enabled"];
-		if (!n_enabled.empty() && n_enabled.isInt()) {
-			n_enabled >> enabled;
-		} else {
-			// fallback: se troviamo un fa_dnn_model, assumiamo enabled=1
-			cv::FileNode n_model = fs["fa_dnn_model"];
-			if (!n_model.empty())
-				enabled = 1;
-		}
-	}
-
+	fs["fa_dnn_enabled"] >> enabled;
 	if (!enabled)
 		return false;
 
-	// Leggi tutte le info DNN dal modello (header = copia della config)
-	fs["fa_dnn_backend"]  >> dnn_backend;
-	fs["fa_dnn_type"]     >> dnn_type;
-	fs["fa_dnn_model"]    >> dnn_model_path;
-	fs["fa_dnn_proto"]    >> dnn_proto_path;
-	fs["fa_dnn_device"]   >> dnn_device;
-	fs["fa_dnn_threshold"]>> dnn_threshold;
+	fs["fa_dnn_type"]      >> dnn_type;
+	fs["fa_dnn_model"]     >> dnn_model_path;
+	fs["fa_dnn_proto"]     >> dnn_proto_path;
+	fs["fa_dnn_device"]    >> dnn_device;
+	fs["fa_dnn_threshold"] >> dnn_threshold;
 
 	if (dnn_threshold <= 0.0)
 		dnn_threshold = 0.6;
@@ -360,14 +343,25 @@ bool FaceRecWrapper::load_dnn_from_model_file(const std::string &modelFile)
 bool FaceRecWrapper::Load(const std::string &modelFile)
 {
 	try {
+		// 1) leggi l’algoritmo dallo XML (header logico)
+		std::string algo = "lbph";
+		{
+			cv::FileStorage fs(modelFile, cv::FileStorage::READ);
+			if (fs.isOpened()) {
+				fs["fa_algorithm"] >> algo;
+			}
+		}
+		if (algo.empty())
+			algo = "lbph";
+
+		// 2) crea il recognizer corretto
+		init_recognizer_for_algorithm(algo);
+
+		// 3) leggi il modello nel recognizer
 		recognizer->read(modelFile);
 
-		// Tenta di leggere header + DNN
-		if (!load_dnn_from_model_file(modelFile)) {
-			// Se non c'è header o DNN disabilitato, restiamo in modalità classica
-			use_dnn    = false;
-			dnn_loaded = false;
-		}
+		// 4) se ci sono metadati DNN, ricarica il backend
+		load_dnn_from_model_file(modelFile);
 
 		return true;
 	} catch (const std::exception &e) {
@@ -382,24 +376,19 @@ bool FaceRecWrapper::Save(const std::string &modelFile) const
 		ensure_dirs(fs::path(modelFile).parent_path().string());
 		recognizer->write(modelFile);
 
-		// Scriviamo SEMPRE un header nel modello XML
-		cv::FileStorage fs_xml(modelFile, cv::FileStorage::APPEND);
-		if (fs_xml.isOpened()) {
-			std::string algo = modelType.empty() ? "lbph" : modelType;
-
-			fs_xml << "fa_version"   << 1;
-			fs_xml << "fa_algorithm" << algo;
+		// Aggiunge sempre l’algoritmo usato e, se presente, i parametri DNN
+		cv::FileStorage fs(modelFile, cv::FileStorage::APPEND);
+		if (fs.isOpened()) {
+			// header comune per TUTTI i modelli
+			fs << "fa_algorithm" << modelType;
 
 			if (use_dnn) {
-				fs_xml << "fa_dnn_enabled"   << 1;
-				fs_xml << "fa_dnn_backend"   << dnn_backend;
-				fs_xml << "fa_dnn_type"      << dnn_type;
-				fs_xml << "fa_dnn_model"     << dnn_model_path;
-				fs_xml << "fa_dnn_proto"     << dnn_proto_path;
-				fs_xml << "fa_dnn_device"    << dnn_device;
-				fs_xml << "fa_dnn_threshold" << dnn_threshold;
-			} else {
-				fs_xml << "fa_dnn_enabled"   << 0;
+				fs << "fa_dnn_enabled"   << 1;
+				fs << "fa_dnn_type"      << dnn_type;
+				fs << "fa_dnn_model"     << dnn_model_path;
+				fs << "fa_dnn_proto"     << dnn_proto_path;
+				fs << "fa_dnn_device"    << dnn_device;
+				fs << "fa_dnn_threshold" << dnn_threshold;
 			}
 		}
 
@@ -442,9 +431,8 @@ bool FaceRecWrapper::predict_with_dnn(const cv::Mat &faceGray,
 	else
 		input = faceGray;
 
-	// Per ora usiamo una logica generica stile SSD (face detector classico)
-	const cv::Size   inputSize(300, 300);
-	const double     scaleFactor = 1.0;
+	const cv::Size   inputSize    = cv::Size(300, 300);
+	const double     scaleFactor  = 1.0;
 	const cv::Scalar meanVal(104.0, 177.0, 123.0);
 
 	cv::Mat blob = cv::dnn::blobFromImage(input, scaleFactor, inputSize,
@@ -648,13 +636,18 @@ bool fa_capture_images(const std::string &user,
 }
 
 bool fa_train_user(const std::string &user,
-				   const FacialAuthConfig &cfg,
+				   const FacialAuthConfig &cfg_in,
 				   const std::string &method,
 				   const std::string &inputDir,
 				   const std::string &outputModel,
-				   bool /*force*/,
-				   std::string &/*log*/)
+				   bool force,
+				   std::string &log)
 {
+	(void)force;
+	(void)log;
+
+	FacialAuthConfig cfg = cfg_in; // copia locale (per sicurezza)
+
 	std::string train_dir = inputDir.empty()
 						  ? fa_user_image_dir(cfg, user)
 						  : inputDir;
@@ -715,8 +708,10 @@ bool fa_test_user(const std::string &user,
 				  const std::string &modelPath,
 				  double &best_conf,
 				  int &best_label,
-				  std::string &/*log*/)
+				  std::string &log)
 {
+	(void)log;
+
 	std::string model_file = modelPath.empty()
 						   ? fa_user_model_path(cfg, user)
 						   : modelPath;
