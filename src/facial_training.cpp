@@ -21,9 +21,7 @@ static void usage(const char *prog)
 	"      --dnn-proto PATH        DNN proto/config path\n"
 	"      --dnn-device DEV        cpu|cuda|opencl|openvino\n"
 	"      --dnn-threshold VAL     DNN threshold [0-1], default 0.6\n"
-	"      --dnn-profile NAME      DNN profile (fast,sface,lresnet100,openface,\n"
-	"                              yunet,emotion,keypoints,det_uint8,det_caffe,\n"
-	"                              det_fp16,mp_landmark,mp_face,mp_blend)\n"
+	"      --dnn-profile NAME      DNN profile\n"
 	"      --debug                 Enable debug logging\n";
 }
 
@@ -38,7 +36,9 @@ int main(int argc, char *argv[])
 	std::string output_model;
 	std::string config_path = FACIALAUTH_CONFIG_DEFAULT;
 	std::string dnn_profile_cli;
+
 	bool force = false;
+	bool debug_cli = false;
 
 	static struct option long_opts[] = {
 		{"user",          required_argument, nullptr, 'u'},
@@ -95,7 +95,7 @@ int main(int argc, char *argv[])
 				cfg.dnn_threshold = std::stod(optarg);
 				break;
 			case 6:
-				cfg.debug = true;
+				debug_cli = true;   // <-- DEBUG CLI flag
 				break;
 			case 7:
 				dnn_profile_cli = optarg;
@@ -111,34 +111,40 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	// Carica config da file (sovrascrive default/valori iniziali di cfg)
+	// Carica configurazione
 	fa_load_config(config_path, cfg, log);
 
-	// Se il metodo è DNN, seleziona il profilo:
-	//  - se --dnn-profile è specificato, ha priorità
-	//  - altrimenti usa cfg.dnn_profile dal file di configurazione
+	// ================================
+	// OVERRIDE DEBUG DA CLI
+	// ================================
+	if (debug_cli) {
+		cfg.debug = true;
+		std::cout << "[DEBUG] Debug mode FORZATO da CLI (--debug)\n";
+	}
+
+	// ================================
+	// DNN PROFILE SELECTION
+	// ================================
 	{
 		std::string mt = method;
-		for (auto &c : mt) c = static_cast<char>(std::tolower((unsigned char)c));
+		for (auto &c : mt)
+			c = static_cast<char>(std::tolower((unsigned char)c));
+
 		if (mt == "dnn") {
-			std::string profile_to_use;
-			if (!dnn_profile_cli.empty()) {
-				profile_to_use = dnn_profile_cli;
-			} else {
-				profile_to_use = cfg.dnn_profile;
-			}
+			std::string profile_to_use =
+			!dnn_profile_cli.empty() ? dnn_profile_cli : cfg.dnn_profile;
 
 			if (!profile_to_use.empty()) {
 				if (!fa_select_dnn_profile(cfg, profile_to_use, log)) {
-					std::cerr << "[ERROR] Unknown DNN profile: " << profile_to_use << "\n";
+					std::cerr << "[ERROR] Unknown DNN profile: "
+					<< profile_to_use << "\n";
 					return 1;
 				}
 			}
 		}
 	}
 
-	// Se input_dir non specificata, useremo quella di default dentro fa_train_user
-
+	// Esegui training
 	if (!fa_train_user(user, cfg, method, input_dir, output_model, force, log)) {
 		std::cerr << "[ERROR] Training failed for user " << user << "\n";
 		return 1;
