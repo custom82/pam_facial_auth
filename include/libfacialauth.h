@@ -53,12 +53,12 @@ struct FacialAuthConfig {
     bool force_overwrite = false;
 
     // ======================================================
-    // Parametri DNN (validi per tutti i backend)
+    // Parametri DNN generali
     // ======================================================
-    // "caffe", "tensorflow", "onnx", "openvino"
-    std::string dnn_type = "caffe";
+    // "caffe", "tensorflow", "onnx", "openvino", "tflite", "torch"
+    std::string dnn_type = "onnx";
 
-    // path al file modello (caffemodel, .pb, .onnx, .xml)
+    // path al file modello (caffemodel, .pb, .onnx, .xml, .tflite, .t7)
     std::string dnn_model_path;
 
     // path al file di “config” (prototxt, pbtxt, .bin IR, opzionale)
@@ -69,6 +69,34 @@ struct FacialAuthConfig {
 
     // soglia logica [0–1], es: 0.6
     double dnn_threshold = 0.6;
+
+    // Profilo DNN di default (fast, sface, lresnet100, openface, ...)
+    std::string dnn_profile = "fast";
+
+    // ======================================================
+    // Path specifici per ciascun backend facciale
+    // (tutti assoluti, valorizzati da pam_facial.conf)
+    // ======================================================
+
+    // Riconoscimento volto
+    std::string dnn_model_fast;          // face_recognizer_fast.onnx
+    std::string dnn_model_sface;         // face_recognition_sface_2021dec.onnx
+    std::string dnn_model_lresnet100;    // LResNet100E_IR.onnx
+    std::string dnn_model_openface;      // openface_nn4.small2.v1.t7
+
+    // Detector volto
+    std::string dnn_model_yunet;               // yunet-202303.onnx
+    std::string dnn_model_detector_caffe;      // opencv_face_detector.caffemodel
+    std::string dnn_model_detector_fp16;       // opencv_face_detector_fp16.caffemodel
+    std::string dnn_model_detector_uint8;      // opencv_face_detector_uint8.pb
+    std::string dnn_proto_detector_caffe;      // deploy.prototxt per i detector caffe
+
+    // Emotion / keypoints / MediaPipe TFLite
+    std::string dnn_model_emotion;                 // emotion_ferplus.onnx
+    std::string dnn_model_keypoints;               // facial_keypoints.onnx
+    std::string dnn_model_face_landmark_tflite;    // face_landmark.tflite
+    std::string dnn_model_face_detection_tflite;   // face_detection_short_range.tflite
+    std::string dnn_model_face_blendshapes_tflite; // face_blendshapes.tflite
 };
 
 // ==========================================================
@@ -80,6 +108,13 @@ struct FacialAuthConfig {
 bool fa_load_config(const std::string &path,
                     FacialAuthConfig &cfg,
                     std::string &log);
+
+// Seleziona un profilo DNN e aggiorna cfg.dnn_type / dnn_model_path / dnn_proto_path
+// profile: fast, sface, lresnet100, openface, yunet, emotion, keypoints,
+//          det_uint8, det_caffe, det_fp16, mp_landmark, mp_face, mp_blend
+bool fa_select_dnn_profile(FacialAuthConfig &cfg,
+                           const std::string &profile,
+                           std::string &log);
 
 // Directory immagini e path modello per un utente
 std::string fa_user_image_dir(const FacialAuthConfig &cfg,
@@ -113,13 +148,14 @@ public:
     void ConfigureDNN(const FacialAuthConfig &cfg);
 
 private:
-    std::string modelType; // "lbph","eigen","fisher","dnn"
+    std::string modelType;  // "lbph", "eigen", "fisher", "dnn"
     cv::Ptr<cv::face::FaceRecognizer> recognizer;
 
     // --- Stato DNN ---
     bool        use_dnn        = false;
     bool        dnn_loaded     = false;
 
+    std::string dnn_profile;    // fast, sface, lresnet100, ...
     std::string dnn_type;
     std::string dnn_model_path;
     std::string dnn_proto_path;
@@ -130,8 +166,6 @@ private:
     // Stato detector (Haar Cascade)
     mutable cv::CascadeClassifier faceCascade;
 
-    // Helpers interni
-    void init_recognizer_for_algorithm(const std::string &algo);
     bool load_dnn_from_model_file(const std::string &modelFile);
     bool predict_with_dnn(const cv::Mat &faceGray,
                           int &label,

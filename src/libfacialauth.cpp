@@ -127,12 +127,31 @@ bool fa_load_config(const std::string &path,
 		else if (k == "debug")           cfg.debug = (val == "1" || to_lower_str(val) == "true");
 		else if (k == "force_overwrite") cfg.force_overwrite = (val == "1" || to_lower_str(val) == "true");
 
-		// DNN
+		// DNN generico
 		else if (k == "dnn_type")        cfg.dnn_type = to_lower_str(val);
 		else if (k == "dnn_model")       cfg.dnn_model_path = val;
 		else if (k == "dnn_proto")       cfg.dnn_proto_path = val;
 		else if (k == "dnn_device")      cfg.dnn_device = to_lower_str(val);
 		else if (k == "dnn_threshold")   cfg.dnn_threshold = std::stod(val);
+		else if (k == "dnn_profile")     cfg.dnn_profile = to_lower_str(val);
+
+		// DNN modelli specifici
+		else if (k == "dnn_model_fast")                 cfg.dnn_model_fast = val;
+		else if (k == "dnn_model_sface")                cfg.dnn_model_sface = val;
+		else if (k == "dnn_model_lresnet100")           cfg.dnn_model_lresnet100 = val;
+		else if (k == "dnn_model_openface")             cfg.dnn_model_openface = val;
+
+		else if (k == "dnn_model_yunet")                cfg.dnn_model_yunet = val;
+		else if (k == "dnn_model_detector_caffe")       cfg.dnn_model_detector_caffe = val;
+		else if (k == "dnn_model_detector_fp16")        cfg.dnn_model_detector_fp16 = val;
+		else if (k == "dnn_model_detector_uint8")       cfg.dnn_model_detector_uint8 = val;
+		else if (k == "dnn_proto_detector_caffe")       cfg.dnn_proto_detector_caffe = val;
+
+		else if (k == "dnn_model_emotion")              cfg.dnn_model_emotion = val;
+		else if (k == "dnn_model_keypoints")            cfg.dnn_model_keypoints = val;
+		else if (k == "dnn_model_face_landmark_tflite") cfg.dnn_model_face_landmark_tflite = val;
+		else if (k == "dnn_model_face_detection_tflite")cfg.dnn_model_face_detection_tflite = val;
+		else if (k == "dnn_model_face_blendshapes_tflite") cfg.dnn_model_face_blendshapes_tflite = val;
 	}
 
 	log_append(log, "Config loaded from: " + path);
@@ -145,6 +164,126 @@ std::string fa_user_image_dir(const FacialAuthConfig &cfg, const std::string &us
 
 std::string fa_user_model_path(const FacialAuthConfig &cfg, const std::string &user) {
 	return join_path(join_path(cfg.basedir, "models"), user + ".xml");
+}
+
+// ==========================================================
+// DNN profile selector
+// ==========================================================
+
+bool fa_select_dnn_profile(FacialAuthConfig &cfg,
+						   const std::string &profile,
+						   std::string &log)
+{
+	std::string p = to_lower_str(profile);
+	cfg.dnn_profile = p;
+
+	auto set = [&](const std::string &type,
+				   const std::string &model_path,
+				const std::string &proto_path)
+	{
+		cfg.dnn_type = type;
+		cfg.dnn_model_path = model_path;
+		cfg.dnn_proto_path = proto_path;
+	};
+
+	// Riconoscimento volto
+	if (p == "fast" || p == "face_recognizer_fast") {
+		std::string mp = !cfg.dnn_model_fast.empty()
+		? cfg.dnn_model_fast
+		: "/usr/share/opencv4/dnn/models/facial/face_recognizer_fast.onnx";
+		set("onnx", mp, "");
+	}
+	else if (p == "sface") {
+		std::string mp = !cfg.dnn_model_sface.empty()
+		? cfg.dnn_model_sface
+		: "/usr/share/opencv4/dnn/models/facial/face_recognition_sface_2021dec.onnx";
+		set("onnx", mp, "");
+	}
+	else if (p == "lresnet100" || p == "lresnet100e_ir") {
+		std::string mp = !cfg.dnn_model_lresnet100.empty()
+		? cfg.dnn_model_lresnet100
+		: "/usr/share/opencv4/dnn/models/facial/LResNet100E_IR.onnx";
+		set("onnx", mp, "");
+	}
+	else if (p == "openface") {
+		std::string mp = !cfg.dnn_model_openface.empty()
+		? cfg.dnn_model_openface
+		: "/usr/share/opencv4/dnn/models/facial/openface_nn4.small2.v1.t7";
+		set("torch", mp, "");
+	}
+
+	// Detector volto
+	else if (p == "yunet") {
+		std::string mp = !cfg.dnn_model_yunet.empty()
+		? cfg.dnn_model_yunet
+		: "/usr/share/opencv4/dnn/models/facial/yunet-202303.onnx";
+		set("onnx", mp, "");
+	}
+	else if (p == "det_caffe") {
+		std::string mp = !cfg.dnn_model_detector_caffe.empty()
+		? cfg.dnn_model_detector_caffe
+		: "/usr/share/opencv4/dnn/models/facial/opencv_face_detector.caffemodel";
+		std::string pp = !cfg.dnn_proto_detector_caffe.empty()
+		? cfg.dnn_proto_detector_caffe
+		: "/usr/share/opencv4/samples/dnn/face_detector/deploy.prototxt";
+		set("caffe", mp, pp);
+	}
+	else if (p == "det_fp16") {
+		std::string mp = !cfg.dnn_model_detector_fp16.empty()
+		? cfg.dnn_model_detector_fp16
+		: "/usr/share/opencv4/dnn/models/facial/opencv_face_detector_fp16.caffemodel";
+		std::string pp = !cfg.dnn_proto_detector_caffe.empty()
+		? cfg.dnn_proto_detector_caffe
+		: "/usr/share/opencv4/samples/dnn/face_detector/deploy.prototxt";
+		set("caffe", mp, pp);
+	}
+	else if (p == "det_uint8") {
+		std::string mp = !cfg.dnn_model_detector_uint8.empty()
+		? cfg.dnn_model_detector_uint8
+		: "/usr/share/opencv4/dnn/models/facial/opencv_face_detector_uint8.pb";
+		set("tensorflow", mp, "");
+	}
+
+	// Emotion / keypoints / MediaPipe TFLite
+	else if (p == "emotion") {
+		std::string mp = !cfg.dnn_model_emotion.empty()
+		? cfg.dnn_model_emotion
+		: "/usr/share/opencv4/dnn/models/facial/emotion_ferplus.onnx";
+		set("onnx", mp, "");
+	}
+	else if (p == "keypoints") {
+		std::string mp = !cfg.dnn_model_keypoints.empty()
+		? cfg.dnn_model_keypoints
+		: "/usr/share/opencv4/dnn/models/facial/facial_keypoints.onnx";
+		set("onnx", mp, "");
+	}
+	else if (p == "mp_landmark") {
+		std::string mp = !cfg.dnn_model_face_landmark_tflite.empty()
+		? cfg.dnn_model_face_landmark_tflite
+		: "/usr/share/opencv4/dnn/models/facial/face_landmark.tflite";
+		set("tflite", mp, "");
+	}
+	else if (p == "mp_face") {
+		std::string mp = !cfg.dnn_model_face_detection_tflite.empty()
+		? cfg.dnn_model_face_detection_tflite
+		: "/usr/share/opencv4/dnn/models/facial/face_detection_short_range.tflite";
+		set("tflite", mp, "");
+	}
+	else if (p == "mp_blend") {
+		std::string mp = !cfg.dnn_model_face_blendshapes_tflite.empty()
+		? cfg.dnn_model_face_blendshapes_tflite
+		: "/usr/share/opencv4/dnn/models/facial/face_blendshapes.tflite";
+		set("tflite", mp, "");
+	}
+	else {
+		log_append(log, "Unknown dnn_profile: " + profile);
+		return false;
+	}
+
+	log_append(log, "DNN profile selected: " + p +
+	" (type=" + cfg.dnn_type +
+	", model=" + cfg.dnn_model_path + ")");
+	return true;
 }
 
 // ==========================================================
@@ -176,7 +315,7 @@ static bool open_camera(const FacialAuthConfig &cfg,
 }
 
 // ==========================================================
-// DNN helpers (Caffe / TensorFlow / ONNX / OpenVINO)
+// DNN helpers (Caffe / TensorFlow / ONNX / OpenVINO / TFLite / Torch)
 // ==========================================================
 
 namespace {
@@ -203,6 +342,14 @@ namespace {
 		else if (t == "openvino" || t == "ir") {
 			// OpenVINO IR: XML + BIN (passiamo entrambi, bin può stare in proto)
 			return cv::dnn::readNet(model, proto);
+		}
+		else if (t == "tflite") {
+			// Importer TFLite (modello singolo .tflite)
+			return cv::dnn::readNet(model);
+		}
+		else if (t == "torch" || t == "t7") {
+			// Modelli Torch .t7
+			return cv::dnn::readNetFromTorch(model);
 		}
 
 		throw std::runtime_error("Unknown DNN type: " + dnn_type);
@@ -247,52 +394,42 @@ namespace {
 // FaceRecWrapper
 // ==========================================================
 
-void FaceRecWrapper::init_recognizer_for_algorithm(const std::string &algo)
-{
-	std::string a = to_lower_str(algo);
-
-	if (a == "eigen") {
-		recognizer = cv::face::EigenFaceRecognizer::create();
-		use_dnn = false;
-	}
-	else if (a == "fisher") {
-		recognizer = cv::face::FisherFaceRecognizer::create();
-		use_dnn = false;
-	}
-	else if (a == "dnn") {
-		// Per DNN usiamo un riconoscitore LBPH "dummy" per avere un XML valido
-		recognizer = cv::face::LBPHFaceRecognizer::create();
-		use_dnn = true;
-	}
-	else { // default LBPH
-		recognizer = cv::face::LBPHFaceRecognizer::create();
-		use_dnn = false;
-	}
-
-	modelType = a;
-	dnn_loaded = false;
-}
-
 FaceRecWrapper::FaceRecWrapper()
 : FaceRecWrapper("lbph")
 {
 }
 
 FaceRecWrapper::FaceRecWrapper(const std::string &modelType_)
+: modelType(to_lower_str(modelType_))
 {
-	init_recognizer_for_algorithm(modelType_);
+	if (modelType == "lbph" || modelType.empty()) {
+		recognizer = cv::face::LBPHFaceRecognizer::create();
+	}
+	else if (modelType == "eigen") {
+		recognizer = cv::face::EigenFaceRecognizer::create();
+	}
+	else if (modelType == "fisher") {
+		recognizer = cv::face::FisherFaceRecognizer::create();
+	}
+	else if (modelType == "dnn") {
+		// Per DNN usiamo un riconoscitore LBPH "dummy" per avere un XML valido
+		recognizer = cv::face::LBPHFaceRecognizer::create();
+		use_dnn = true;
+	}
+	else {
+		recognizer = cv::face::LBPHFaceRecognizer::create();
+	}
 }
 
 void FaceRecWrapper::ConfigureDNN(const FacialAuthConfig &cfg)
 {
+	dnn_profile    = cfg.dnn_profile;
 	dnn_type       = cfg.dnn_type;
 	dnn_model_path = cfg.dnn_model_path;
 	dnn_proto_path = cfg.dnn_proto_path;
 	dnn_device     = cfg.dnn_device;
 	dnn_threshold  = cfg.dnn_threshold;
-
-	// se stiamo usando algoritmo "dnn", abilita DNN
-	use_dnn = true;
+	use_dnn        = true;
 
 	try {
 		dnn_net = fa_create_dnn_net(dnn_type, dnn_model_path, dnn_proto_path);
@@ -313,9 +450,19 @@ bool FaceRecWrapper::load_dnn_from_model_file(const std::string &modelFile)
 
 	int enabled = 0;
 	fs["fa_dnn_enabled"] >> enabled;
-	if (!enabled)
-		return false;
 
+	std::string algorithm;
+	fs["fa_algorithm"] >> algorithm;
+	algorithm = to_lower_str(algorithm);
+
+	if (algorithm != "dnn" || !enabled) {
+		// Modello classico o DNN disabilitato
+		use_dnn    = false;
+		dnn_loaded = false;
+		return false;
+	}
+
+	fs["fa_dnn_profile"]   >> dnn_profile;
 	fs["fa_dnn_type"]      >> dnn_type;
 	fs["fa_dnn_model"]     >> dnn_model_path;
 	fs["fa_dnn_proto"]     >> dnn_proto_path;
@@ -340,29 +487,11 @@ bool FaceRecWrapper::load_dnn_from_model_file(const std::string &modelFile)
 	}
 }
 
-bool FaceRecWrapper::Load(const std::string &modelFile)
-{
+bool FaceRecWrapper::Load(const std::string &modelFile) {
 	try {
-		// 1) leggi l’algoritmo dallo XML (header logico)
-		std::string algo = "lbph";
-		{
-			cv::FileStorage fs(modelFile, cv::FileStorage::READ);
-			if (fs.isOpened()) {
-				fs["fa_algorithm"] >> algo;
-			}
-		}
-		if (algo.empty())
-			algo = "lbph";
-
-		// 2) crea il recognizer corretto
-		init_recognizer_for_algorithm(algo);
-
-		// 3) leggi il modello nel recognizer
 		recognizer->read(modelFile);
-
-		// 4) se ci sono metadati DNN, ricarica il backend
+		// prova a leggere meta DNN / algoritmo
 		load_dnn_from_model_file(modelFile);
-
 		return true;
 	} catch (const std::exception &e) {
 		std::cerr << "Error loading model: " << e.what() << std::endl;
@@ -370,20 +499,19 @@ bool FaceRecWrapper::Load(const std::string &modelFile)
 	}
 }
 
-bool FaceRecWrapper::Save(const std::string &modelFile) const
-{
+bool FaceRecWrapper::Save(const std::string &modelFile) const {
 	try {
 		ensure_dirs(fs::path(modelFile).parent_path().string());
 		recognizer->write(modelFile);
 
-		// Aggiunge sempre l’algoritmo usato e, se presente, i parametri DNN
+		// Scriviamo sempre l'algoritmo usato + eventuali metadati DNN
 		cv::FileStorage fs(modelFile, cv::FileStorage::APPEND);
 		if (fs.isOpened()) {
-			// header comune per TUTTI i modelli
 			fs << "fa_algorithm" << modelType;
 
 			if (use_dnn) {
 				fs << "fa_dnn_enabled"   << 1;
+				fs << "fa_dnn_profile"   << dnn_profile;
 				fs << "fa_dnn_type"      << dnn_type;
 				fs << "fa_dnn_model"     << dnn_model_path;
 				fs << "fa_dnn_proto"     << dnn_proto_path;
@@ -400,8 +528,7 @@ bool FaceRecWrapper::Save(const std::string &modelFile) const
 }
 
 bool FaceRecWrapper::Train(const std::vector<cv::Mat> &images,
-						   const std::vector<int> &labels)
-{
+						   const std::vector<int> &labels) {
 	if (images.empty() || labels.empty() || images.size() != labels.size())
 		return false;
 
@@ -416,149 +543,149 @@ bool FaceRecWrapper::Train(const std::vector<cv::Mat> &images,
 		std::cerr << "Error training model: " << e.what() << std::endl;
 		return false;
 	}
-}
+						   }
 
-bool FaceRecWrapper::predict_with_dnn(const cv::Mat &faceGray,
-									  int &label,
+						   bool FaceRecWrapper::predict_with_dnn(const cv::Mat &faceGray,
+																 int &label,
+											   double &confidence)
+						   {
+							   if (!dnn_loaded)
+								   return false;
+
+							   cv::Mat input;
+							   if (faceGray.channels() == 1)
+								   cv::cvtColor(faceGray, input, cv::COLOR_GRAY2BGR);
+							   else
+								   input = faceGray;
+
+							   // Per ora usiamo ancora la logica SSD-like:
+							   const cv::Size inputSize(300, 300);
+							   const double scaleFactor = 1.0;
+							   const cv::Scalar meanVal(104.0, 177.0, 123.0);
+
+							   cv::Mat blob = cv::dnn::blobFromImage(input, scaleFactor, inputSize,
+																	 meanVal, false, false);
+							   dnn_net.setInput(blob);
+							   cv::Mat out = dnn_net.forward();
+
+							   float best_score = 0.0f;
+
+							   // Caso classico SSD: [1, 1, N, 7]
+							   if (out.dims == 4 && out.size[2] > 0 && out.size[3] >= 7) {
+								   int N = out.size[2];
+								   const float* data = out.ptr<float>(0, 0); // [N][7]
+
+								   for (int i = 0; i < N; ++i) {
+									   float score = data[i * 7 + 2]; // confidence
+									   if (score > best_score)
+										   best_score = score;
+								   }
+							   }
+							   // Fallback generico: [N,7]
+							   else if (out.rows > 0 && out.cols >= 7) {
+								   int N = out.rows;
+								   for (int i = 0; i < N; ++i) {
+									   const float* row = out.ptr<float>(i);
+									   float score = row[2];
+									   if (score > best_score)
+										   best_score = score;
+								   }
+							   }
+
+							   // conf più basso = migliore (coerente col resto del codice)
+							   confidence = 1.0 - static_cast<double>(best_score);
+
+							   if (best_score >= dnn_threshold)
+								   label = 1;
+							   else
+								   label = -1;
+
+							   return true;
+						   }
+
+						   bool FaceRecWrapper::Predict(const cv::Mat &faceGray,
+														int &label,
 									  double &confidence)
-{
-	if (!dnn_loaded)
+						   {
+							   if (faceGray.empty())
+								   return false;
+
+							   if (use_dnn && dnn_loaded) {
+								   return predict_with_dnn(faceGray, label, confidence);
+							   }
+
+							   try {
+								   recognizer->predict(faceGray, label, confidence);
+								   return true;
+							   } catch (const std::exception &e) {
+								   std::cerr << "Error predicting: " << e.what() << std::endl;
+								   return false;
+							   }
+						   }
+
+						   bool FaceRecWrapper::DetectFace(const cv::Mat &frame, cv::Rect &faceROI) {
+							   if (frame.empty())
+								   return false;
+
+							   if (faceCascade.empty()) {
+								   std::string cascadePath;
+								   const char *envPath = std::getenv("FACIAL_HAAR_PATH");
+								   if (envPath)
+									   cascadePath = envPath;
+
+								   if (cascadePath.empty())
+									   cascadePath = "/usr/share/opencv4/haarcascades/haarcascade_frontalface_default.xml";
+								   if (!file_exists(cascadePath))
+									   cascadePath = "/usr/share/opencv/haarcascades/haarcascade_frontalface_default.xml";
+
+								   if (!faceCascade.load(cascadePath)) {
+									   std::cerr << "Failed to load Haar cascade: " << cascadePath << std::endl;
+									   return false;
+								   }
+							   }
+
+							   cv::Mat gray;
+							   if (frame.channels() == 3)
+								   cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
+							   else
+								   gray = frame;
+
+							   cv::equalizeHist(gray, gray);
+
+							   std::vector<cv::Rect> faces;
+							   faceCascade.detectMultiScale(gray, faces, 1.1, 3, 0, cv::Size(80, 80));
+
+							   if (faces.empty())
+								   return false;
+
+							   auto best = faces[0];
+							   for (const auto &r : faces) {
+								   if (r.area() > best.area())
+									   best = r;
+							   }
+
+							   faceROI = best;
+							   return true;
+						   }
+
+						   // ==========================================================
+						   // High-level API
+						   // ==========================================================
+
+						   bool fa_capture_images(const std::string &user,
+												  const FacialAuthConfig &cfg,
+								bool force,
+								std::string &log,
+								const std::string &img_format)
+						   {
+							   (void)log;
+
+							   std::string device_used;
+							   cv::VideoCapture cap;
+							   if (!open_camera(cfg, cap, device_used)) {
+								   log_tool(cfg, "ERROR", "Failed to open camera (%s)", cfg.device.c_str());
 		return false;
-
-	cv::Mat input;
-	if (faceGray.channels() == 1)
-		cv::cvtColor(faceGray, input, cv::COLOR_GRAY2BGR);
-	else
-		input = faceGray;
-
-	const cv::Size   inputSize    = cv::Size(300, 300);
-	const double     scaleFactor  = 1.0;
-	const cv::Scalar meanVal(104.0, 177.0, 123.0);
-
-	cv::Mat blob = cv::dnn::blobFromImage(input, scaleFactor, inputSize,
-										  meanVal, false, false);
-	dnn_net.setInput(blob);
-	cv::Mat out = dnn_net.forward();
-
-	float best_score = 0.0f;
-
-	// Caso classico SSD: [1, 1, N, 7]
-	if (out.dims == 4 && out.size[2] > 0 && out.size[3] >= 7) {
-		int N = out.size[2];
-		const float* data = out.ptr<float>(0, 0); // [N][7]
-
-		for (int i = 0; i < N; ++i) {
-			float score = data[i * 7 + 2]; // confidence
-			if (score > best_score)
-				best_score = score;
-		}
-	}
-	// Fallback generico: [N,7]
-	else if (out.rows > 0 && out.cols >= 7) {
-		int N = out.rows;
-		for (int i = 0; i < N; ++i) {
-			const float* row = out.ptr<float>(i);
-			float score = row[2];
-			if (score > best_score)
-				best_score = score;
-		}
-	}
-
-	// conf più basso = migliore (coerente col resto del codice)
-	confidence = 1.0 - static_cast<double>(best_score);
-
-	if (best_score >= dnn_threshold)
-		label = 1;
-	else
-		label = -1;
-
-	return true;
-}
-
-bool FaceRecWrapper::Predict(const cv::Mat &faceGray,
-							 int &label,
-							 double &confidence)
-{
-	if (faceGray.empty())
-		return false;
-
-	if (use_dnn && dnn_loaded) {
-		return predict_with_dnn(faceGray, label, confidence);
-	}
-
-	try {
-		recognizer->predict(faceGray, label, confidence);
-		return true;
-	} catch (const std::exception &e) {
-		std::cerr << "Error predicting: " << e.what() << std::endl;
-		return false;
-	}
-}
-
-bool FaceRecWrapper::DetectFace(const cv::Mat &frame, cv::Rect &faceROI)
-{
-	if (frame.empty())
-		return false;
-
-	if (faceCascade.empty()) {
-		std::string cascadePath;
-		const char *envPath = std::getenv("FACIAL_HAAR_PATH");
-		if (envPath)
-			cascadePath = envPath;
-
-		if (cascadePath.empty())
-			cascadePath = "/usr/share/opencv4/haarcascades/haarcascade_frontalface_default.xml";
-		if (!file_exists(cascadePath))
-			cascadePath = "/usr/share/opencv/haarcascades/haarcascade_frontalface_default.xml";
-
-		if (!faceCascade.load(cascadePath)) {
-			std::cerr << "Failed to load Haar cascade: " << cascadePath << std::endl;
-			return false;
-		}
-	}
-
-	cv::Mat gray;
-	if (frame.channels() == 3)
-		cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
-	else
-		gray = frame;
-
-	cv::equalizeHist(gray, gray);
-
-	std::vector<cv::Rect> faces;
-	faceCascade.detectMultiScale(gray, faces, 1.1, 3, 0, cv::Size(80, 80));
-
-	if (faces.empty())
-		return false;
-
-	auto best = faces[0];
-	for (const auto &r : faces) {
-		if (r.area() > best.area())
-			best = r;
-	}
-
-	faceROI = best;
-	return true;
-}
-
-// ==========================================================
-// High-level API
-// ==========================================================
-
-bool fa_capture_images(const std::string &user,
-					   const FacialAuthConfig &cfg,
-					   bool force,
-					   std::string &log,
-					   const std::string &img_format)
-{
-	(void)log;
-
-	std::string device_used;
-	cv::VideoCapture cap;
-	if (!open_camera(cfg, cap, device_used)) {
-		log_tool(cfg, "ERROR", "Failed to open camera (%s)", cfg.device.c_str());
-		return false;
-	}
+							   }
 	log_tool(cfg, "INFO", "Camera opened on %s", device_used.c_str());
 
 	std::string img_dir = fa_user_image_dir(cfg, user);
@@ -595,48 +722,48 @@ bool fa_capture_images(const std::string &user,
 	for (auto &ch : fmt)
 		ch = static_cast<char>(::tolower(static_cast<unsigned char>(ch)));
 
-	log_tool(cfg, "INFO", "Capturing %d frames", cfg.frames);
+							   log_tool(cfg, "INFO", "Capturing %d frames", cfg.frames);
 
-	while (captured < cfg.frames) {
-		cv::Mat frame;
-		cap >> frame;
-		if (frame.empty())
-			break;
+							   while (captured < cfg.frames) {
+								   cv::Mat frame;
+								   cap >> frame;
+								   if (frame.empty())
+									   break;
 
-		cv::Rect roi;
-		if (!rec.DetectFace(frame, roi)) {
-			// Nessun volto: skip frame
-			sleep_ms(cfg.sleep_ms);
-			continue;
-		}
+								   cv::Rect roi;
+								   if (!rec.DetectFace(frame, roi)) {
+									   // Nessun volto: skip frame
+									   sleep_ms(cfg.sleep_ms);
+									   continue;
+								   }
 
-		cv::Mat face = frame(roi).clone();
-		cv::Mat gray;
-		cv::cvtColor(face, gray, cv::COLOR_BGR2GRAY);
-		cv::resize(gray, gray, cv::Size(cfg.width, cfg.height));
-		cv::equalizeHist(gray, gray);
+								   cv::Mat face = frame(roi).clone();
+								   cv::Mat gray;
+								   cv::cvtColor(face, gray, cv::COLOR_BGR2GRAY);
+								   cv::resize(gray, gray, cv::Size(cfg.width, cfg.height));
+								   cv::equalizeHist(gray, gray);
 
-		char namebuf[64];
-		std::snprintf(namebuf, sizeof(namebuf),
-					  "img_%03d.%s", start_index + captured + 1, fmt.c_str());
-		std::string path = join_path(img_dir, namebuf);
+								   char namebuf[64];
+								   std::snprintf(namebuf, sizeof(namebuf),
+												 "img_%03d.%s", start_index + captured + 1, fmt.c_str());
+								   std::string path = join_path(img_dir, namebuf);
 
-		cv::imwrite(path, gray);
-		log_tool(cfg, "INFO", "Saved %s", path.c_str());
-		++captured;
-		sleep_ms(cfg.sleep_ms);
-	}
+								   cv::imwrite(path, gray);
+								   log_tool(cfg, "INFO", "Saved %s", path.c_str());
+								   ++captured;
+								   sleep_ms(cfg.sleep_ms);
+							   }
 
-	if (captured == 0) {
-		log_tool(cfg, "ERROR", "No frames captured for user %s", user.c_str());
+							   if (captured == 0) {
+								   log_tool(cfg, "ERROR", "No frames captured for user %s", user.c_str());
 		return false;
-	}
+							   }
 
 	return true;
-}
+						   }
 
 bool fa_train_user(const std::string &user,
-				   const FacialAuthConfig &cfg_in,
+				   const FacialAuthConfig &cfg,
 				   const std::string &method,
 				   const std::string &inputDir,
 				   const std::string &outputModel,
@@ -645,8 +772,6 @@ bool fa_train_user(const std::string &user,
 {
 	(void)force;
 	(void)log;
-
-	FacialAuthConfig cfg = cfg_in; // copia locale (per sicurezza)
 
 	std::string train_dir = inputDir.empty()
 						  ? fa_user_image_dir(cfg, user)
