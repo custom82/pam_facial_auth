@@ -811,6 +811,41 @@ bool FaceRecWrapper::Train(const std::vector<cv::Mat> &images,
 							   return true;
 						   }
 
+						   // ----------------------------------------------------------
+						   // Heuristic check on detected face ROI to reject "black screen"
+						   // or obviously invalid frames (e.g. covered webcam).
+						   // ----------------------------------------------------------
+						   static bool fa_is_valid_face_roi(const cv::Mat &faceGray)
+						   {
+							   if (faceGray.empty())
+								   return false;
+
+							   // Basic statistics: mean + stddev
+							   cv::Scalar mean, stddev;
+							   cv::meanStdDev(faceGray, mean, stddev);
+							   double m = mean[0];
+							   double s = stddev[0];
+
+							   // Extremely low contrast (almost flat image)
+							   if (s < 5.0)
+								   return false;
+
+							   // Almost all black or all white
+							   if (m < 10.0 || m > 245.0)
+								   return false;
+
+							   // Edge density: a real face should have some structure
+							   cv::Mat edges;
+							   cv::Canny(faceGray, edges, 50, 150);
+							   double edgeFrac = static_cast<double>(cv::countNonZero(edges)) /
+							   static_cast<double>(edges.total() ? edges.total() : 1);
+
+							   if (edgeFrac < 0.01)
+								   return false;
+
+							   return true;
+						   }
+
 						   // ==========================================================
 						   // High-level API
 						   // ==========================================================
@@ -885,6 +920,13 @@ bool FaceRecWrapper::Train(const std::vector<cv::Mat> &images,
 								   cv::cvtColor(face, gray, cv::COLOR_BGR2GRAY);
 								   cv::resize(gray, gray, cv::Size(cfg.width, cfg.height));
 								   cv::equalizeHist(gray, gray);
+
+								   // Reject obviously invalid frames (e.g. covered webcam)
+								   if (!fa_is_valid_face_roi(gray)) {
+									   log_tool(cfg, "DEBUG", "Frame %d: ROI rejected by heuristics", captured);
+									   sleep_ms(cfg.sleep_ms);
+									   continue;
+								   }
 
 								   char namebuf[64];
 								   std::snprintf(namebuf, sizeof(namebuf),
@@ -1035,6 +1077,12 @@ bool fa_test_user(const std::string &user,
 		cv::cvtColor(face, gray, cv::COLOR_BGR2GRAY);
 		cv::resize(gray, gray, cv::Size(cfg.width, cfg.height));
 		cv::equalizeHist(gray, gray);
+
+		if (!fa_is_valid_face_roi(gray)) {
+			log_tool(cfg, "DEBUG", "Frame %d: ROI rejected by heuristics", i);
+			sleep_ms(cfg.sleep_ms);
+			continue;
+		}
 
 		int label = -1;
 		double conf = 0.0;
