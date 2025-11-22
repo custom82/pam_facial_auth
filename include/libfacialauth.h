@@ -45,7 +45,6 @@ struct FacialAuthConfig {
     int sleep_ms = 150;
 
     // Soglia decisionale per metodi classici (LBPH/Eigen/Fisher)
-    // e per DNN (dove viene trasformata).
     double threshold = 60.0;
 
     // Flag vari
@@ -67,7 +66,7 @@ struct FacialAuthConfig {
     // backend/target: "cpu", "cuda", "opencl", "openvino"
     std::string dnn_device = "cpu";
 
-    // soglia logica [0–1], es: 0.6
+    // soglia logica [0–1] per DNN (es. distanza max)
     double dnn_threshold = 0.6;
 
     // Profilo DNN di default (fast, sface, lresnet100, openface, ...)
@@ -147,6 +146,10 @@ public:
     // Configura DNN a partire dalla config globale
     void ConfigureDNN(const FacialAuthConfig &cfg);
 
+    // Info per chi usa il wrapper (es. fa_test_user)
+    bool   IsDNN() const          { return use_dnn; }
+    double GetDnnThreshold() const{ return dnn_threshold; }
+
 private:
     std::string modelType;  // "lbph", "eigen", "fisher", "dnn"
     cv::Ptr<cv::face::FaceRecognizer> recognizer;
@@ -163,6 +166,10 @@ private:
     double      dnn_threshold  = 0.6;
     cv::dnn::Net dnn_net;
 
+    // Template di riferimento per DNN (media embedding)
+    cv::Mat dnn_template;   // 1 x N, CV_32F
+    bool    has_dnn_template = false;
+
     // Stato detector (Haar Cascade)
     mutable cv::CascadeClassifier faceCascade;
 
@@ -170,6 +177,9 @@ private:
     bool predict_with_dnn(const cv::Mat &faceGray,
                           int &label,
                           double &confidence);
+
+    // Calcola embedding DNN da un volto normalizzato (grayscale 200x200)
+    bool compute_dnn_embedding(const cv::Mat &faceGray, cv::Mat &embedding);
 };
 
 // ==========================================================

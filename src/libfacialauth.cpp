@@ -471,6 +471,16 @@ bool FaceRecWrapper::load_dnn_from_model_file(const std::string &modelFile)
 	fs["fa_dnn_device"]    >> dnn_device;
 	fs["fa_dnn_threshold"] >> dnn_threshold;
 
+	// Template eventuale
+	cv::Mat tpl;
+	fs["fa_dnn_template"] >> tpl;
+	if (!tpl.empty()) {
+		tpl.convertTo(dnn_template, CV_32F);
+		has_dnn_template = true;
+	} else {
+		has_dnn_template = false;
+	}
+
 	// Normalizza proto vuoto o scritto come "" / ''
 	if (dnn_proto_path == "\"\"" ||
 		dnn_proto_path == "''")
@@ -536,6 +546,12 @@ bool FaceRecWrapper::Save(const std::string &modelFile) const {
 
 				fs << "fa_dnn_device"    << dnn_device;
 				fs << "fa_dnn_threshold" << dnn_threshold;
+
+				if (!dnn_template.empty()) {
+					cv::Mat tmp;
+					dnn_template.convertTo(tmp, CV_32F);
+					fs << "fa_dnn_template" << tmp;
+				}
 			}
 		}
 
@@ -546,14 +562,91 @@ bool FaceRecWrapper::Save(const std::string &modelFile) const {
 	}
 }
 
+// ----------------------------------------------------------
+// compute_dnn_embedding: volto (gray) -> embedding normalizzato
+// ----------------------------------------------------------
+
+bool FaceRecWrapper::compute_dnn_embedding(const cv::Mat &faceGray, cv::Mat &embedding)
+{
+	if (!dnn_loaded)
+		return false;
+	if (faceGray.empty())
+		return false;
+
+	cv::Mat input;
+	if (faceGray.channels() == 1)
+		cv::cvtColor(faceGray, input, cv::COLOR_GRAY2BGR);
+	else
+		input = faceGray;
+
+	cv::Mat resized;
+	cv::Size inputSize(112,112);
+
+	// Per la maggior parte dei modelli di embedding (SFace, fast, LResNet, openface)
+	cv::resize(input, resized, inputSize);
+
+	// SFace / ArcFace-like: scala 1/255, nessun mean, BGR
+	cv::Mat blob = cv::dnn::blobFromImage(resized,
+										  1.0/255.0,
+									   inputSize,
+									   cv::Scalar(0,0,0),
+										  false,  // BGR, no swapRB
+									   false);
+
+	dnn_net.setInput(blob);
+	cv::Mat out = dnn_net.forward();
+	if (out.total() == 0)
+		return false;
+
+	cv::Mat flat = out.reshape(1,1);
+	flat.convertTo(embedding, CV_32F);
+	if (embedding.cols == 0)
+		return false;
+
+	// Normalizza L2
+	cv::normalize(embedding, embedding);
+	return true;
+}
+
 bool FaceRecWrapper::Train(const std::vector<cv::Mat> &images,
 						   const std::vector<int> &labels) {
 	if (images.empty() || labels.empty() || images.size() != labels.size())
 		return false;
 
-	// Per un DNN puro pre-addestrato possiamo saltare il training
-	if (use_dnn)
+	// Per un DNN puro: calcoliamo un template di embedding (media)
+	if (use_dnn) {
+		if (!dnn_loaded)
+			return false;
+
+		std::vector<cv::Mat> embs;
+		for (const auto &img : images) {
+			cv::Mat emb;
+			if (!compute_dnn_embedding(img, emb))
+				continue;
+			embs.push_back(emb);
+		}
+
+		if (embs.empty()) {
+			std::cerr << "Error: no DNN embeddings computed during training.\n";
+			return false;
+		}
+
+		// Media degli embedding
+		int dim = embs[0].cols;
+		cv::Mat mean = cv::Mat::zeros(1, dim, CV_32F);
+		for (const auto &e : embs) {
+			CV_Assert(e.cols == dim);
+			mean += e;
+		}
+		mean /= static_cast<float>(embs.size());
+
+		cv::normalize(mean, mean);
+		dnn_template = mean;
+		has_dnn_template = true;
+
+		// Nessun training del riconoscitore classico
 		return true;
+	}
 
 	try {
 		recognizer->train(images, labels);
@@ -565,7 +658,8 @@ bool FaceRecWrapper::Train(const std::vector<cv::Mat> &images,
 						   }
 
 						   // ==========================================================
-						   // DNN prediction (SFace / Fast / LResNet / Detectors)
+						   // DNN prediction (embedding per SFace / fast / LResNet / OpenFace,
+						   // oppure score SSD per profili detector)
 						   // ==========================================================
 
 						   bool FaceRecWrapper::predict_with_dnn(const cv::Mat &faceGray,
@@ -575,86 +669,58 @@ bool FaceRecWrapper::Train(const std::vector<cv::Mat> &images,
 							   if (!dnn_loaded)
 								   return false;
 
+							   std::string p = to_lower_str(dnn_profile);
+
+							   // ----------------------------
+							   // Profili embedding (riconoscimento)
+							   // ----------------------------
+							   if (p == "sface" || p == "fast" ||
+								   p == "lresnet100" || p == "openface")
+							   {
+								   if (!has_dnn_template || dnn_template.empty()) {
+									   // Senza template non possiamo decidere nulla
+									   label = -1;
+									   confidence = 1.0;
+									   return false;
+								   }
+
+								   cv::Mat emb;
+								   if (!compute_dnn_embedding(faceGray, emb)) {
+									   label = -1;
+									   confidence = 1.0;
+									   return false;
+								   }
+
+								   // Cosine distance: 1 - cos_sim
+								   double sim = dnn_template.dot(emb);
+								   double dist = 1.0 - sim;
+
+								   confidence = dist;  // più basso = meglio
+								   if (dist <= dnn_threshold) {
+									   label = 1;
+								   } else {
+									   label = -1;
+								   }
+								   return true;
+							   }
+
+							   // ----------------------------
+							   // Profili detector (SSD-like)
+							   // ----------------------------
 							   cv::Mat input;
 							   if (faceGray.channels() == 1)
 								   cv::cvtColor(faceGray, input, cv::COLOR_GRAY2BGR);
 							   else
 								   input = faceGray;
 
-							   cv::Mat blob;
-
-							   // ===========================
-							   //  PROFILI ARCFACE / SFACE / FAST / LRESNET
-							   //  (embedding: es. 1x128)
-							   // ===========================
-							   if (dnn_profile == "sface" ||
-								   dnn_profile == "fast"  ||
-								   dnn_profile == "lresnet100")
-							   {
-								   cv::Mat resized;
-								   cv::resize(input, resized, cv::Size(112,112));
-
-								   // Normalizzazione [0,1], BGR → come da modelli ONNX moderni
-								   blob = cv::dnn::blobFromImage(resized, 1.0/255.0,
-																 cv::Size(112,112),
-																 cv::Scalar(0,0,0),
-																 true, false);
-							   }
-							   // ===========================
-							   //  Detector SSD-style
-							   // ===========================
-							   else if (dnn_profile == "det_uint8" ||
-								   dnn_profile == "det_caffe" ||
-								   dnn_profile == "det_fp16")
-							   {
-								   blob = cv::dnn::blobFromImage(input, 1.0,
-																 cv::Size(300,300),
-																 cv::Scalar(104.0,177.0,123.0),
-																 false, false);
-							   }
-							   else {
-								   // Fallback generico
-								   cv::Mat resized;
-								   cv::resize(input, resized, cv::Size(112,112));
-								   blob = cv::dnn::blobFromImage(resized, 1.0/255.0,
-																 cv::Size(112,112),
-																 cv::Scalar(0,0,0),
-																 true, false);
-							   }
-
+							   cv::Mat blob = cv::dnn::blobFromImage(input,
+																	 1.0,
+												cv::Size(300,300),
+																	 cv::Scalar(104.0,177.0,123.0),
+																	 false, false);
 							   dnn_net.setInput(blob);
 							   cv::Mat out = dnn_net.forward();
 
-							   // ===========================
-							   //   SFace / ArcFace-like:
-							   //   embedding 1×128 (o simile)
-							   // ===========================
-							   if (out.total() == 128 || out.total() == 256)
-							   {
-								   // Per ora: se l'output è un embedding valido,
-								   // consideriamo il riconoscimento "valido".
-								   // (Per un vero sistema andrebbe confrontato
-								   // con un template salvato e applicata una soglia
-								   // sul cosine similarity.)
-								   cv::Mat feat = out.reshape(1,1);
-								   if (cv::countNonZero(feat) == 0) {
-									   label = -1;
-									   confidence = 1.0;
-									   return true;
-								   }
-
-								   // Normalizziamo solo per sicurezza
-								   cv::Mat normFeat;
-								   cv::normalize(feat, normFeat);
-
-								   label = 1;
-								   confidence = 0.0;  // migliore possibile per la nostra logica
-								   return true;
-							   }
-
-							   // ===========================
-							   //  Detector SSD (vecchia logica)
-							   // ===========================
 							   float best_score = 0.0f;
 
 							   if (out.dims == 4 && out.size[3] >= 7) {
@@ -943,6 +1009,14 @@ bool fa_test_user(const std::string &user,
 
 	int frames_ok = 0;
 
+	// Soglia da usare: per DNN usiamo dnn_threshold, per gli altri threshold classico
+	double thr = cfg.threshold;
+	if (rec.IsDNN()) {
+		thr = rec.GetDnnThreshold();
+		if (thr <= 0.0)
+			thr = 0.6;
+	}
+
 	for (int i = 0; i < cfg.frames; ++i) {
 		cv::Mat frame;
 		cap >> frame;
@@ -965,18 +1039,21 @@ bool fa_test_user(const std::string &user,
 		int label = -1;
 		double conf = 0.0;
 		if (rec.Predict(gray, label, conf)) {
-			log_tool(cfg, "INFO", "Frame %d: label=%d conf=%.4f", i, label, conf);
+			log_tool(cfg, "INFO", "Frame %d: label=%d conf=%.6f thr=%.6f",
+					 i, label, conf, thr);
 
-			if (conf < best_conf) {
+			if (label >= 0 && conf < best_conf) {
 				best_conf  = conf;
 				best_label = label;
 			}
+
 			++frames_ok;
 
-			if (conf <= cfg.threshold) {
+			// conf più basso = meglio, e richiediamo label valido
+			if (label >= 0 && conf <= thr && conf > 0.0) {
 				log_tool(cfg, "INFO",
-						 "Facial authentication SUCCESS (conf=%.4f <= thr=%.4f)",
-						 conf, cfg.threshold);
+						 "Facial authentication SUCCESS (conf=%.6f <= thr=%.6f)",
+						 conf, thr);
 				return true;
 			}
 		}
@@ -984,9 +1061,16 @@ bool fa_test_user(const std::string &user,
 		sleep_ms(cfg.sleep_ms);
 	}
 
+	if (best_label < 0) {
+		log_tool(cfg, "WARNING",
+				 "Facial authentication FAILED for user %s (no valid predictions)",
+				 user.c_str());
+		return false;
+	}
+
 	log_tool(cfg, "WARNING",
-			 "Facial authentication FAILED for user %s (best_conf=%.4f thr=%.4f)",
-			 user.c_str(), best_conf, cfg.threshold);
+			 "Facial authentication FAILED for user %s (best_conf=%.6f thr=%.6f)",
+			 user.c_str(), best_conf, thr);
 
 	return false;
 }
@@ -1304,8 +1388,7 @@ int fa_training_cli(int argc, char *argv[])
 		return 1;
 	}
 
-	// Carica configurazione (non trattiamo il "false" come errore fatale:
-	// se il file non c'è, si usano i default già in cfg)
+	// Carica configurazione (se manca, proseguiamo con i default)
 	fa_load_config(config_path, cfg, log);
 
 	// Override debug da CLI (ha precedenza su config)
