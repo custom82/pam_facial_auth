@@ -4,107 +4,153 @@
 #include <string>
 #include <vector>
 
-#include <opencv2/core.hpp>
-#include <opencv2/objdetect.hpp>
+#include <opencv2/opencv.hpp>
 #include <opencv2/face.hpp>
 #include <opencv2/dnn.hpp>
-#include <opencv2/imgproc.hpp>
-#include <opencv2/imgcodecs.hpp>
-#include <opencv2/videoio.hpp>
 
+// ==========================================================
+// Default config file path
+// ==========================================================
+#ifndef FACIALAUTH_CONFIG_DEFAULT
 #define FACIALAUTH_CONFIG_DEFAULT "/etc/security/pam_facial.conf"
+#endif
 
-// =============================================
-// Config
-// =============================================
+// ==========================================================
+// Configurazione globale
+// ==========================================================
 
 struct FacialAuthConfig {
-    std::string config_path;
+    // Path al file di configurazione (solo informativo)
+    std::string config_path = FACIALAUTH_CONFIG_DEFAULT;
 
+    // Directory base per immagini e modelli
+    //  images: <basedir>/images/<user>/
+    //  models: <basedir>/models/<user>.xml
     std::string basedir = "/etc/pam_facial_auth";
 
-    std::string device;   // /dev/video0 (optional)
+    // Dispositivo video (se vuoto, usa camera_index)
+    std::string device;
+
+    // Indice camera (se device vuoto)
     int camera_index = 0;
 
+    // Numero di frame da catturare per test/train
     int frames = 10;
+
+    // Dimensioni standard del volto normalizzato
     int width  = 200;
     int height = 200;
 
+    // Risoluzione *desiderata* della camera (0 = non forzare)
+    int frame_width  = 0;
+    int frame_height = 0;
+
+    // Millisecondi di sleep tra un frame e l'altro
     int sleep_ms = 150;
 
+    // Soglia decisionale per metodi classici (LBPH/Eigen/Fisher)
     double threshold = 60.0;
 
-    bool debug = false;
+    // Debug / overwrite
+    bool debug           = false;
     bool force_overwrite = false;
 
-    // ---- DNN recognizer ----
-    std::string dnn_type;
+    // ======================================================
+    // Parametri DNN generali (riconoscimento)
+    // ======================================================
+    // "caffe", "tensorflow", "onnx", "openvino", "tflite", "torch"
+    std::string dnn_type = "onnx";
+
+    // path al file modello (caffemodel, .pb, .onnx, .xml, .tflite, .t7)
     std::string dnn_model_path;
+
+    // path al file di “config” (prototxt, pbtxt, .bin IR, opzionale)
     std::string dnn_proto_path;
+
+    // backend/target: "cpu", "cuda", "opencl", "openvino"
     std::string dnn_device = "cpu";
-    double      dnn_threshold = 0.6;
-    std::string dnn_profile;
 
-    // ---- DNN embedding models ----
-    std::string dnn_model_fast;
-    std::string dnn_model_sface;
-    std::string dnn_model_lresnet100;
-    std::string dnn_model_openface;
+    // soglia logica [0–1], es: 0.6 (usata sia per DNN riconoscimento che detector)
+    double dnn_threshold = 0.6;
 
-    // ---- DNN detectors ----
-    std::string dnn_model_yunet;
-    std::string dnn_model_detector_caffe;
-    std::string dnn_model_detector_fp16;
-    std::string dnn_model_detector_uint8;
-    std::string dnn_proto_detector_caffe;
+    // Profilo DNN di default (fast, sface, lresnet100, openface, ...)
+    std::string dnn_profile = "fast";
 
-    // ---- Extra models ----
-    std::string dnn_model_emotion;
-    std::string dnn_model_keypoints;
-    std::string dnn_model_face_landmark_tflite;
-    std::string dnn_model_face_detection_tflite;
-    std::string dnn_model_face_blendshapes_tflite;
+    // ======================================================
+    // Parametri DNN per DETECTOR
+    // ======================================================
 
-    // ---- Haar fallback ----
+    // Profilo DNN da usare come detector (solo per gating):
+    //   det_uint8, det_caffe, det_fp16
+    // Gli altri profili vengono ignorati come detector e si usa solo Haar.
+    std::string dnn_detector_profile;
+
+    // Path assoluto per Haar cascade (se vuoto usa env/Fallback standard)
     std::string haar_cascade;
 
-    // ---- Detector selection ----
-    std::string detector_profile;
-    double      detector_threshold = 0.6;
-    int         detector_width  = 0;
-    int         detector_height = 0;
+    // ======================================================
+    // Path specifici per ciascun backend facciale
+    // (tutti assoluti, valorizzati da pam_facial.conf)
+    // ======================================================
+
+    // Riconoscimento volto
+    std::string dnn_model_fast;          // face_recognizer_fast.onnx
+    std::string dnn_model_sface;         // face_recognition_sface_2021dec.onnx
+    std::string dnn_model_lresnet100;    // LResNet100E_IR.onnx
+    std::string dnn_model_openface;      // openface_nn4.small2.v1.t7
+
+    // Detector volto
+    std::string dnn_model_yunet;               // yunet-202303.onnx
+    std::string dnn_model_detector_caffe;      // opencv_face_detector.caffemodel
+    std::string dnn_model_detector_fp16;       // opencv_face_detector_fp16.caffemodel
+    std::string dnn_model_detector_uint8;      // opencv_face_detector_uint8.pb
+    std::string dnn_proto_detector_caffe;      // deploy.prototxt per i detector caffe
+
+    // Emotion / keypoints / MediaPipe TFLite
+    std::string dnn_model_emotion;                 // emotion_ferplus.onnx
+    std::string dnn_model_keypoints;               // facial_keypoints.onnx
+    std::string dnn_model_face_landmark_tflite;    // face_landmark.tflite
+    std::string dnn_model_face_detection_tflite;   // face_detection_short_range.tflite
+    std::string dnn_model_face_blendshapes_tflite; // face_blendshapes.tflite
 };
 
-// =============================================
-// Utility prototypes
-// =============================================
+// ==========================================================
+// API di configurazione
+// ==========================================================
 
+// Carica configurazione semplice key=value dal file path
+// Restituisce false in caso di errore grave (file mancante, ecc.)
 bool fa_load_config(const std::string &path,
                     FacialAuthConfig &cfg,
                     std::string &log);
 
+// Seleziona un profilo DNN e aggiorna cfg.dnn_type / dnn_model_path / dnn_proto_path
+// profile: fast, sface, lresnet100, openface, yunet, emotion, keypoints,
+//          det_uint8, det_caffe, det_fp16, mp_landmark, mp_face, mp_blend
+bool fa_select_dnn_profile(FacialAuthConfig &cfg,
+                           const std::string &profile,
+                           std::string &log);
+
+// Directory immagini e path modello per un utente
 std::string fa_user_image_dir(const FacialAuthConfig &cfg,
                               const std::string &user);
 
 std::string fa_user_model_path(const FacialAuthConfig &cfg,
                                const std::string &user);
 
-// =============================================
-// open_camera() — MUST BE DECLARED!
-// =============================================
+// Apertura camera (usata da CLI e PAM)
 bool open_camera(const FacialAuthConfig &cfg,
                  cv::VideoCapture &cap,
                  std::string &device_used);
 
-// =============================================
-// FaceRecWrapper
-// =============================================
+// ==========================================================
+// Wrapper di riconoscimento
+// ==========================================================
 
 class FaceRecWrapper {
-
 public:
     FaceRecWrapper();
-    explicit FaceRecWrapper(const std::string &modelType);
+    explicit FaceRecWrapper(const std::string &modelType_);
 
     bool Load(const std::string &modelFile);
     bool Save(const std::string &modelFile) const;
@@ -116,70 +162,72 @@ public:
                  int &label,
                  double &confidence);
 
-    bool DetectFace(const cv::Mat &frame, cv::Rect &roi);
+    // Face detection (usa Haar + opzionale DNN detector)
+    bool DetectFace(const cv::Mat &frame, cv::Rect &faceROI);
 
+    // Configura DNN di riconoscimento a partire dalla config globale
     void ConfigureDNN(const FacialAuthConfig &cfg);
+
+    // Configura DETECTOR (Haar + opzionale DNN detector)
     void ConfigureDetector(const FacialAuthConfig &cfg);
 
     bool IsDNN() const { return use_dnn; }
     double GetDnnThreshold() const { return dnn_threshold; }
 
 private:
-    // Recognizer
+    std::string modelType;  // "lbph", "eigen", "fisher", "dnn"
     cv::Ptr<cv::face::FaceRecognizer> recognizer;
-    std::string modelType;
 
-    // DNN recognition
-    bool        use_dnn = false;
-    bool        dnn_loaded = false;
-    std::string dnn_profile;
+    // --- Stato DNN (riconoscimento) ---
+    bool        use_dnn        = false;
+    bool        dnn_loaded     = false;
+    std::string dnn_profile;   // fast, sface, lresnet100, ...
     std::string dnn_type;
     std::string dnn_model_path;
     std::string dnn_proto_path;
     std::string dnn_device;
-    double      dnn_threshold = 0.6;
-
+    double      dnn_threshold  = 0.6;
     cv::dnn::Net dnn_net;
 
+    // Template embedding per DNN (SFace / fast / LResNet / OpenFace)
     cv::Mat dnn_template;
     bool    has_dnn_template = false;
 
+    // --- Detector ---
+    std::string dnn_detector_profile;   // det_uint8 / det_caffe / det_fp16
+    double      dnn_detector_threshold = 0.6;
+    cv::dnn::Net dnn_detector_net;
+    bool        dnn_detector_loaded = false;
+
+    // Haar cascade
+    mutable cv::CascadeClassifier faceCascade;
+    std::string haar_cascade_path;
+
+    // Helpers interni
     bool load_dnn_from_model_file(const std::string &modelFile);
     bool compute_dnn_embedding(const cv::Mat &faceGray, cv::Mat &embedding);
     bool predict_with_dnn(const cv::Mat &faceGray,
                           int &label,
                           double &confidence);
 
-    // Haar fallback
-    std::string haar_path;
-    mutable cv::CascadeClassifier faceCascade;
-
-    // DNN Detector
-    bool        use_dnn_detector = false;
-    bool        detector_loaded  = false;
-
-    std::string detector_profile;
-    std::string detector_type;
-    std::string detector_model_path;
-    std::string detector_proto_path;
-    std::string detector_device;
-    double      detector_threshold = 0.6;
-    int         detector_input_width  = 0;
-    int         detector_input_height = 0;
-
-    cv::dnn::Net detector_net;
+    bool dnn_detector_accepts(const cv::Mat &roi) const;
 };
 
-// =============================================
-// High level API
-// =============================================
+// ==========================================================
+// API alto livello
+// ==========================================================
 
+// Cattura immagini da webcam e salva in basedir/images/<user>/img_XXX.<fmt>
 bool fa_capture_images(const std::string &user,
                        const FacialAuthConfig &cfg,
                        bool force,
                        std::string &log,
-                       const std::string &format);
+                       const std::string &img_format = "png");
 
+// Allena un modello per l’utente (LBPH / Eigen / Fisher / DNN)
+// - method: "lbph", "eigen", "fisher", "dnn"
+// - inputDir: se vuoto usa fa_user_image_dir(cfg, user)
+// - outputModel: se vuoto usa fa_user_model_path(cfg, user)
 bool fa_train_user(const std::string &user,
                    const FacialAuthConfig &cfg,
                    const std::string &method,
@@ -188,6 +236,10 @@ bool fa_train_user(const std::string &user,
                    bool force,
                    std::string &log);
 
+// Testa l’utente in tempo reale (camera) usando il modello XML
+// - modelPath: se vuoto usa fa_user_model_path(cfg, user)
+// - best_conf: migliore (più bassa) conf trovata
+// - best_label: label associato
 bool fa_test_user(const std::string &user,
                   const FacialAuthConfig &cfg,
                   const std::string &modelPath,
@@ -195,18 +247,19 @@ bool fa_test_user(const std::string &user,
                   int &best_label,
                   std::string &log);
 
+// ==========================================================
+// Maintenance helpers and root check
+// ==========================================================
 bool fa_clean_images(const FacialAuthConfig &cfg, const std::string &user);
-bool fa_clean_model (const FacialAuthConfig &cfg, const std::string &user);
-void fa_list_images (const FacialAuthConfig &cfg, const std::string &user);
+bool fa_clean_model(const FacialAuthConfig &cfg, const std::string &user);
+void fa_list_images(const FacialAuthConfig &cfg, const std::string &user);
+bool fa_check_root(const char *tool_name);
 
-bool fa_check_root(const char *tool);
-
-// =============================================
-// CLI frontends
-// =============================================
-
+// ==========================================================
+// CLI entrypoints (usati dai binari wrapper)
+// ==========================================================
 int fa_training_cli(int argc, char *argv[]);
-int fa_capture_cli (int argc, char *argv[]);
-int fa_test_cli    (int argc, char *argv[]);
+int fa_capture_cli(int argc, char *argv[]);
+int fa_test_cli(int argc, char *argv[]);
 
-#endif
+#endif // LIBFACIALAUTH_H
