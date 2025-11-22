@@ -13,6 +13,8 @@
 #include <chrono>
 #include <thread>
 #include <cctype>
+#include <getopt.h>
+#include <algorithm>
 
 namespace fs = std::filesystem;
 
@@ -774,8 +776,8 @@ bool fa_train_user(const std::string &user,
 	(void)log;
 
 	std::string train_dir = inputDir.empty()
-						  ? fa_user_image_dir(cfg, user)
-						  : inputDir;
+		? fa_user_image_dir(cfg, user)
+		: inputDir;
 
 	if (!fs::exists(train_dir)) {
 		log_tool(cfg, "ERROR", "Training dir does not exist: %s", train_dir.c_str());
@@ -816,8 +818,8 @@ bool fa_train_user(const std::string &user,
 	}
 
 	std::string model_path = outputModel.empty()
-						   ? fa_user_model_path(cfg, user)
-						   : outputModel;
+		? fa_user_model_path(cfg, user)
+		: outputModel;
 
 	if (!rec.Save(model_path)) {
 		log_tool(cfg, "ERROR", "Failed to save model to %s", model_path.c_str());
@@ -838,8 +840,8 @@ bool fa_test_user(const std::string &user,
 	(void)log;
 
 	std::string model_file = modelPath.empty()
-						   ? fa_user_model_path(cfg, user)
-						   : modelPath;
+		? fa_user_model_path(cfg, user)
+		: modelPath;
 
 	if (!file_exists(model_file)) {
 		log_tool(cfg, "ERROR", "Model file missing for user %s: %s",
@@ -966,4 +968,534 @@ bool fa_check_root(const char *tool_name)
 		return false;
 	}
 	return true;
+}
+
+// ======================================================================
+// CLI helpers: profili DNN dinamici / usage / entrypoints
+// ======================================================================
+
+// Legge dinamicamente i profili DNN dal file di configurazione.
+// Restituisce i nomi logici: fast, sface, lresnet100, openface, yunet, ...
+static std::vector<std::string> fa_get_dnn_profiles_from_config(const std::string &config_path)
+{
+	std::vector<std::string> profiles;
+
+	std::ifstream in(config_path);
+	if (!in) {
+		// Fallback: elenco completo predefinito
+		profiles = {
+			"fast", "sface", "lresnet100", "openface",
+			"yunet", "emotion", "keypoints",
+			"det_uint8", "det_caffe", "det_fp16",
+			"mp_landmark", "mp_face", "mp_blend"
+		};
+		return profiles;
+	}
+
+	auto maybe_add = [&](const std::string &line,
+						 const std::string &key,
+					  const std::string &name)
+	{
+		if (line.rfind(key, 0) != 0)  // non inizia con key
+			return;
+
+		auto eq = line.find('=');
+		if (eq == std::string::npos)
+			return;
+
+		std::string val = line.substr(eq + 1);
+
+		// trim spazi
+		auto b = val.find_first_not_of(" \t");
+		auto e = val.find_last_not_of(" \t\r\n");
+		if (b == std::string::npos || e == std::string::npos)
+			val.clear();
+		else
+			val = val.substr(b, e - b + 1);
+
+		if (!val.empty())
+			profiles.push_back(name);
+	};
+
+	std::string line;
+	while (std::getline(in, line)) {
+		auto first = line.find_first_not_of(" \t");
+		if (first == std::string::npos)
+			continue;
+		if (line[first] == '#')
+			continue;
+
+		std::string s = line.substr(first);
+
+		// mappa chiavi del config -> nomi profilo
+		maybe_add(s, "dnn_model_fast",                     "fast");
+		maybe_add(s, "dnn_model_sface",                    "sface");
+		maybe_add(s, "dnn_model_lresnet100",               "lresnet100");
+		maybe_add(s, "dnn_model_openface",                 "openface");
+
+		maybe_add(s, "dnn_model_yunet",                    "yunet");
+		maybe_add(s, "dnn_model_emotion",                  "emotion");
+		maybe_add(s, "dnn_model_keypoints",                "keypoints");
+
+		maybe_add(s, "dnn_model_detector_uint8",           "det_uint8");
+		maybe_add(s, "dnn_model_detector_caffe",           "det_caffe");
+		maybe_add(s, "dnn_model_detector_fp16",            "det_fp16");
+
+		maybe_add(s, "dnn_model_face_landmark_tflite",     "mp_landmark");
+		maybe_add(s, "dnn_model_face_detection_tflite",    "mp_face");
+		maybe_add(s, "dnn_model_face_blendshapes_tflite",  "mp_blend");
+	}
+
+	if (profiles.empty()) {
+		profiles = {
+			"fast", "sface", "lresnet100", "openface",
+			"yunet", "emotion", "keypoints",
+			"det_uint8", "det_caffe", "det_fp16",
+			"mp_landmark", "mp_face", "mp_blend"
+		};
+	} else {
+		std::sort(profiles.begin(), profiles.end());
+		profiles.erase(std::unique(profiles.begin(), profiles.end()),
+					   profiles.end());
+	}
+
+	return profiles;
+}
+
+// ---------------------- HELP TRAINING ----------------------
+
+static void fa_usage_training(const char *prog, const std::string &config_path)
+{
+	std::cerr <<
+	"Usage: " << prog << " [options]\n"
+	"  -u, --user USER             User name\n"
+	"  -m, --method METHOD         lbph|eigen|fisher|dnn [default: lbph]\n"
+	"  -i, --input-dir DIR         Training images dir\n"
+	"  -o, --output-model FILE     Output model XML\n"
+	"  -c, --config FILE           Config file (default " FACIALAUTH_CONFIG_DEFAULT ")\n"
+	"  -f, --force                 Force overwrite\n"
+	"      --dnn-type T            caffe|tensorflow|onnx|openvino|tflite|torch\n"
+	"      --dnn-model PATH        DNN model path\n"
+	"      --dnn-proto PATH        DNN proto/config path\n"
+	"      --dnn-device DEV        cpu|cuda|opencl|openvino\n"
+	"      --dnn-threshold VAL     DNN threshold [0-1], default 0.6\n";
+
+	auto profiles = fa_get_dnn_profiles_from_config(config_path);
+	std::cerr << "      --dnn-profile NAME      DNN profiles available in config:\n";
+	if (profiles.empty()) {
+		std::cerr << "                              (none)\n";
+	} else {
+		for (const auto &p : profiles) {
+			std::cerr << "                              " << p << "\n";
+		}
+	}
+
+	std::cerr <<
+	"      --debug                 Enable debug logging\n"
+	"      --help                  Show this help\n";
+}
+
+// ---------------------- HELP CAPTURE -----------------------
+
+static void fa_usage_capture(const char *prog)
+{
+	std::cout <<
+	"Usage: " << prog << " [OPTIONS]\n"
+	"Options:\n"
+	"  -u, --user <name>            User name (REQUIRED)\n"
+	"  -d, --device <dev>           Video device (/dev/video0)\n"
+	"  -w, --width <px>             Frame width\n"
+	"  -h, --height <px>            Frame height\n"
+	"  -n, --frames <num>           Number of frames\n"
+	"  -c, --config <file>          Config file path (default " FACIALAUTH_CONFIG_DEFAULT ")\n"
+	"  -f, --force                  Overwrite images (reset index to 1)\n"
+	"      --clean                  Delete ALL images for user\n"
+	"      --reset                  Delete images + model\n"
+	"      --list                   List user images\n"
+	"      --format <ext>           Image format (png,jpg) [default: jpg]\n"
+	"      --debug                  Enable verbose debug\n"
+	"      --help                   Show this help\n";
+}
+
+// ---------------------- HELP TEST --------------------------
+
+static void fa_usage_test(const char *prog)
+{
+	std::cerr <<
+	"Usage: " << prog << " [options]\n"
+	"  -u, --user USER             User name\n"
+	"  -m, --model FILE            Model XML (default: basedir/models/<user>.xml)\n"
+	"  -c, --config FILE           Config file (default " FACIALAUTH_CONFIG_DEFAULT ")\n"
+	"      --frames N              Number of frames\n"
+	"      --debug                 Enable debug logging\n"
+	"      --help                  Show this help\n";
+}
+
+// ======================================================================
+// CLI IMPLEMENTATIONS
+// ======================================================================
+
+// ---------------------- TRAINING CLI ----------------------------------
+
+int fa_training_cli(int argc, char *argv[])
+{
+	FacialAuthConfig cfg;
+
+	std::string user;
+	std::string input_dir;
+	std::string method = "lbph";
+	std::string log;
+	std::string output_model;
+	std::string config_path = FACIALAUTH_CONFIG_DEFAULT;
+	std::string dnn_profile_cli;
+
+	bool force     = false;
+	bool debug_cli = false;
+
+	static struct option long_opts[] = {
+		{"user",          required_argument, nullptr, 'u'},
+		{"method",        required_argument, nullptr, 'm'},
+		{"input-dir",     required_argument, nullptr, 'i'},
+		{"output-model",  required_argument, nullptr, 'o'},
+		{"config",        required_argument, nullptr, 'c'},
+		{"force",         no_argument,       nullptr, 'f'},
+		{"dnn-type",      required_argument, nullptr,  1 },
+		{"dnn-model",     required_argument, nullptr,  2 },
+		{"dnn-proto",     required_argument, nullptr,  3 },
+		{"dnn-device",    required_argument, nullptr,  4 },
+		{"dnn-threshold", required_argument, nullptr,  5 },
+		{"debug",         no_argument,       nullptr,  6 },
+		{"dnn-profile",   required_argument, nullptr,  7 },
+		{"help",          no_argument,       nullptr,  8 },
+		{nullptr,         0,                 nullptr,  0 }
+	};
+
+	int opt, idx;
+	optind = 1;
+
+	while ((opt = getopt_long(argc, argv, "u:m:i:o:c:f", long_opts, &idx)) != -1) {
+		switch (opt) {
+			case 'u':
+				user = optarg;
+				break;
+			case 'm':
+				method = optarg;
+				break;
+			case 'i':
+				input_dir = optarg;
+				break;
+			case 'o':
+				output_model = optarg;
+				break;
+			case 'c':
+				config_path = optarg;
+				break;
+			case 'f':
+				force = true;
+				cfg.force_overwrite = true;
+				break;
+			case 1:
+				cfg.dnn_type = optarg;
+				break;
+			case 2:
+				cfg.dnn_model_path = optarg;
+				break;
+			case 3:
+				cfg.dnn_proto_path = optarg;
+				break;
+			case 4:
+				cfg.dnn_device = optarg;
+				break;
+			case 5:
+				cfg.dnn_threshold = std::stod(optarg);
+				break;
+			case 6:
+				debug_cli = true;
+				break;
+			case 7:
+				dnn_profile_cli = optarg;
+				break;
+			case 8:
+				fa_usage_training(argv[0], config_path);
+				return 0;
+			default:
+				fa_usage_training(argv[0], config_path);
+				return 1;
+		}
+	}
+
+	if (user.empty()) {
+		fa_usage_training(argv[0], config_path);
+		return 1;
+	}
+
+	// Carica configurazione (non trattiamo il "false" come errore fatale:
+	// se il file non c'è, si usano i default già in cfg)
+	fa_load_config(config_path, cfg, log);
+
+	// Override debug da CLI (ha precedenza su config)
+	if (debug_cli) {
+		cfg.debug = true;
+		std::cout << "[DEBUG] Debug mode FORZATO da CLI (--debug)\n";
+	}
+
+	// Se metodo DNN, seleziona profilo
+	{
+		std::string mt = to_lower_str(method);
+		if (mt == "dnn") {
+			std::string profile_to_use =
+			!dnn_profile_cli.empty() ? dnn_profile_cli : cfg.dnn_profile;
+
+			if (!profile_to_use.empty()) {
+				if (!fa_select_dnn_profile(cfg, profile_to_use, log)) {
+					std::cerr << "[ERROR] Unknown DNN profile: "
+					<< profile_to_use << "\n";
+					if (!log.empty())
+						std::cerr << log << "\n";
+					return 1;
+				}
+			}
+		}
+	}
+
+	if (!fa_train_user(user, cfg, method, input_dir, output_model, force, log)) {
+		std::cerr << "[ERROR] Training failed for user " << user << "\n";
+		if (!log.empty())
+			std::cerr << log << "\n";
+		return 1;
+	}
+
+	std::cout << "[INFO] Training completed for user " << user << "\n";
+	return 0;
+}
+
+// ---------------------- CAPTURE CLI ----------------------------------
+
+int fa_capture_cli(int argc, char *argv[])
+{
+	FacialAuthConfig cfg;
+
+	std::string config_path = FACIALAUTH_CONFIG_DEFAULT;
+	std::string user;
+	std::string img_format = "jpg";
+	std::string log;
+
+	bool force       = false;
+	bool clean       = false;
+	bool reset       = false;
+	bool list_images = false;
+	bool debug_cli   = false;
+
+	int width  = 0;
+	int height = 0;
+	int frames = 0;
+
+	static struct option long_opts[] = {
+		{"user",        required_argument, nullptr, 'u'},
+		{"device",      required_argument, nullptr, 'd'},
+		{"width",       required_argument, nullptr, 'w'},
+		{"height",      required_argument, nullptr, 'h'},
+		{"frames",      required_argument, nullptr, 'n'},
+		{"config",      required_argument, nullptr, 'c'},
+		{"force",       no_argument,       nullptr, 'f'},
+		{"format",      required_argument, nullptr,  1 },
+		{"debug",       no_argument,       nullptr,  2 },
+		{"clean",       no_argument,       nullptr,  3 },
+		{"reset",       no_argument,       nullptr,  4 },
+		{"list",        no_argument,       nullptr,  5 },
+		{"help",        no_argument,       nullptr,  6 },
+		{nullptr,       0,                 nullptr,  0 }
+	};
+
+	int opt, idx;
+	optind = 1;
+
+	while ((opt = getopt_long(argc, argv, "u:d:w:h:n:c:f", long_opts, &idx)) != -1) {
+		switch (opt) {
+			case 'u':
+				user = optarg;
+				break;
+			case 'd':
+				cfg.device = optarg;
+				break;
+			case 'w':
+				width = std::stoi(optarg);
+				break;
+			case 'h':
+				height = std::stoi(optarg);
+				break;
+			case 'n':
+				frames = std::stoi(optarg);
+				break;
+			case 'c':
+				config_path = optarg;
+				break;
+			case 'f':
+				force = true;
+				cfg.force_overwrite = true;
+				break;
+			case 1:
+				img_format = optarg;
+				break;
+			case 2:
+				debug_cli = true;
+				break;
+			case 3:
+				clean = true;
+				break;
+			case 4:
+				reset = true;
+				break;
+			case 5:
+				list_images = true;
+				break;
+			case 6:
+				fa_usage_capture(argv[0]);
+				return 0;
+			default:
+				fa_usage_capture(argv[0]);
+				return 1;
+		}
+	}
+
+	if (user.empty()) {
+		std::cerr << "[ERROR] Missing --user\n";
+		fa_usage_capture(argv[0]);
+		return 1;
+	}
+
+	fa_load_config(config_path, cfg, log);
+
+	if (debug_cli) {
+		cfg.debug = true;
+		std::cout << "[DEBUG] Debug mode FORZATO da CLI (--debug)\n";
+	}
+
+	if (width > 0)
+		cfg.width = width;
+	if (height > 0)
+		cfg.height = height;
+	if (frames > 0)
+		cfg.frames = frames;
+
+	if (list_images) {
+		fa_list_images(cfg, user);
+		return 0;
+	}
+
+	if (clean) {
+		std::cout << "[INFO] Removing all images for user " << user << "\n";
+		fa_clean_images(cfg, user);
+		return 0;
+	}
+
+	if (reset) {
+		std::cout << "[INFO] Reset user data (images + model)\n";
+		fa_clean_images(cfg, user);
+		fa_clean_model(cfg, user);
+		return 0;
+	}
+
+	if (force) {
+		std::cout << "[INFO] FORCE enabled: cleaning images before capture\n";
+		fa_clean_images(cfg, user);
+	}
+
+	std::cout << "[INFO] Starting capture for user: " << user << "\n";
+
+	if (!fa_capture_images(user, cfg, force, log, img_format)) {
+		std::cerr << "[ERROR] Capture failed\n";
+		if (!log.empty())
+			std::cerr << log << "\n";
+		return 1;
+	}
+
+	std::cout << "[INFO] Capture completed\n";
+	return 0;
+}
+
+// ---------------------- TEST CLI -------------------------------------
+
+int fa_test_cli(int argc, char *argv[])
+{
+	FacialAuthConfig cfg;
+
+	std::string user;
+	std::string model_path;
+	std::string config_path = FACIALAUTH_CONFIG_DEFAULT;
+	std::string log;
+
+	int frames     = 0;
+	bool debug_cli = false;
+
+	static struct option long_opts[] = {
+		{"user",    required_argument, nullptr, 'u'},
+		{"model",   required_argument, nullptr, 'm'},
+		{"config",  required_argument, nullptr, 'c'},
+		{"frames",  required_argument, nullptr,  1 },
+		{"debug",   no_argument,       nullptr,  2 },
+		{"help",    no_argument,       nullptr,  3 },
+		{nullptr,   0,                 nullptr,  0 }
+	};
+
+	int opt, idx;
+	optind = 1;
+
+	while ((opt = getopt_long(argc, argv, "u:m:c:", long_opts, &idx)) != -1) {
+		switch (opt) {
+			case 'u':
+				user = optarg;
+				break;
+			case 'm':
+				model_path = optarg;
+				break;
+			case 'c':
+				config_path = optarg;
+				break;
+			case 1:
+				frames = std::stoi(optarg);
+				break;
+			case 2:
+				debug_cli = true;
+				break;
+			case 3:
+				fa_usage_test(argv[0]);
+				return 0;
+			default:
+				fa_usage_test(argv[0]);
+				return 1;
+		}
+	}
+
+	if (user.empty()) {
+		fa_usage_test(argv[0]);
+		return 1;
+	}
+
+	fa_load_config(config_path, cfg, log);
+
+	if (debug_cli) {
+		cfg.debug = true;
+		std::cout << "[DEBUG] Debug mode FORZATO da CLI (--debug)\n";
+	}
+
+	if (frames > 0)
+		cfg.frames = frames;
+
+	if (model_path.empty())
+		model_path = fa_user_model_path(cfg, user);
+
+	double best_conf = 0.0;
+	int    best_label = -1;
+
+	bool ok = fa_test_user(user, cfg, model_path, best_conf, best_label, log);
+
+	std::cout << "Result: " << (ok ? "SUCCESS" : "FAIL") << "\n"
+	<< "  best_conf = " << best_conf << "\n"
+	<< "  best_label = " << best_label << "\n";
+
+	if (!log.empty())
+		std::cout << log << "\n";
+
+	return ok ? 0 : 1;
 }

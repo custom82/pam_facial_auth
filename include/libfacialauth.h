@@ -214,4 +214,12 @@ bool fa_clean_model(const FacialAuthConfig &cfg, const std::string &user);
 void fa_list_images(const FacialAuthConfig &cfg, const std::string &user);
 bool fa_check_root(const char *tool_name);
 
+// ==========================================================
+// CLI front-ends (wrapper entrypoints)
+// ==========================================================
+
+int fa_capture_cli(int argc, char *argv[]);
+int fa_training_cli(int argc, char *argv[]);
+int fa_test_cli(int argc, char *argv[]);
+
 #endif // LIBFACIALAUTH_H
