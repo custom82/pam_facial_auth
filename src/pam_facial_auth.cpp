@@ -10,7 +10,7 @@
 extern "C" {
 
     // =======================================================================
-    // Helper: ricava l’utente PAM
+    // Helper: get user
     // =======================================================================
 
     static int get_pam_user(pam_handle_t *pamh, std::string &user)
@@ -26,6 +26,30 @@ extern "C" {
     }
 
     // =======================================================================
+    // Helper: parse pam arguments (only debug=1 or debug=true)
+    // =======================================================================
+
+    static void parse_pam_args(int argc, const char **argv, FacialAuthConfig &cfg, pam_handle_t *pamh)
+    {
+        for (int i = 0; i < argc; i++) {
+            if (!argv[i])
+                continue;
+
+            std::string arg = argv[i];
+
+            // Format: debug=1 OR debug=true
+            if (arg.rfind("debug=", 0) == 0) {
+                std::string val = arg.substr(6);
+
+                if (val == "1" || val == "true" || val == "True" || val == "TRUE") {
+                    cfg.debug = true;
+                    pam_syslog(pamh, LOG_DEBUG, "PAM argument: debug FORCED to true");
+                }
+            }
+        }
+    }
+
+    // =======================================================================
     // PAM AUTHENTICATE
     // =======================================================================
 
@@ -35,8 +59,6 @@ extern "C" {
                                        const char **argv)
     {
         (void)flags;
-        (void)argc;
-        (void)argv;
 
         std::string user;
         int ret = get_pam_user(pamh, user);
@@ -46,12 +68,14 @@ extern "C" {
         FacialAuthConfig cfg;
         std::string log;
 
-        // Carica configurazione
+        // Load configuration file
         fa_load_config(FACIALAUTH_CONFIG_DEFAULT, cfg, log);
 
-        // Determina la soglia effettiva leggendo il modello
-        double thr_used = cfg.threshold;
+        // Apply PAM runtime arguments (debug=1)
+        parse_pam_args(argc, argv, cfg, pamh);
 
+        // Determine threshold based on the model XML
+        double thr_used = cfg.threshold;
         std::string model_path = fa_user_model_path(cfg, user);
 
         if (file_exists(model_path)) {
@@ -68,7 +92,7 @@ extern "C" {
 
                     if (cfg.debug) {
                         pam_syslog(pamh, LOG_DEBUG,
-                                   "Detected DNN model for user=%s threshold=%.4f",
+                                   "Model for %s: DNN enabled, threshold=%.4f",
                                    user.c_str(), thr_used);
                     }
                 }
@@ -96,39 +120,12 @@ extern "C" {
         pam_syslog(pamh, LOG_INFO,
                    "Face authentication SUCCESS for user %s (conf=%.6f thr=%.6f)",
                    user.c_str(), best_conf, thr_used);
+
         return PAM_SUCCESS;
     }
 
     // =======================================================================
-    // Other PAM functions (no-op)
+    // Other PAM functions
     // =======================================================================
 
     PAM_EXTERN int pam_sm_setcred(pam_handle_t *pamh, int flags,
-                                  int argc, const char **argv)
-    {
-        (void)pamh; (void)flags; (void)argc; (void)argv;
-        return PAM_SUCCESS;
-    }
-
-    PAM_EXTERN int pam_sm_open_session(pam_handle_t *pamh, int flags,
-                                       int argc, const char **argv)
-    {
-        (void)pamh; (void)flags; (void)argc; (void)argv;
-        return PAM_SUCCESS;
-    }
-
-    PAM_EXTERN int pam_sm_close_session(pam_handle_t *pamh, int flags,
-                                        int argc, const char **argv)
-    {
-        (void)pamh; (void)flags; (void)argc; (void)argv;
-        return PAM_SUCCESS;
-    }
-
-    PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags,
-                                    int argc, const char **argv)
-    {
-        (void)pamh; (void)flags; (void)argc; (void)argv;
-        return PAM_SUCCESS;
-    }
-
-} // extern "C"
