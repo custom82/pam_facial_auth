@@ -19,6 +19,10 @@
 
 namespace fs = std::filesystem;
 
+// Path globale per la Haar cascade, impostato da config (o sovrascritto da ENV)
+static std::string g_haar_cascade_path;
+
+
 // ==========================================================
 // Utility helpers
 // ==========================================================
@@ -892,31 +896,29 @@ bool FaceRecWrapper::Predict(const cv::Mat &faceGray,
 	}
 }
 
-bool FaceRecWrapper::DetectFace(const cv::Mat &frame, cv::Rect &faceROI)
-{
+bool FaceRecWrapper::DetectFace(const cv::Mat &frame, cv::Rect &faceROI) {
 	if (frame.empty())
 		return false;
 
-	// 1) Try DNN detector if configured
-	if (use_dnn_detector && !dnn_detector_net.empty()) {
-		if (dnn_detector_accepts(frame, faceROI))
-			return true;
-	}
-
-	// 2) Fallback to Haar cascade
+	// Usa (e cache) l'Haar cascade
 	if (faceCascade.empty()) {
-		std::string cascadePath = haar_cascade_path;
+		std::string cascadePath;
 
-		if (cascadePath.empty()) {
+		// 1) path esplicito da config (se presente)
+		if (!g_haar_cascade_path.empty()) {
+			cascadePath = g_haar_cascade_path;
+		} else {
+			// 2) override opzionale via env
 			const char *envPath = std::getenv("FACIAL_HAAR_PATH");
 			if (envPath)
 				cascadePath = envPath;
-		}
 
-		if (cascadePath.empty())
-			cascadePath = "/usr/share/opencv4/haarcascades/haarcascade_frontalface_default.xml";
-		if (!file_exists(cascadePath))
-			cascadePath = "/usr/share/opencv/haarcascades/haarcascade_frontalface_default.xml";
+			// 3) fallback di distro
+			if (cascadePath.empty())
+				cascadePath = "/usr/share/opencv4/haarcascades/haarcascade_frontalface_default.xml";
+			if (!file_exists(cascadePath))
+				cascadePath = "/usr/share/opencv/haarcascades/haarcascade_frontalface_default.xml";
+		}
 
 		if (!faceCascade.load(cascadePath)) {
 			std::cerr << "Failed to load Haar cascade: " << cascadePath << std::endl;
@@ -934,15 +936,36 @@ bool FaceRecWrapper::DetectFace(const cv::Mat &frame, cv::Rect &faceROI)
 
 	std::vector<cv::Rect> faces;
 	faceCascade.detectMultiScale(gray, faces, 1.1, 3, 0, cv::Size(80, 80));
-
 	if (faces.empty())
 		return false;
 
-	auto best = faces[0];
+	// Prendi il volto con area maggiore
+	cv::Rect best = faces[0];
 	for (const auto &r : faces) {
 		if (r.area() > best.area())
 			best = r;
 	}
+
+	// --- Heuristica "webcam coperta" / patch non plausibile ---
+	// Ritagliamo il ROI originale e controlliamo luminosità e varianza.
+	cv::Mat roi = frame(best).clone();
+	cv::Mat roiGray;
+	if (roi.channels() == 3)
+		cv::cvtColor(roi, roiGray, cv::COLOR_BGR2GRAY);
+	else
+		roiGray = roi;
+
+	cv::Scalar mean, stddev;
+	cv::meanStdDev(roiGray, mean, stddev);
+	double m = mean[0];
+	double s = stddev[0];
+
+	// Molto conservativo:
+	//  - se è troppo scuro (m < 40)
+	//  - o troppo "piatto" (s < 20)
+	// lo scartiamo come falso positivo (tipico caso webcam coperta).
+	if (m < 40.0 || s < 20.0)
+		return false;
 
 	faceROI = best;
 	return true;
