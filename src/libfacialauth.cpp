@@ -83,6 +83,34 @@ static void log_tool(const FacialAuthConfig &cfg,
 	}
 }
 
+static bool is_plausible_face_region(const cv::Mat &frame, const cv::Rect &roi)
+{
+	cv::Rect imageRect(0, 0, frame.cols, frame.rows);
+	cv::Rect r = roi & imageRect;
+	if (r.width <= 0 || r.height <= 0)
+		return false;
+
+	cv::Mat patch = frame(r);
+	cv::Mat gray;
+	if (patch.channels() == 3)
+		cv::cvtColor(patch, gray, cv::COLOR_BGR2GRAY);
+	else
+		gray = patch;
+
+	cv::Scalar meanVal, stddevVal;
+	cv::meanStdDev(gray, meanVal, stddevVal);
+	double m = meanVal[0];
+	double s = stddevVal[0];
+
+	// Heuristic: reject very dark or almost flat regions (covered camera, etc.)
+	if (m < 30.0)
+		return false;
+	if (s < 10.0)
+		return false;
+
+	return true;
+}
+
 // ==========================================================
 // Config
 // ==========================================================
@@ -154,6 +182,13 @@ bool fa_load_config(const std::string &path,
 		else if (k == "dnn_model_face_landmark_tflite") cfg.dnn_model_face_landmark_tflite = val;
 		else if (k == "dnn_model_face_detection_tflite")cfg.dnn_model_face_detection_tflite = val;
 		else if (k == "dnn_model_face_blendshapes_tflite") cfg.dnn_model_face_blendshapes_tflite = val;
+
+		// Haar / detector configuration
+		else if (k == "haar_cascade")        cfg.haar_cascade = val;
+		else if (k == "detector_profile")    cfg.detector_profile = to_lower_str(val);
+		else if (k == "detector_threshold")  cfg.detector_threshold = std::stod(val);
+		else if (k == "detector_width")      cfg.detector_width = std::stoi(val);
+		else if (k == "detector_height")     cfg.detector_height = std::stoi(val);
 	}
 
 	log_append(log, "Config loaded from: " + path);
@@ -441,6 +476,89 @@ void FaceRecWrapper::ConfigureDNN(const FacialAuthConfig &cfg)
 		std::cerr << "Error loading DNN: " << e.what() << std::endl;
 		dnn_loaded = false;
 		use_dnn    = false;
+	}
+}
+
+void FaceRecWrapper::ConfigureDetector(const FacialAuthConfig &cfg)
+{
+	// Haar cascade path (can be empty -> fallback inside DetectFace)
+	haar_cascade_path = cfg.haar_cascade;
+
+	use_dnn_detector     = false;
+	detector_loaded      = false;
+	detector_profile     = to_lower_str(cfg.detector_profile);
+	detector_type.clear();
+	detector_model_path.clear();
+	detector_proto_path.clear();
+	detector_device.clear();
+	detector_threshold   = (cfg.detector_threshold > 0.0) ? cfg.detector_threshold : 0.6;
+	detector_input_width  = cfg.detector_width;
+	detector_input_height = cfg.detector_height;
+
+	if (detector_profile.empty()) {
+		// Only Haar cascade will be used.
+		return;
+	}
+
+	std::string prof = detector_profile;
+	std::string model;
+	std::string proto;
+	std::string dtype;
+
+	if (prof == "det_uint8") {
+		dtype = "tensorflow";
+		model = !cfg.dnn_model_detector_uint8.empty()
+		? cfg.dnn_model_detector_uint8
+		: "/usr/share/opencv4/dnn/models/facial/opencv_face_detector_uint8.pb";
+		proto.clear();
+
+		if (detector_input_width <= 0)  detector_input_width  = 300;
+		if (detector_input_height <= 0) detector_input_height = 300;
+	}
+	else if (prof == "det_caffe" || prof == "det_fp16") {
+		dtype = "caffe";
+
+		if (prof == "det_caffe") {
+			model = !cfg.dnn_model_detector_caffe.empty()
+			? cfg.dnn_model_detector_caffe
+			: "/usr/share/opencv4/dnn/models/facial/opencv_face_detector.caffemodel";
+		} else {
+			model = !cfg.dnn_model_detector_fp16.empty()
+			? cfg.dnn_model_detector_fp16
+			: "/usr/share/opencv4/dnn/models/facial/opencv_face_detector_fp16.caffemodel";
+		}
+
+		proto = !cfg.dnn_proto_detector_caffe.empty()
+		? cfg.dnn_proto_detector_caffe
+		: "/usr/share/opencv4/samples/dnn/face_detector/deploy.prototxt";
+
+		if (detector_input_width <= 0)  detector_input_width  = 300;
+		if (detector_input_height <= 0) detector_input_height = 300;
+	}
+	else {
+		// Unsupported detector profile -> fall back to Haar cascade
+		return;
+	}
+
+	if (model.empty()) {
+		// Nothing to load
+		return;
+	}
+
+	try {
+		detector_net = fa_create_dnn_net(dtype, model, proto);
+		fa_set_dnn_backend_and_target(detector_net, cfg.dnn_device);
+
+		use_dnn_detector    = true;
+		detector_loaded     = true;
+		detector_type       = dtype;
+		detector_model_path = model;
+		detector_proto_path = proto;
+		detector_device     = cfg.dnn_device;
+	} catch (const std::exception &e) {
+		std::cerr << "Error loading DNN detector (" << prof << "): " << e.what() << std::endl;
+		use_dnn_detector = false;
+		detector_loaded  = false;
 	}
 }
 
@@ -766,16 +884,104 @@ bool FaceRecWrapper::Train(const std::vector<cv::Mat> &images,
 							   }
 						   }
 
-						   bool FaceRecWrapper::DetectFace(const cv::Mat &frame, cv::Rect &faceROI) {
+						   bool FaceRecWrapper::DetectFace(const cv::Mat &frame, cv::Rect &faceROI)
+						   {
 							   if (frame.empty())
 								   return false;
 
+							   // 1. Try DNN detector if configured
+							   if (use_dnn_detector && detector_loaded) {
+								   cv::Size inputSize(detector_input_width > 0 ? detector_input_width : 300,
+													  detector_input_height > 0 ? detector_input_height : 300);
+
+								   cv::Mat blob = cv::dnn::blobFromImage(frame,
+																		 1.0,
+												 inputSize,
+												 cv::Scalar(104.0, 177.0, 123.0),
+																		 false,  // BGR
+												 false);
+
+								   detector_net.setInput(blob);
+								   cv::Mat out = detector_net.forward();
+
+								   cv::Rect bestRect;
+								   float bestScore = 0.0f;
+
+								   // Handle both 4D [1,1,N,7] and 2D [N,7] layouts
+								   if (out.dims == 4 && out.size[3] >= 7) {
+									   int numDetections = out.size[2];
+									   const float *data = out.ptr<float>(0, 0);
+									   for (int i = 0; i < numDetections; ++i) {
+										   float score = data[i * 7 + 2];
+										   if (score < detector_threshold || score <= bestScore)
+											   continue;
+
+										   float x1 = data[i * 7 + 3] * frame.cols;
+										   float y1 = data[i * 7 + 4] * frame.rows;
+										   float x2 = data[i * 7 + 5] * frame.cols;
+										   float y2 = data[i * 7 + 6] * frame.rows;
+
+										   cv::Rect r(cvRound(x1), cvRound(y1),
+													  cvRound(x2 - x1), cvRound(y2 - y1));
+										   cv::Rect imageRect(0, 0, frame.cols, frame.rows);
+										   r &= imageRect;
+										   if (r.width <= 0 || r.height <= 0)
+											   continue;
+
+										   bestScore = score;
+										   bestRect = r;
+									   }
+								   }
+								   else if (out.rows > 0 && out.cols >= 7) {
+									   int numDetections = out.rows;
+									   for (int i = 0; i < numDetections; ++i) {
+										   const float *row = out.ptr<float>(i);
+										   float score = row[2];
+										   if (score < detector_threshold || score <= bestScore)
+											   continue;
+
+										   float x1 = row[3] * frame.cols;
+										   float y1 = row[4] * frame.rows;
+										   float x2 = row[5] * frame.cols;
+										   float y2 = row[6] * frame.rows;
+
+										   cv::Rect r(cvRound(x1), cvRound(y1),
+													  cvRound(x2 - x1), cvRound(y2 - y1));
+										   cv::Rect imageRect(0, 0, frame.cols, frame.rows);
+										   r &= imageRect;
+										   if (r.width <= 0 || r.height <= 0)
+											   continue;
+
+										   bestScore = score;
+										   bestRect = r;
+									   }
+								   }
+
+								   if (bestScore >= detector_threshold && bestRect.area() > 0) {
+									   // Extra sanity check to avoid "ghost faces" on covered camera
+									   if (is_plausible_face_region(frame, bestRect)) {
+										   faceROI = bestRect;
+										   return true;
+									   }
+								   }
+								   // If DNN detector produced nothing usable, fall back to Haar below.
+							   }
+
+							   // 2. Haar cascade fallback (or primary detector if no DNN configured)
 							   if (faceCascade.empty()) {
 								   std::string cascadePath;
-								   const char *envPath = std::getenv("FACIAL_HAAR_PATH");
-								   if (envPath)
-									   cascadePath = envPath;
 
+								   // 1) Config-specified path
+								   if (!haar_cascade_path.empty()) {
+									   cascadePath = haar_cascade_path;
+								   } else {
+									   // 2) Environment override
+									   const char *envPath = std::getenv("FACIAL_HAAR_PATH");
+									   if (envPath)
+										   cascadePath = envPath;
+								   }
+
+								   // 3) Hard-coded fallbacks
 								   if (cascadePath.empty())
 									   cascadePath = "/usr/share/opencv4/haarcascades/haarcascade_frontalface_default.xml";
 								   if (!file_exists(cascadePath))
@@ -807,43 +1013,22 @@ bool FaceRecWrapper::Train(const std::vector<cv::Mat> &images,
 									   best = r;
 							   }
 
+							   // Again, ensure this region looks like a "real" face patch
+							   if (!is_plausible_face_region(frame, best))
+								   return false;
+
 							   faceROI = best;
 							   return true;
 						   }
 
-						   // ----------------------------------------------------------
-						   // Heuristic check on detected face ROI to reject "black screen"
-						   // or obviously invalid frames (e.g. covered webcam).
-						   // ----------------------------------------------------------
-						   static bool fa_is_valid_face_roi(const cv::Mat &faceGray)
+						   bool FaceRecWrapper::IsDNN() const
 						   {
-							   if (faceGray.empty())
-								   return false;
+							   return use_dnn && dnn_loaded;
+						   }
 
-							   // Basic statistics: mean + stddev
-							   cv::Scalar mean, stddev;
-							   cv::meanStdDev(faceGray, mean, stddev);
-							   double m = mean[0];
-							   double s = stddev[0];
-
-							   // Extremely low contrast (almost flat image)
-							   if (s < 5.0)
-								   return false;
-
-							   // Almost all black or all white
-							   if (m < 10.0 || m > 245.0)
-								   return false;
-
-							   // Edge density: a real face should have some structure
-							   cv::Mat edges;
-							   cv::Canny(faceGray, edges, 50, 150);
-							   double edgeFrac = static_cast<double>(cv::countNonZero(edges)) /
-							   static_cast<double>(edges.total() ? edges.total() : 1);
-
-							   if (edgeFrac < 0.01)
-								   return false;
-
-							   return true;
+						   double FaceRecWrapper::GetDnnThreshold() const
+						   {
+							   return dnn_threshold;
 						   }
 
 						   // ==========================================================
@@ -894,6 +1079,7 @@ bool FaceRecWrapper::Train(const std::vector<cv::Mat> &images,
 			 user.c_str(), max_idx);
 
 	FaceRecWrapper rec; // solo per DetectFace
+	rec.ConfigureDetector(cfg);
 	int captured = 0;
 
 	std::string fmt = img_format.empty() ? "png" : img_format;
@@ -920,13 +1106,6 @@ bool FaceRecWrapper::Train(const std::vector<cv::Mat> &images,
 								   cv::cvtColor(face, gray, cv::COLOR_BGR2GRAY);
 								   cv::resize(gray, gray, cv::Size(cfg.width, cfg.height));
 								   cv::equalizeHist(gray, gray);
-
-								   // Reject obviously invalid frames (e.g. covered webcam)
-								   if (!fa_is_valid_face_roi(gray)) {
-									   log_tool(cfg, "DEBUG", "Frame %d: ROI rejected by heuristics", captured);
-									   sleep_ms(cfg.sleep_ms);
-									   continue;
-								   }
 
 								   char namebuf[64];
 								   std::snprintf(namebuf, sizeof(namebuf),
@@ -1033,6 +1212,7 @@ bool fa_test_user(const std::string &user,
 	}
 
 	FaceRecWrapper rec;
+	rec.ConfigureDetector(cfg);
 	if (!rec.Load(model_file)) {
 		log_tool(cfg, "ERROR", "Failed to load model file: %s", model_file.c_str());
 		return false;
@@ -1077,12 +1257,6 @@ bool fa_test_user(const std::string &user,
 		cv::cvtColor(face, gray, cv::COLOR_BGR2GRAY);
 		cv::resize(gray, gray, cv::Size(cfg.width, cfg.height));
 		cv::equalizeHist(gray, gray);
-
-		if (!fa_is_valid_face_roi(gray)) {
-			log_tool(cfg, "DEBUG", "Frame %d: ROI rejected by heuristics", i);
-			sleep_ms(cfg.sleep_ms);
-			continue;
-		}
 
 		int label = -1;
 		double conf = 0.0;
@@ -1320,6 +1494,7 @@ static void fa_usage_capture(const char *prog)
 	"      --reset                  Delete images + model\n"
 	"      --list                   List user images\n"
 	"      --format <ext>           Image format (png,jpg) [default: jpg]\n"
+	"      --detector-profile NAME  DNN detector profile (det_uint8|det_caffe|det_fp16)\n"
 	"      --debug                  Enable verbose debug\n"
 	"      --help                   Show this help\n";
 }
@@ -1334,6 +1509,7 @@ static void fa_usage_test(const char *prog)
 	"  -m, --model FILE            Model XML (default: basedir/models/<user>.xml)\n"
 	"  -c, --config FILE           Config file (default " FACIALAUTH_CONFIG_DEFAULT ")\n"
 	"      --frames N              Number of frames\n"
+	"      --detector-profile NAME DNN detector profile (det_uint8|det_caffe|det_fp16)\n"
 	"      --debug                 Enable debug logging\n"
 	"      --help                  Show this help\n";
 }
@@ -1485,6 +1661,7 @@ int fa_capture_cli(int argc, char *argv[])
 	std::string user;
 	std::string img_format = "jpg";
 	std::string log;
+	std::string detector_profile_cli;
 
 	bool force       = false;
 	bool clean       = false;
@@ -1497,20 +1674,21 @@ int fa_capture_cli(int argc, char *argv[])
 	int frames = 0;
 
 	static struct option long_opts[] = {
-		{"user",        required_argument, nullptr, 'u'},
-		{"device",      required_argument, nullptr, 'd'},
-		{"width",       required_argument, nullptr, 'w'},
-		{"height",      required_argument, nullptr, 'h'},
-		{"frames",      required_argument, nullptr, 'n'},
-		{"config",      required_argument, nullptr, 'c'},
-		{"force",       no_argument,       nullptr, 'f'},
-		{"format",      required_argument, nullptr,  1 },
-		{"debug",       no_argument,       nullptr,  2 },
-		{"clean",       no_argument,       nullptr,  3 },
-		{"reset",       no_argument,       nullptr,  4 },
-		{"list",        no_argument,       nullptr,  5 },
-		{"help",        no_argument,       nullptr,  6 },
-		{nullptr,       0,                 nullptr,  0 }
+		{"user",             required_argument, nullptr, 'u'},
+		{"device",           required_argument, nullptr, 'd'},
+		{"width",            required_argument, nullptr, 'w'},
+		{"height",           required_argument, nullptr, 'h'},
+		{"frames",           required_argument, nullptr, 'n'},
+		{"config",           required_argument, nullptr, 'c'},
+		{"force",            no_argument,       nullptr, 'f'},
+		{"format",           required_argument, nullptr,  1 },
+		{"debug",            no_argument,       nullptr,  2 },
+		{"clean",            no_argument,       nullptr,  3 },
+		{"reset",            no_argument,       nullptr,  4 },
+		{"list",             no_argument,       nullptr,  5 },
+		{"detector-profile", required_argument, nullptr,  7 },
+		{"help",             no_argument,       nullptr,  6 },
+		{nullptr,            0,                 nullptr,  0 }
 	};
 
 	int opt, idx;
@@ -1555,6 +1733,9 @@ int fa_capture_cli(int argc, char *argv[])
 			case 5:
 				list_images = true;
 				break;
+			case 7:
+				detector_profile_cli = optarg;
+				break;
 			case 6:
 				fa_usage_capture(argv[0]);
 				return 0;
@@ -1576,6 +1757,9 @@ int fa_capture_cli(int argc, char *argv[])
 		cfg.debug = true;
 		std::cout << "[DEBUG] Debug mode FORZATO da CLI (--debug)\n";
 	}
+
+	if (!detector_profile_cli.empty())
+		cfg.detector_profile = detector_profile_cli;
 
 	if (width > 0)
 		cfg.width = width;
@@ -1630,18 +1814,20 @@ int fa_test_cli(int argc, char *argv[])
 	std::string model_path;
 	std::string config_path = FACIALAUTH_CONFIG_DEFAULT;
 	std::string log;
+	std::string detector_profile_cli;
 
 	int frames     = 0;
 	bool debug_cli = false;
 
 	static struct option long_opts[] = {
-		{"user",    required_argument, nullptr, 'u'},
-		{"model",   required_argument, nullptr, 'm'},
-		{"config",  required_argument, nullptr, 'c'},
-		{"frames",  required_argument, nullptr,  1 },
-		{"debug",   no_argument,       nullptr,  2 },
-		{"help",    no_argument,       nullptr,  3 },
-		{nullptr,   0,                 nullptr,  0 }
+		{"user",             required_argument, nullptr, 'u'},
+		{"model",            required_argument, nullptr, 'm'},
+		{"config",           required_argument, nullptr, 'c'},
+		{"frames",           required_argument, nullptr,  1 },
+		{"debug",            no_argument,       nullptr,  2 },
+		{"help",             no_argument,       nullptr,  3 },
+		{"detector-profile", required_argument, nullptr,  4 },
+		{nullptr,            0,                 nullptr,  0 }
 	};
 
 	int opt, idx;
@@ -1667,6 +1853,9 @@ int fa_test_cli(int argc, char *argv[])
 			case 3:
 				fa_usage_test(argv[0]);
 				return 0;
+			case 4:
+				detector_profile_cli = optarg;
+				break;
 			default:
 				fa_usage_test(argv[0]);
 				return 1;
@@ -1684,6 +1873,9 @@ int fa_test_cli(int argc, char *argv[])
 		cfg.debug = true;
 		std::cout << "[DEBUG] Debug mode FORZATO da CLI (--debug)\n";
 	}
+
+	if (!detector_profile_cli.empty())
+		cfg.detector_profile = detector_profile_cli;
 
 	if (frames > 0)
 		cfg.frames = frames;
