@@ -1,66 +1,53 @@
-.TH facial_training 1 "November 2025" "pam_facial_auth" "User Commands"
+.TH facial_training 1 "November 2025" "pam_facial_auth 1.0" "User Commands"
 .SH NAME
-facial_training \- addestra un modello biometrico del volto
-
+facial_training \- train a facial recognition model for a user
 .SH SYNOPSIS
 .B facial_training
 \-u USER \-m METHOD
 [\-i DIR] [\-o FILE] [\-f] [\-v]
-
 .SH DESCRIPTION
-Il comando
+The
 .B facial_training
-addestra un modello di riconoscimento facciale usando uno dei seguenti metodi:
+utility creates or updates a facial recognition model for a user based
+on previously captured images.
 
-.TP
-.B lbph
-Local Binary Pattern Histogram (robusto, raccomandato)
+Supported recognition methods:
+.IP \(bu 4
+LBPH (Local Binary Pattern Histogram)
+.IP \(bu
+Eigenfaces
+.IP \(bu
+Fisherfaces
 
-.TP
-.B eigen
-Eigenfaces (richiede molte immagini e un dataset omogeneo)
-
-.TP
-.B fisher
-Fisherfaces (richiede dataset ben bilanciato)
-
-Le immagini devono essere già presenti in:
-.nf
-    /etc/pam_facial_auth/images/USER/
-.fi
-
-Il modello risultante viene salvato in XML e sarà usato dal modulo PAM.
+All images are normalized to 200x200 grayscale frames for consistent
+model training.
 
 .SH OPTIONS
 .TP
-.B \-u, \-\-user USER
-Utente (obbligatorio).
-
+.BR \-u " " USER ", " \-\-user=USER
+User whose model is to be trained.
 .TP
-.B \-m, \-\-method {lbph,eigen,fisher}
-Metodo di addestramento.
-
+.BR \-m " " METHOD ", " \-\-method=METHOD
+Recognition method: \fBlbph\fR, \fBeigen\fR, or \fBfisher\fR.
 .TP
-.B \-i, \-\-input DIR
-Override di basedir per le immagini.
-
+.BR \-i " " DIR ", " \-\-input=DIR
+Specify a different base directory for images.
 .TP
-.B \-o, \-\-output FILE
-Percorso completo per il modello XML.
-
+.BR \-o " " FILE ", " \-\-output=FILE
+Specify output path for the model XML file.
 .TP
-.B \-f, \-\-force
-Forza sovrascrittura modello.
-
+.BR \-f ", " \-\-force
+Force model overwrite.
 .TP
-.B \-v, \-\-verbose
-Abilita debug.
-
+.BR \-v ", " \-\-verbose
+Enable debug mode.
 .SH FILES
-.nf
-/etc/security/pam_facial.conf
-/etc/pam_facial_auth/models/USER.xml
-.fi
-
+.TP
+.I /etc/security/pam_facial.conf
+Configuration file used for default settings.
 .SH SEE ALSO
-facial_capture(1), facial_test(1), pam_facial_auth(8)
+.BR facial_capture (1),
+.BR facial_test (1),
+.BR pam_facial_auth (8)
+.SH AUTHOR
+Andrea Postiglione and contributors.

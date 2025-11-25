@@ -1,83 +1,70 @@
-.TH facial_capture 1 "November 2025" "pam_facial_auth" "User Commands"
+.TH facial_capture 1 "November 2025" "pam_facial_auth 1.0" "User Commands"
 .SH NAME
-facial_capture \- acquisisce immagini del volto per l'addestramento del modello
-
+facial_capture \- capture face images for training facial recognition models
 .SH SYNOPSIS
 .B facial_capture
 \-u USER
 [\-d DEVICE] [\-w WIDTH] [\-h HEIGHT] [\-n FRAMES]
-[\-s MS] [\-f] [\-g] [\-\-clean] [\-\-reset]
-[\-v] [\-c FILE] [\-\-format EXT]
-
+[\-s MS] [\-f] [\-\-clean] [\-\-reset]
+[\-g] [\-v] [\-c FILE] [\-\-format EXT]
 .SH DESCRIPTION
-Il comando
+The
 .B facial_capture
-acquisisce una sequenza di immagini del volto tramite webcam, da utilizzare
-nell'addestramento dei modelli (LBPH, Eigenfaces, Fisherfaces).
+utility captures face images from a video device and stores them in the
+user-specific image directory. These images are used by
+.BR facial_training (1)
+to generate facial recognition models.
 
-Le immagini vengono salvate in:
-.nf
-    /etc/pam_facial_auth/images/USER/
-.fi
-
-Ogni immagine è automaticamente convertita in scala di grigi e normalizzata a
-200x200 pixel.
+Images are processed through a Haar cascade classifier for face detection
+and are stored as grayscale, equalized, and normalized frames.
 
 .SH OPTIONS
 .TP
-.B \-u, \-\-user USER
-Utente per cui acquisire le immagini (obbligatorio).
-
+.BR \-u " " USER ", " \-\-user=USER
+Specify the user for whom images will be captured.
 .TP
-.B \-d, \-\-device DEV
-Percorso del device video (default: /dev/video0).
-
+.BR \-d " " DEVICE ", " \-\-device=DEVICE
+Override the video capture device (default: /dev/video0).
 .TP
-.B \-w, \-\-width N
-Larghezza del frame della webcam.
-
+.BR \-w " " WIDTH ", " \-\-width=WIDTH
+Set capture frame width.
 .TP
-.B \-h, \-\-height N
-Altezza del frame.
-
+.BR \-h " " HEIGHT ", " \-\-height=HEIGHT
+Set capture frame height.
 .TP
-.B \-n, \-\-frames N
-Numero di immagini da catturare.
-
+.BR \-n " " FRAMES ", " \-\-frames=FRAMES
+Number of face images to capture.
 .TP
-.B \-s, \-\-sleep MS
-Ritardo tra uno scatto e l'altro.
-
+.BR \-s " " MS ", " \-\-sleep=MS
+Delay in milliseconds between captures.
 .TP
-.B \-f, \-\-force
-Forza sovrascrittura delle immagini precedenti.
-
+.BR \-f ", " \-\-force
+Force overwrite of existing images.
 .TP
-.B \-\-clean
-Cancella tutte le immagini dell'utente.
-
+.BR \-g ", " \-\-nogui
+Disable any graphical output.
 .TP
-.B \-\-reset
-Cancella immagini e modello.
-
+.BR \-\-clean
+Remove all images for the specified user.
 .TP
-.B \-v, \-\-debug
-Abilita modalità verbosa.
-
+.BR \-\-reset
+Remove the user model and all images.
 .TP
-.B \-c, \-\-config FILE
-Percorso file di configurazione
-(default: /etc/security/pam_facial.conf).
-
+.BR \-v ", " \-\-debug
+Enable verbose/debug mode.
 .TP
-.B \-\-format EXT
-Formato immagine (default: jpg).
-
+.BR \-c " " FILE ", " \-\-config=FILE
+Use an alternate configuration file.
+.TP
+.BR \-\-format " " EXT
+Set the output image format (jpg, png, etc.).
 .SH FILES
-.nf
-/etc/security/pam_facial.conf
-/etc/pam_facial_auth/images/USER/
-.fi
-
+.TP
+.I /etc/security/pam_facial.conf
+Default configuration file.
 .SH SEE ALSO
-facial_training(1), facial_test(1)
+.BR facial_training (1),
+.BR facial_test (1),
+.BR pam_facial_auth (8)
+.SH AUTHOR
+Andrea Postiglione and contributors.

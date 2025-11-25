@@ -1,57 +1,45 @@
-.TH facial_test 1 "November 2025" "pam_facial_auth" "User Commands"
+.TH facial_test 1 "November 2025" "pam_facial_auth 1.0" "User Commands"
 .SH NAME
-facial_test \- testa un modello di riconoscimento facciale
-
+facial_test \- test a user's facial recognition model
 .SH SYNOPSIS
 .B facial_test
 \-u USER
-[\-m MODEL] [\-c CONFIG] [\-d DEVICE]
+[\-m MODEL] [\-c FILE] [\-d DEVICE]
 [\-\-threshold VALUE] [\-v] [\-\-nogui]
-
 .SH DESCRIPTION
-Il comando
+The
 .B facial_test
-esegue un tentativo di riconoscimento facciale usando webcam e un modello
-XML precedentemente addestrato.
+tool authenticates a user against a trained facial recognition model by
+capturing live frames from a video device and comparing them to the model.
 
-Per impostazione predefinita il modello è cercato in:
-.nf
-    /etc/pam_facial_auth/models/USER.xml
-.fi
+This tool is intended for debugging and verification of recognition
+accuracy outside the PAM authentication stack.
 
 .SH OPTIONS
 .TP
-.B \-u, \-\-user USER
-Utente da verificare (obbligatorio).
-
+.BR \-u " " USER ", " \-\-user=USER
+User to be authenticated.
 .TP
-.B \-m, \-\-model FILE
-File modello XML (opzionale).
-
+.BR \-m " " MODEL ", " \-\-model=MODEL
+Path to the model XML file. Defaults to basedir/models/<user>.xml.
 .TP
-.B \-c, \-\-config FILE
-File di configurazione (default: /etc/security/pam_facial.conf)
-
+.BR \-c " " FILE ", " \-\-config=FILE
+Alternate configuration file.
 .TP
-.B \-d, \-\-device DEV
-Webcam da usare.
-
+.BR \-d " " DEVICE ", " \-\-device=DEVICE
+Webcam device to use.
 .TP
-.B \-\-threshold VALUE
-Override della soglia di accettazione.
-
+.BR \-\-threshold " " VALUE
+Override recognition confidence threshold.
 .TP
-.B \-v, \-\-verbose
-Output dettagliato.
-
+.BR \-v ", " \-\-verbose
+Enable verbose output.
 .TP
-.B \-\-nogui
-Disabilita eventuali finestre GUI.
-
-.SH EXIT STATUS
-0  Successo
-2  Fallimento autenticazione
-1  Errore
-
+.BR \-\-nogui
+Disable GUI features.
 .SH SEE ALSO
-facial_training(1), facial_capture(1), pam_facial_auth(8)
+.BR facial_capture (1),
+.BR facial_training (1),
+.BR pam_facial_auth (8)
+.SH AUTHOR
+Andrea Postiglione and contributors.

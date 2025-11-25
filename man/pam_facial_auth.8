@@ -1,65 +1,72 @@
-.TH pam_facial_auth 8 "November 2025" "pam_facial_auth" "System Authentication"
+.TH pam_facial_auth 8 "November 2025" "pam_facial_auth 1.0" "System Administration Utilities"
 .SH NAME
-pam_facial_auth \- modulo PAM per autenticazione biometrica facciale
-
+pam_facial_auth \- PAM module providing face recognition authentication
 .SH SYNOPSIS
-Add in:
-.B /etc/pam.d/system-auth
-or similar:
-
-.nf
-auth    sufficient    pam_facial_auth.so
-.fi
-
+Add to
+.I /etc/pam.d/system-auth
+or
+.I /etc/pam.d/login
+the line:
+.PP
+.B auth sufficient pam_facial_auth.so [options]
 .SH DESCRIPTION
-Il modulo
-.B pam_facial_auth.so
-permette l'autenticazione tramite riconoscimento facciale usando i modelli
-creati dall'utente con facial_capture(1) e facial_training(1).
+The
+.B pam_facial_auth
+module performs face recognition–based authentication within the Linux
+PAM framework.
 
-Durante l'autenticazione il modulo:
-.IP \(bu 2
-apre la webcam
-.IP \(bu 2
-rileva il volto usando Haar Cascade
-.IP \(bu 2
-normalizza l'immagine (200x200)
-.IP \(bu 2
-esegue la predizione usando LBPH/Eigen/Fisher
-.IP \(bu 2
-confronta la confidenza con la soglia configurata
+The module loads a user-specific trained model and captures live webcam
+frames to verify identity. Haar-based face detection is used unless
+replaced by a future DNN-based detector.
+
+If authentication succeeds, control returns to PAM with
+.B PAM_SUCCESS.
+Failure returns
+.B PAM_AUTH_ERR
+unless configured otherwise.
 
 .SH OPTIONS
 .TP
 .B debug
-Abilita log dettagliati su stderr.
-
+Enable verbose diagnostics.
 .TP
-.B config=/path/file
-Percorso alternativo per il file di configurazione.
-
+.B ignore\_unknown
+If no facial model exists for the user, skip this module without failing.
 .TP
-.B threshold=value
-Override soglia globale.
-
+.B ignore\_failure
+Return success even if authentication fails.
+(For debugging only.)
+.TP
+.B config=PATH
+Specify a custom configuration file instead of
+.I /etc/security/pam_facial.conf .
 .SH FILES
 .TP
-.B /etc/security/pam_facial.conf
-Configurazione globale.
-
+.I /etc/security/pam_facial.conf
+Module configuration file.
 .TP
-.B /etc/pam_facial_auth/models/USER.xml
-Modello facciale per l'utente.
-
+.I /etc/pam_facial_auth/models/*.xml
+Trained recognition models.
 .TP
-.B /etc/pam_facial_auth/images/USER/
-Immagini catturate per il training.
-
+.I /etc/pam_facial_auth/images/*/
+Captured face images.
 .SH RETURN VALUES
-0   autenticazione avvenuta
-10  fallimento
-11  impossibile aprire webcam
-12  modello mancante o corrotto
-
+.TP
+.B PAM_SUCCESS
+User authenticated.
+.TP
+.B PAM_AUTH_ERR
+Authentication failed.
+.TP
+.B PAM_IGNORE
+Module skipped due to configuration or missing model.
+.SH NOTES
+The webcam must be accessible by the process invoking PAM
+(e.g., display manager, login service).
 .SH SEE ALSO
-facial_test(1), facial_training(1), facial_capture(1)
+.BR facial_capture (1),
+.BR facial_training (1),
+.BR facial_test (1),
+.BR pam (7)
+.SH AUTHOR
+Andrea Postiglione and contributors.
