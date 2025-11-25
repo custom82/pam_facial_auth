@@ -341,10 +341,6 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 								 cap.set(cv::CAP_PROP_FRAME_HEIGHT, cfg.height);
 								 return true;
 							 }
-							 // ==========================================================
-							 // CAPTURE IMAGES
-							 // ==========================================================
-
 							 bool fa_capture_images(const std::string &user,
 													const FacialAuthConfig &cfg,
 							   bool force,
@@ -364,32 +360,25 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 	std::string img_dir = fa_user_image_dir(cfg, user);
 	ensure_dirs(img_dir);
 
-	// Determine start index
 	int start_idx = 0;
+
 	if (!force && !cfg.force_overwrite) {
 		for (auto &entry : fs::directory_iterator(img_dir)) {
-			if (!entry.is_regular_file())
-				continue;
+			if (!entry.is_regular_file()) continue;
 
 			std::string name = entry.path().filename().string();
-			if (name.rfind("img_", 0) == 0 && name.size() >= 8) {
+			if (name.size() >= 8 && name.rfind("img_", 0) == 0) {
 				try {
 					int idx = std::stoi(name.substr(4, 3));
-					if (idx > start_idx)
-						start_idx = idx;
+					if (idx > start_idx) start_idx = idx;
 				} catch (...) {}
 			}
 		}
 	}
 
 	FaceRecWrapper rec;
-	if (!rec.InitCascade(cfg.haar_cascade_path)) {
-		log_tool(cfg, "ERROR", "Cannot load Haar cascade: %s",
-				 cfg.haar_cascade_path.c_str());
-		return false;
-	}
-
 	cv::Mat frame;
+
 	int captured = 0;
 
 	std::string fmt = img_format.empty() ? "jpg" : img_format;
@@ -398,8 +387,7 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 
 								 while (captured < cfg.frames) {
 									 cap >> frame;
-									 if (frame.empty())
-										 break;
+									 if (frame.empty()) break;
 
 									 cv::Rect roi;
 									 if (!rec.DetectFace(frame, roi)) {
@@ -409,9 +397,11 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 
 									 cv::Mat face = frame(roi).clone();
 
-									 cv::Mat gray;
+									 // ---- NORMALIZZAZIONE PER EIGEN/FISHER ----
+									 cv::Mat gray, resized;
 									 cv::cvtColor(face, gray, cv::COLOR_BGR2GRAY);
 									 cv::equalizeHist(gray, gray);
+									 cv::resize(gray, resized, cv::Size(128, 128));
 
 									 char buf[64];
 									 std::snprintf(buf, sizeof(buf), "img_%03d.%s",
@@ -419,7 +409,7 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 
 									 std::string out = join_path(img_dir, buf);
 
-									 cv::imwrite(out, gray);
+									 cv::imwrite(out, resized);
 									 log_tool(cfg, "INFO", "Saved %s", out.c_str());
 
 									 captured++;
@@ -428,6 +418,7 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 
 								 return captured > 0;
 							 }
+
 
 
 							 // ==========================================================
@@ -515,6 +506,8 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 						  int &best_label,
 						  std::string &logbuf)
 							 {
+								 (void)logbuf;
+
 								 std::string model_file =
 								 modelPath.empty() ? fa_user_model_path(cfg, user) : modelPath;
 
@@ -524,16 +517,13 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 								 }
 
 	FaceRecWrapper rec;
-
-	// Carica tipo modello + cascade + parametri
 	if (!rec.Load(model_file)) {
 		log_tool(cfg, "ERROR", "Cannot load model: %s", model_file.c_str());
 		return false;
 	}
 
-	// Carica Haar cascade *solo* dal percorso della configurazione
 	if (!rec.InitCascade(cfg.haar_cascade_path)) {
-		log_tool(cfg, "ERROR", "Cannot load Haar cascade: %s",
+		log_tool(cfg, "ERROR", "Cannot load HAAR cascade: %s",
 				 cfg.haar_cascade_path.c_str());
 		return false;
 	}
@@ -546,7 +536,7 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 		return false;
 	}
 
-	log_tool(cfg, "INFO", "Testing user %s using device %s",
+	log_tool(cfg, "INFO", "Testing user %s on device %s",
 			 user.c_str(), dev_used.c_str());
 
 	best_conf  = 1e9;
@@ -556,29 +546,25 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 
 	for (int i = 0; i < cfg.frames; i++) {
 		cap >> frame;
-		if (frame.empty())
-			continue;
+		if (frame.empty()) continue;
 
 		cv::Rect roi;
-		if (!rec.DetectFace(frame, roi)) {
-			if (cfg.debug)
-				log_tool(cfg, "DEBUG", "No face detected on frame %d", i);
+		if (!rec.DetectFace(frame, roi))
 			continue;
-		}
 
 		cv::Mat face = frame(roi).clone();
 
+		// ---- NORMALIZZAZIONE PER EIGEN/FISHER ----
 		cv::Mat gray;
 		cv::cvtColor(face, gray, cv::COLOR_BGR2GRAY);
 		cv::equalizeHist(gray, gray);
+		cv::resize(gray, gray, cv::Size(128, 128));
 
-		int label   = -1;
-		double conf = 1e9;
+		int    label = -1;
+		double conf  = 1e9;
 
-		if (!rec.Predict(gray, label, conf)) {
-			log_tool(cfg, "WARN", "Predict failed");
+		if (!rec.Predict(gray, label, conf))
 			continue;
-		}
 
 		if (conf < best_conf) {
 			best_conf  = conf;
@@ -586,9 +572,8 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 		}
 
 		if (conf <= cfg.threshold) {
-			log_tool(cfg, "INFO",
-					 "Authentication success: conf=%.2f <= threshold=%.2f",
-			conf, cfg.threshold);
+			log_tool(cfg, "INFO", "Auth success: conf=%.2f <= %.2f",
+					 conf, cfg.threshold);
 			return true;
 		}
 
@@ -596,11 +581,12 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 	}
 
 	log_tool(cfg, "WARN",
-			 "Authentication failed: best_conf=%.2f threshold=%.2f",
+			 "Auth failed: best_conf=%.2f threshold=%.2f",
 		  best_conf, cfg.threshold);
 
 	return false;
 							 }
+
 							 // ==========================================================
 							 // Maintenance (clean, reset, list)
 							 // ==========================================================
