@@ -1,72 +1,65 @@
-.TH PAM_FACIAL_AUTH 8 "2025-01" "pam_facial_auth" "PAM Module"
+.TH pam_facial_auth 8 "November 2025" "pam_facial_auth" "System Authentication"
 .SH NAME
-pam_facial_auth \- PAM module for facial recognition authentication
+pam_facial_auth \- modulo PAM per autenticazione biometrica facciale
 
 .SH SYNOPSIS
-Add the following line to a PAM stack:
+Add in:
+.B /etc/pam.d/system-auth
+or similar:
 
-.PP
-.B auth required pam_facial_auth.so
-[options]
+.nf
+auth    sufficient    pam_facial_auth.so
+.fi
 
 .SH DESCRIPTION
-The
-.B pam_facial_auth
-module performs facial recognition authentication using the LBPH model
-trained using the provided tools.
+Il modulo
+.B pam_facial_auth.so
+permette l'autenticazione tramite riconoscimento facciale usando i modelli
+creati dall'utente con facial_capture(1) e facial_training(1).
 
-It loads the user’s model from
-.BR /etc/pam_facial_auth/models .
-The module uses OpenCV to open the webcam, detect a face, and match it
-against the stored model.
-
-This module is intended to be used as an additional authentication factor
-after the standard PAM password check.
+Durante l'autenticazione il modulo:
+.IP \(bu 2
+apre la webcam
+.IP \(bu 2
+rileva il volto usando Haar Cascade
+.IP \(bu 2
+normalizza l'immagine (200x200)
+.IP \(bu 2
+esegue la predizione usando LBPH/Eigen/Fisher
+.IP \(bu 2
+confronta la confidenza con la soglia configurata
 
 .SH OPTIONS
 .TP
-.B config=/path/file
-Configuration file (default:
-/etc/security/pam_facial.conf).
+.B debug
+Abilita log dettagliati su stderr.
 
 .TP
-.B device=/dev/videoX
-Webcam device path.
+.B config=/path/file
+Percorso alternativo per il file di configurazione.
 
 .TP
 .B threshold=value
-LBPH confidence threshold (lower values = better match).
-
-.TP
-.B nogui=on|off
-Disable GUI windows (default: on for PAM).
-
-.TP
-.B debug=on|off
-Enable debug logging in syslog.
-
-.TP
-.B model=/path/dir
-Custom model directory containing USER.xml.
+Override soglia globale.
 
 .SH FILES
 .TP
-.B /etc/pam_facial_auth/
-Base directory for images and models.
-
-.TP
 .B /etc/security/pam_facial.conf
-Global configuration file.
+Configurazione globale.
 
 .TP
-.B /var/log/pam_facial_auth.log
-Optional debug log if configured.
+.B /etc/pam_facial_auth/models/USER.xml
+Modello facciale per l'utente.
 
-.SH AUTHOR
-Andrea Postiglione
+.TP
+.B /etc/pam_facial_auth/images/USER/
+Immagini catturate per il training.
+
+.SH RETURN VALUES
+0   autenticazione avvenuta
+10  fallimento
+11  impossibile aprire webcam
+12  modello mancante o corrotto
 
 .SH SEE ALSO
-.BR facial_capture (1),
-.BR facial_training (1),
-.BR facial_test (1),
-.BR pam (8)
+facial_test(1), facial_training(1), facial_capture(1)

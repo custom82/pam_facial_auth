@@ -1,62 +1,57 @@
-.TH FACIAL_TEST 1 "2025-01" "pam_facial_auth" "User Commands"
+.TH facial_test 1 "November 2025" "pam_facial_auth" "User Commands"
 .SH NAME
-facial_test \- test facial recognition for a given user
+facial_test \- testa un modello di riconoscimento facciale
 
 .SH SYNOPSIS
 .B facial_test
 \-u USER
-[\-d DEVICE] [\-g] [\-v]
-[\-m FILE] [\-c FILE]
+[\-m MODEL] [\-c CONFIG] [\-d DEVICE]
+[\-\-threshold VALUE] [\-v] [\-\-nogui]
 
 .SH DESCRIPTION
-The
+Il comando
 .B facial_test
-utility loads the trained XML facial model for the specified user and attempts
-to authenticate using the webcam.
+esegue un tentativo di riconoscimento facciale usando webcam e un modello
+XML precedentemente addestrato.
 
-This is the standalone test tool and does not interact with PAM.
+Per impostazione predefinita il modello è cercato in:
+.nf
+    /etc/pam_facial_auth/models/USER.xml
+.fi
 
 .SH OPTIONS
 .TP
-.B \-u, --user USER
-User whose model will be tested. Required.
+.B \-u, \-\-user USER
+Utente da verificare (obbligatorio).
 
 .TP
-.B \-d, --device DEVICE
-Webcam device (default:
-/dev/video0).
+.B \-m, \-\-model FILE
+File modello XML (opzionale).
 
 .TP
-.B \-m, --model FILE
-Model file path
-(default:
-/etc/pam_facial_auth/models/USER.xml).
+.B \-c, \-\-config FILE
+File di configurazione (default: /etc/security/pam_facial.conf)
 
 .TP
-.B \-g, --nogui
-Disable GUI preview windows.
+.B \-d, \-\-device DEV
+Webcam da usare.
 
 .TP
-.B \-v, --verbose
-Enable verbose logging.
+.B \-\-threshold VALUE
+Override della soglia di accettazione.
 
 .TP
-.B \-c, --config FILE
-Load settings from a configuration file
-(default:
-/etc/security/pam_facial.conf).
+.B \-v, \-\-verbose
+Output dettagliato.
 
 .TP
-.B --help
-Show help and exit.
+.B \-\-nogui
+Disabilita eventuali finestre GUI.
 
-.SH FILES
-.TP
-.B /etc/pam_facial_auth/models/USER.xml
-Model file.
-.TP
-.B /etc/security/pam_facial.conf
-Configuration file.
+.SH EXIT STATUS
+0  Successo
+2  Fallimento autenticazione
+1  Errore
 
-.SH AUTHOR
-Andrea Postiglione
+.SH SEE ALSO
+facial_training(1), facial_capture(1), pam_facial_auth(8)

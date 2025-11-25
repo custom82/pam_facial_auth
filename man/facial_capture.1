@@ -1,78 +1,83 @@
-.TH FACIAL_CAPTURE 1 "2025-01" "pam_facial_auth" "User Commands"
+.TH facial_capture 1 "November 2025" "pam_facial_auth" "User Commands"
 .SH NAME
-facial_capture \- capture face images for PAM facial authentication
+facial_capture \- acquisisce immagini del volto per l'addestramento del modello
 
 .SH SYNOPSIS
 .B facial_capture
 \-u USER
-[\-d DEVICE] [\-w WIDTH] [\-h HEIGHT]
-[\-n FRAMES] [\-s MS] [\-f] [\-g] [\-v]
-[\-c FILE]
+[\-d DEVICE] [\-w WIDTH] [\-h HEIGHT] [\-n FRAMES]
+[\-s MS] [\-f] [\-g] [\-\-clean] [\-\-reset]
+[\-v] [\-c FILE] [\-\-format EXT]
 
 .SH DESCRIPTION
-The
+Il comando
 .B facial_capture
-utility captures face images using a webcam and stores them under
-.BR /etc/pam_facial_auth/images/USER .
-These images are later used by the facial recognition training tool.
+acquisisce una sequenza di immagini del volto tramite webcam, da utilizzare
+nell'addestramento dei modelli (LBPH, Eigenfaces, Fisherfaces).
 
-The program uses OpenCV for webcam access and face detection.
+Le immagini vengono salvate in:
+.nf
+    /etc/pam_facial_auth/images/USER/
+.fi
+
+Ogni immagine è automaticamente convertita in scala di grigi e normalizzata a
+200x200 pixel.
 
 .SH OPTIONS
 .TP
-.B \-u, --user USER
-User name for which images are captured. Required.
+.B \-u, \-\-user USER
+Utente per cui acquisire le immagini (obbligatorio).
 
 .TP
-.B \-d, --device DEVICE
-Video device (default:
-/dev/video0).
+.B \-d, \-\-device DEV
+Percorso del device video (default: /dev/video0).
 
 .TP
-.B \-w, --width WIDTH
-Set capture width (default: 640).
+.B \-w, \-\-width N
+Larghezza del frame della webcam.
 
 .TP
-.B \-h, --height HEIGHT
-Set capture height (default: 480).
+.B \-h, \-\-height N
+Altezza del frame.
 
 .TP
-.B \-n, --frames N
-Number of frames to capture (default: 5).
+.B \-n, \-\-frames N
+Numero di immagini da catturare.
 
 .TP
-.B \-s, --sleep MS
-Pause between frames in milliseconds (default: 500).
+.B \-s, \-\-sleep MS
+Ritardo tra uno scatto e l'altro.
 
 .TP
-.B \-f, --force
-Overwrite old images.
+.B \-f, \-\-force
+Forza sovrascrittura delle immagini precedenti.
 
 .TP
-.B \-g, --nogui
-Disable GUI preview windows.
+.B \-\-clean
+Cancella tutte le immagini dell'utente.
 
 .TP
-.B \-v, --verbose
-Enable verbose/debug logging.
+.B \-\-reset
+Cancella immagini e modello.
 
 .TP
-.B \-c, --config FILE
-Configuration file path (default:
-/etc/security/pam_facial.conf).
+.B \-v, \-\-debug
+Abilita modalità verbosa.
 
 .TP
-.B --help
-Show usage information.
+.B \-c, \-\-config FILE
+Percorso file di configurazione
+(default: /etc/security/pam_facial.conf).
+
+.TP
+.B \-\-format EXT
+Formato immagine (default: jpg).
 
 .SH FILES
-.TP
-.B /etc/pam_facial_auth/
-Base directory for images and models.
-.TP
-.B /etc/security/pam_facial.conf
-Configuration file.
+.nf
+/etc/security/pam_facial.conf
+/etc/pam_facial_auth/images/USER/
+.fi
 
-.SH AUTHOR
-Andrea Postiglione
-
+.SH SEE ALSO
+facial_training(1), facial_test(1)
