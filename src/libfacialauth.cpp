@@ -430,7 +430,7 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 						   const std::string &method,
 						   const std::string &inputDir,
 						   const std::string &outputModel,
-						   bool /*force*/,
+						   bool force,
 						   std::string &logbuf)
 							 {
 								 std::string train_dir = inputDir.empty()
@@ -438,63 +438,103 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 								 : inputDir;
 
 								 if (!fs::exists(train_dir)) {
-									 log_tool(cfg, "ERROR", "Training directory missing: %s",
-											  train_dir.c_str());
-									 return false;
+									 log_tool(cfg, "ERROR", "Training dir missing: %s", train_dir.c_str());
+		return false;
 								 }
 
-								 std::vector<cv::Mat> images;
-								 std::vector<int> labels;
+	std::vector<cv::Mat> images;
+	std::vector<int>     labels;
 
-								 auto has_suffix = [](const std::string &s, const char *suf) {
-									 size_t ls = s.size();
-									 size_t lf = std::strlen(suf);
-									 return (ls >= lf && s.compare(ls - lf, lf, suf) == 0);
-								 };
+	auto has_suffix = [](const std::string &s, const char *suf) {
+		size_t ls = s.size();
+		size_t lf = std::strlen(suf);
+		return (ls >= lf && s.compare(ls - lf, lf, suf) == 0);
+	};
 
-								 for (auto &entry : fs::directory_iterator(train_dir)) {
-									 if (!entry.is_regular_file())
-										 continue;
+	// ------------------------------
+	// CARICAMENTO IMMAGINI
+	// ------------------------------
+	for (auto &entry : fs::directory_iterator(train_dir)) {
+		if (!entry.is_regular_file())
+			continue;
 
-									 std::string path = entry.path().string();
-									 std::string lower = to_lower_copy(path);
+		std::string path = entry.path().string();
 
-									 if (!(has_suffix(lower, ".png") ||
-										 has_suffix(lower, ".jpg") ||
-										 has_suffix(lower, ".jpeg")))
-										 continue;
+		std::string lower = path;
+		for (char &c : lower)
+			c = std::tolower(static_cast<unsigned char>(c));
 
-									 cv::Mat img = cv::imread(path, cv::IMREAD_GRAYSCALE);
-									 if (!img.empty()) {
-										 images.push_back(img);
-										 labels.push_back(0);
-									 }
-								 }
+		if (!(has_suffix(lower, ".png") ||
+			has_suffix(lower, ".jpg") ||
+			has_suffix(lower, ".jpeg")))
+			continue;
 
-								 if (images.empty()) {
-									 log_tool(cfg, "ERROR", "No valid images in training directory");
-									 return false;
-								 }
+		cv::Mat img = cv::imread(path, cv::IMREAD_GRAYSCALE);
+		if (!img.empty()) {
+			images.push_back(img);
+			labels.push_back(0);   // per LBPH verrà mantenuto
+		}
+	}
 
-								 FaceRecWrapper rec(method);
+	if (images.empty()) {
+		log_tool(cfg, "ERROR", "No valid images found in training directory");
+		return false;
+	}
 
-								 if (!rec.Train(images, labels)) {
-									 log_tool(cfg, "ERROR", "Training failed");
-									 return false;
-								 }
+	// ------------------------------
+	// PRE-PROCESS (resize consigliato)
+	// ------------------------------
+	for (auto &img : images) {
+		cv::resize(img, img, cv::Size(256, 256));
+	}
 
-								 // Save model — salva automaticamente:
-								 //   - dati del recognizer
-								 //   - tipo del modello (lbph/eigen/fisher)
-								 if (!rec.Save(outputModel)) {
-									 log_tool(cfg, "ERROR", "Cannot save model to %s",
-											  outputModel.c_str());
-									 return false;
-								 }
+	// ------------------------------
+	// GESTIONE CLASSI PER EIGEN/FISHER
+	// ------------------------------
+	if (method == "eigen" || method == "fisher") {
+		int total = images.size();
+		int half  = total / 2;
 
-								 log_tool(cfg, "INFO", "Model saved to %s", outputModel.c_str());
-								 return true;
+		if (half < 1) {
+			log_tool(cfg, "ERROR",
+					 "Eigen/Fisher require at least 2 classes with at least 1 image each");
+			return false;
+		}
+
+		labels.clear();
+		for (int i = 0; i < total; i++) {
+			labels.push_back(i < half ? 0 : 1);
+		}
+
+		log_tool(cfg, "INFO", "Eigen/Fisher: created synthetic labels (0/1)");
+	}
+
+	// ------------------------------
+	// TRAIN WRAPPER
+	// ------------------------------
+	FaceRecWrapper rec(method);
+
+	if (!rec.Train(images, labels)) {
+		log_tool(cfg, "ERROR", "Training failed for method '%s'", method.c_str());
+		return false;
+	}
+
+	// ------------------------------
+	// SALVATAGGIO MODELLO
+	// ------------------------------
+	std::string model_out = outputModel.empty()
+		? fa_user_model_path(cfg, user)
+		: outputModel;
+
+	if (!rec.Save(model_out)) {
+		log_tool(cfg, "ERROR", "Cannot save model to %s", model_out.c_str());
+		return false;
+	}
+
+	log_tool(cfg, "INFO", "Model saved to %s", model_out.c_str());
+	return true;
 							 }
+
 							 // ==========================================================
 							 // TEST USER  (auto-detect model type)
 							 // ==========================================================
