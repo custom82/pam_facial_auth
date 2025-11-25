@@ -33,8 +33,8 @@ bool str_to_bool(const std::string &s, bool defval) {
 	for (char &c : t)
 		c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
 
-	if (t == "1" || t == "true" || t == "yes" || t == "on")  return true;
-	if (t == "0" || t == "false" || t == "no" || t == "off") return false;
+	if (t == "1" || t == "true"  || t == "yes" || t == "on")  return true;
+	if (t == "0" || t == "false" || t == "no"  || t == "off") return false;
 	return defval;
 }
 
@@ -158,6 +158,7 @@ void log_tool(const FacialAuthConfig &cfg, const char *level, const char *fmt, .
 FaceRecWrapper::FaceRecWrapper(const std::string &modelType_)
 : modelType(modelType_)
 {
+	// Per ora supportiamo solo LBPH
 	recognizer = cv::face::LBPHFaceRecognizer::create();
 }
 
@@ -214,6 +215,7 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 							 {
 								 if (frame.empty()) return false;
 
+								 // Carica il cascade una sola volta
 								 if (faceCascade.empty()) {
 									 std::string cascadePath;
 
@@ -316,7 +318,6 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 
 	FaceRecWrapper rec;
 	cv::Mat frame;
-
 	int captured = 0;
 
 	std::string fmt = img_format.empty() ? "jpg" : img_format;
@@ -367,7 +368,8 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 						   bool /*force*/,
 						   std::string &logbuf)
 							 {
-								 (void)method; // per ora solo LBPH, ignoriamo il tipo
+								 // Per ora solo LBPH, ignoriamo il tipo ma lo controlliamo a livello CLI
+								 (void)method;
 
 								 std::string train_dir = inputDir.empty()
 								 ? fa_user_image_dir(cfg, user)
@@ -565,6 +567,7 @@ void fa_list_images(const FacialAuthConfig &cfg, const std::string &user)
 			std::cout << "  " << entry.path().filename().string() << "\n";
 	}
 }
+
 // ==========================================================
 // Root check
 // ==========================================================
@@ -611,16 +614,16 @@ int facial_capture_cli_main(int argc, char *argv[])
 	std::string device_opt;
 	std::string img_format = "jpg";
 
-	int width_opt   = 0;
-	int height_opt  = 0;
-	int frames_opt  = 0;
-	int sleep_opt   = -1;
-	bool force      = false;
-	bool debug_opt  = false;
-	bool nogui_opt  = false;
+	int  width_opt   = 0;
+	int  height_opt  = 0;
+	int  frames_opt  = 0;
+	int  sleep_opt   = -1;
+	bool force       = false;
+	bool debug_opt   = false;
+	bool nogui_opt   = false;
 
-	bool opt_clean  = false;
-	bool opt_reset  = false;
+	bool opt_clean   = false;
+	bool opt_reset   = false;
 
 	enum {
 		OPT_FORMAT = 1000,
@@ -695,7 +698,7 @@ int facial_capture_cli_main(int argc, char *argv[])
 	if (debug_opt) cfg.debug = true;
 	if (nogui_opt) cfg.nogui = true;
 	if (!device_opt.empty()) cfg.device = device_opt;
-	if (width_opt > 0)  cfg.width  = width_opt;
+	if (width_opt  > 0) cfg.width  = width_opt;
 	if (height_opt > 0) cfg.height = height_opt;
 	if (frames_opt > 0) cfg.frames = frames_opt;
 	if (sleep_opt >= 0) cfg.sleep_ms = sleep_opt;
@@ -736,14 +739,26 @@ int facial_capture_cli_main(int argc, char *argv[])
 	std::cout << "[INFO] Capture completed\n";
 	return 0;
 }
-
 // ----------------------------------------------------------
 // facial_training
 // ----------------------------------------------------------
 
-static void print_facial_training_usage(const char *p)
+static void print_facial_training_usage(const char * /*p*/)
 {
-	std::cout << "Usage: " << p << " -u USER [-i DIR] [-o FILE]\n";
+	std::cout <<
+	"Usage: facial_training -u <user> -m <method> <training_data_directory> [options]\n"
+	"\n"
+	"Options:\n"
+	"  -u, --user <name>           Specify the username to train the model for\n"
+	"  -m, --method <type>         Specify the training method (lbph, eigen, fisher)\n"
+	"  -o, --output <file>         Path to save the trained model (XML)\n"
+	"  -f, --force                 Force overwrite of existing model file\n"
+	"  -v, --verbose               Enable detailed output\n"
+	"  -h, --help                  Show this help message\n"
+	"\n"
+	"Examples:\n"
+	"  facial_training -u custom -m lbph /etc/pam_facial_auth/ -o /etc/pam_facial_auth/custom/models/custom.xml\n"
+	"  facial_training -u alice -m eigen /etc/pam_facial_auth/ --force --verbose\n";
 }
 
 int facial_training_cli_main(int argc, char *argv[])
@@ -751,35 +766,37 @@ int facial_training_cli_main(int argc, char *argv[])
 	FacialAuthConfig cfg;
 	std::string config_path = FACIALAUTH_CONFIG_DEFAULT;
 
-	std::string user, input_dir, model_path, method = "lbph";
+	std::string user;
+	std::string method;
+	std::string output_file;
+	std::string input_dir;
 	std::string logbuf;
-	bool force = false, debug_opt = false;
 
-	enum { OPT_METHOD = 2000 };
+	bool force   = false;
+	bool verbose = false;
 
 	struct option long_opts[] = {
-		{"user",   required_argument, nullptr, 'u'},
-		{"input",  required_argument, nullptr, 'i'},
-		{"output", required_argument, nullptr, 'o'},
-		{"force",  no_argument,       nullptr, 'f'},
-		{"debug",  no_argument,       nullptr, 'v'},
-		{"config", required_argument, nullptr, 'c'},
-		{"method", required_argument, nullptr, OPT_METHOD},
-		{"help",   no_argument,       nullptr, 'h'},
+		{"user",    required_argument, nullptr, 'u'},
+		{"method",  required_argument, nullptr, 'm'},
+		{"output",  required_argument, nullptr, 'o'},
+		{"force",   no_argument,       nullptr, 'f'},
+		{"verbose", no_argument,       nullptr, 'v'},
+		{"config",  required_argument, nullptr, 'c'},
+		{"help",    no_argument,       nullptr, 'h'},
 		{nullptr,0,nullptr,0}
 	};
 
 	int opt, idx = 0;
-	while ((opt = getopt_long(argc, argv, "u:i:o:fvc:h", long_opts, &idx)) != -1) {
-		switch (opt) {
 
+	// parsing opzioni
+	while ((opt = getopt_long(argc, argv, "u:m:o:fvhc:", long_opts, &idx)) != -1) {
+		switch (opt) {
 			case 'u': user = optarg; break;
-			case 'i': input_dir = optarg; break;
-			case 'o': model_path = optarg; break;
+			case 'm': method = optarg; break;
+			case 'o': output_file = optarg; break;
 			case 'f': force = true; break;
-			case 'v': debug_opt = true; break;
+			case 'v': verbose = true; break;
 			case 'c': config_path = optarg; break;
-			case OPT_METHOD: method = optarg; break;
 
 			case 'h':
 				print_facial_training_usage(argv[0]);
@@ -792,32 +809,56 @@ int facial_training_cli_main(int argc, char *argv[])
 		}
 	}
 
+	// argomento posizionale: training_data_directory
+	if (optind < argc)
+		input_dir = argv[optind];
+
+	// validazione parametri
 	if (user.empty()) {
-		std::cerr << "ERROR: --user required\n";
+		std::cerr << "ERROR: --user is required\n";
+		return 1;
+	}
+
+	if (method.empty()) {
+		std::cerr << "ERROR: --method is required\n";
+		return 1;
+	}
+
+	if (method != "lbph" && method != "eigen" && method != "fisher") {
+		std::cerr << "ERROR: invalid method '" << method
+		<< "' (must be lbph, eigen, fisher)\n";
+		return 1;
+	}
+
+	if (input_dir.empty()) {
+		std::cerr << "ERROR: training_data_directory argument is required\n";
 		return 1;
 	}
 
 	if (!fa_check_root("facial_training"))
 		return 1;
 
+	// carica config
 	if (!read_kv_config(config_path, cfg, &logbuf)) {
-		std::cerr << "[ERROR] Cannot read config file: " << config_path << "\n";
+		std::cerr << "[ERROR] Cannot read config: " << config_path << "\n";
 		if (!logbuf.empty()) std::cerr << logbuf;
 		return 1;
 	}
 
-	if (debug_opt) cfg.debug = true;
+	if (verbose) cfg.debug = true;
 
-	if (input_dir.empty()) input_dir = fa_user_image_dir(cfg, user);
-	if (model_path.empty()) model_path = fa_user_model_path(cfg, user);
+	// default model path
+	if (output_file.empty())
+		output_file = fa_user_model_path(cfg, user);
 
-	if (!fa_train_user(user, cfg, method, input_dir, model_path, force, logbuf)) {
+	// training
+	if (!fa_train_user(user, cfg, method, input_dir, output_file, force, logbuf)) {
 		std::cerr << "Training failed\n";
 		if (!logbuf.empty()) std::cerr << logbuf;
 		return 1;
 	}
 
-	std::cout << "[OK] Model trained: " << model_path << "\n";
+	std::cout << "[OK] Model trained: " << output_file << "\n";
 	return 0;
 }
 
@@ -888,7 +929,7 @@ int facial_test_cli_main(int argc, char *argv[])
 		model_path = fa_user_model_path(cfg, user);
 
 	double best_conf = 0;
-	int best_label = -1;
+	int    best_label = -1;
 
 	bool ok = fa_test_user(user, cfg, model_path, best_conf, best_label, logbuf);
 	if (!ok) {
