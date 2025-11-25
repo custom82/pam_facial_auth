@@ -504,17 +504,35 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 									 cv::Mat img = cv::imread(path, cv::IMREAD_GRAYSCALE);
 									 if (img.empty()) continue;
 
-									 // scarta immagini troppo piccole
 									 if (img.cols < 60 || img.rows < 60)
 										 continue;
 
 									 cv::equalizeHist(img, img);
+									 cv::resize(img, img, cv::Size(200, 200)); // uniforme
 
-									 // *** Resize uniforme per TUTTI i metodi ***
-									 cv::resize(img, img, cv::Size(200, 200));
+									 if (method == "fisher") {
+										 // Classe reale (0)
+										 images.push_back(img);
+										 labels.push_back(0);
 
-									 images.push_back(img);
-									 labels.push_back(0);
+										 // Classe sintetica (1)
+										 cv::Mat blur, gamma;
+										 cv::GaussianBlur(img, blur, cv::Size(5,5), 0);
+
+										 // Gamma correction
+										 img.convertTo(gamma, -1, 1.15, 2); // leggero aumento contrasto
+
+										 images.push_back(blur);
+										 labels.push_back(1);
+
+										 images.push_back(gamma);
+										 labels.push_back(1);
+
+									 } else {
+										 // LBPH ed Eigen → mono-classe
+										 images.push_back(img);
+										 labels.push_back(0);
+									 }
 								 }
 
 								 if (images.empty()) {
@@ -548,6 +566,7 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 	log_tool(cfg, "INFO", "Model saved to %s", model_out.c_str());
 	return true;
 							 }
+
 
 // ==========================================================
 // TEST USER
