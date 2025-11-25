@@ -1085,27 +1085,49 @@ int facial_test_cli_main(int argc, char *argv[])
 	// -----------------------------
 	// VERSIONE CORRETTA (6 param)
 	// -----------------------------
-	bool ok = fa_test_user(user, cfg, model_path,
-						   best_conf, best_label, logbuf,
-						threshold_override);
+	// ==========================================================
+	// TEST USER
+	// ==========================================================
 
+	// ========================================
+	// ESECUZIONE TEST (6 parametri reali)
+	// ========================================
 
+	bool ok = fa_test_user(
+		user, cfg, model_path,
+		best_conf, best_label, logbuf
+	);
+
+	// ----------------------------------------
+	// Gestione fallimento
+	// ----------------------------------------
 	if (!ok) {
-		double eff_thr = -1.0;
 
-		// soglia effettiva per stampa
+		double eff_thr;
+
 		if (threshold_override > 0.0)
 			eff_thr = threshold_override;
-		else
-			eff_thr = cfg.lbph_threshold;
+		else {
+			// soglia in base al tipo modello
+			std::string mtype = fa_detect_model_type(model_path);
+			if (mtype == "eigen")      eff_thr = cfg.eigen_threshold;
+			else if (mtype == "fisher") eff_thr = cfg.fisher_threshold;
+			else                        eff_thr = cfg.lbph_threshold;
+		}
 
-		std::cerr << "Authentication FAILED (best_conf="
-		<< best_conf << ", threshold=" << eff_thr << ")\n";
+		std::cerr << "Authentication FAILED (best_conf=" << best_conf
+		<< ", threshold=" << eff_thr << ")\n";
 
-		if (!logbuf.empty()) std::cerr << logbuf;
+		if (!logbuf.empty())
+			std::cerr << logbuf;
+
 		return 2;
 	}
 
+	// ----------------------------------------
+	// SUCCESSO
+	// ----------------------------------------
 	std::cout << "[OK] Authentication SUCCESS (conf=" << best_conf << ")\n";
 	return 0;
 }
+
