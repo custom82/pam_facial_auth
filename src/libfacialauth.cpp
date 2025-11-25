@@ -1008,21 +1008,25 @@ int facial_training_cli_main(int argc, char *argv[])
 // facial_test CLI
 // ----------------------------------------------------------
 
+// ----------------------------------------------------------
+// facial_test
+// ----------------------------------------------------------
+
 static void print_facial_test_usage(const char *p)
 {
-	std::cout <<
-	"Usage: " << p << " -u <user> -m <model_path> [options]\n"
-	"\n"
-	"Options:\n"
-	"  -u, --user <user>        Utente da verificare (obbligatorio)\n"
-	"  -m, --model <path>       File modello XML (obbligatorio)\n"
-	"  -c, --config <file>      File di configurazione\n"
-	"                           (default: " FACIALAUTH_CONFIG_DEFAULT ")\n"
-	"  -d, --device <device>    Dispositivo webcam (es. /dev/video0)\n"
-	"      --threshold <value>  Soglia di confidenza (override globale)\n"
-	"  -v, --verbose            Modalità verbosa\n"
-	"      --nogui              Disabilita la GUI\n"
-	"  -h, --help               Mostra questo messaggio\n";
+	std::cout
+	<< "Usage: " << p << " -u <user> [options]\n\n"
+	<< "Options:\n"
+	<< "  -u, --user <user>        Utente da verificare (obbligatorio)\n"
+	<< "  -m, --model <path>       File modello XML (opzionale;\n"
+	<< "                           default: <basedir>/models/<user>.xml)\n"
+	<< "  -c, --config <file>      File di configurazione\n"
+	<< "                           (default: " << FACIALAUTH_CONFIG_DEFAULT << ")\n"
+	<< "  -d, --device <device>    Dispositivo webcam (es. /dev/video0)\n"
+	<< "      --threshold <value>  Soglia di confidenza (override globale)\n"
+	<< "  -v, --verbose            Modalità verbosa\n"
+	<< "      --nogui              Disabilita la GUI\n"
+	<< "  -h, --help               Mostra questo messaggio\n";
 }
 
 int facial_test_cli_main(int argc, char *argv[])
@@ -1030,45 +1034,65 @@ int facial_test_cli_main(int argc, char *argv[])
 	FacialAuthConfig cfg;
 	std::string config_path = FACIALAUTH_CONFIG_DEFAULT;
 
-	std::string user, device_opt, model_path, logbuf;
-	bool debug_opt = false, nogui_opt = false;
+	std::string user;
+	std::string model_path;
+	std::string device_opt;
+	std::string logbuf;
+
+	bool verbose = false;
+	bool nogui_opt = false;
+
 	double threshold_override = 0.0;
+	bool threshold_set = false;
 
 	enum {
-		OPT_HELP      = 2000,
-		OPT_THRESHOLD = 2001
+		OPT_THRESHOLD = 1000,
+		OPT_NOGUI     = 1001
 	};
 
 	struct option long_opts[] = {
 		{"user",      required_argument, nullptr, 'u'},
-		{"device",    required_argument, nullptr, 'd'},
-		{"nogui",     no_argument,       nullptr, 'g'},
-		{"verbose",   no_argument,       nullptr, 'v'},
 		{"model",     required_argument, nullptr, 'm'},
 		{"config",    required_argument, nullptr, 'c'},
-		{"help",      no_argument,       nullptr, OPT_HELP},
+		{"device",    required_argument, nullptr, 'd'},
 		{"threshold", required_argument, nullptr, OPT_THRESHOLD},
+		{"verbose",   no_argument,       nullptr, 'v'},
+		{"nogui",     no_argument,       nullptr, OPT_NOGUI},
+		{"help",      no_argument,       nullptr, 'h'},
 		{nullptr,0,nullptr,0}
 	};
 
 	int opt, idx = 0;
-
-	while ((opt = getopt_long(argc, argv, "u:d:gvm:c:", long_opts, &idx)) != -1) {
+	while ((opt = getopt_long(argc, argv, "u:m:c:d:vh", long_opts, &idx)) != -1) {
 		switch (opt) {
-
-			case 'u': user = optarg; break;
-			case 'd': device_opt = optarg; break;
-			case 'g': nogui_opt = true; break;
-			case 'v': debug_opt = true; break;
-			case 'm': model_path = optarg; break;
-			case 'c': config_path = optarg; break;
+			case 'u':
+				user = optarg;
+				break;
+			case 'm':
+				model_path = optarg;
+				break;
+			case 'c':
+				config_path = optarg;
+				break;
+			case 'd':
+				device_opt = optarg;
+				break;
+			case 'v':
+				verbose = true;
+				break;
 
 			case OPT_THRESHOLD:
-				if (optarg)
-					threshold_override = std::atof(optarg);
-			break;
+				if (optarg) {
+					threshold_override = std::strtod(optarg, nullptr);
+					threshold_set = true;
+				}
+				break;
 
-			case OPT_HELP:
+			case OPT_NOGUI:
+				nogui_opt = true;
+				break;
+
+			case 'h':
 				print_facial_test_usage(argv[0]);
 				return 0;
 
@@ -1078,40 +1102,49 @@ int facial_test_cli_main(int argc, char *argv[])
 		}
 	}
 
+	// user obbligatorio
 	if (user.empty()) {
-		std::cerr << "ERROR: --user required\n";
-		return 1;
-	}
-
-	if (model_path.empty()) {
-		std::cerr << "ERROR: --model required\n";
+		std::cerr << "ERROR: --user is required\n";
+		print_facial_test_usage(argv[0]);
 		return 1;
 	}
 
 	if (!fa_check_root("facial_test"))
 		return 1;
 
+	// Carica config (qui prendiamo basedir & soglie)
 	if (!read_kv_config(config_path, cfg, &logbuf)) {
 		std::cerr << "[ERROR] Cannot read config file: " << config_path << "\n";
 		if (!logbuf.empty()) std::cerr << logbuf;
 		return 1;
 	}
 
-	if (debug_opt) cfg.debug = true;
-	if (nogui_opt) cfg.nogui = true;
-	if (!device_opt.empty()) cfg.device = device_opt;
+	if (verbose)
+		cfg.debug = true;
+	if (nogui_opt)
+		cfg.nogui = true;
+	if (!device_opt.empty())
+		cfg.device = device_opt;
 
-	// override globale se specificato
-	if (threshold_override > 0.0)
-		cfg.threshold = threshold_override;
+	// Se il modello non è stato specificato, deriviamolo da basedir
+	if (model_path.empty())
+		model_path = fa_user_model_path(cfg, user);
 
-	double best_conf = 0;
+	// Threshold override globale (forza tutte le soglie)
+	if (threshold_set) {
+		cfg.threshold        = threshold_override;
+		cfg.lbph_threshold   = threshold_override;
+		cfg.eigen_threshold  = threshold_override;
+		cfg.fisher_threshold = threshold_override;
+	}
+
+	double best_conf = 0.0;
 	int best_label   = -1;
 
 	bool ok = fa_test_user(user, cfg, model_path, best_conf, best_label, logbuf);
 	if (!ok) {
 		std::cerr << "Authentication FAILED (best_conf=" << best_conf
-		<< ", threshold=" << (cfg.threshold > 0.0 ? cfg.threshold : cfg.lbph_threshold) << ")\n";
+		<< ", threshold=" << cfg.threshold << ")\n";
 		if (!logbuf.empty()) std::cerr << logbuf;
 		return 2;
 	}
