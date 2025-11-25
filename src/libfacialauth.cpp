@@ -1018,9 +1018,18 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 									 return 1;
 								 }
 
+								 // ===========================
+								 // MODEL: derive from basedir if not specified
+								 // ===========================
+
+								 // Se l’utente NON specifica --model, usarlo dalla basedir della configurazione
 								 if (model_path.empty()) {
-									 std::cerr << "ERROR: --model is required\n";
-									 return 1;
+									 model_path = fa_user_model_path(cfg, user);
+
+									 if (cfg.debug) {
+										 std::cerr << "[DEBUG] Using autodetected model path: "
+										 << model_path << "\n";
+									 }
 								 }
 
 								 if (!fa_check_root("facial_test"))
