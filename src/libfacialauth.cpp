@@ -476,6 +476,9 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 		return (ls >= lf && s.compare(ls - lf, lf, suf) == 0);
 	};
 
+	int target_w = 200;
+	int target_h = 200;
+
 	for (auto &entry : fs::directory_iterator(train_dir)) {
 		if (!entry.is_regular_file()) continue;
 
@@ -494,14 +497,16 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 		if (img.empty())
 			continue;
 
-		// Classe 0: immagine originale
+		// Normalizzazione — ESSENZIALE per EIGEN/FISHER
+		cv::resize(img, img, cv::Size(target_w, target_h));
+
 		images.push_back(img);
 		labels.push_back(0);
 
-		// Per EIGEN/FISHER creiamo una "classe 1" sintetica con immagine specchiata
 		if (m == "eigen" || m == "fisher") {
 			cv::Mat flipped;
 			cv::flip(img, flipped, 1);
+			cv::resize(flipped, flipped, cv::Size(target_w, target_h));
 			images.push_back(flipped);
 			labels.push_back(1);
 		}
@@ -515,12 +520,12 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 	FaceRecWrapper rec(m);
 
 	if (!rec.Train(images, labels)) {
-		log_tool(cfg, "ERROR", "Training failed");
+		log_tool(cfg, "ERROR", "Training failed (Eigen/Fisher require equal-sized images)");
 		return false;
 	}
 
 	std::string model_out =
-	outputModel.empty() ? fa_user_model_path(cfg, user) : outputModel;
+		outputModel.empty() ? fa_user_model_path(cfg, user) : outputModel;
 
 	if (!rec.Save(model_out)) {
 		log_tool(cfg, "ERROR", "Cannot save model to %s", model_out.c_str());
@@ -534,6 +539,7 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 	log_tool(cfg, "INFO", "Model saved to %s", model_out.c_str());
 	return true;
 							 }
+
 
 // ==========================================================
 // TEST USER
