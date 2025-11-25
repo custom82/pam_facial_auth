@@ -454,130 +454,88 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 						   const std::string &method,
 						   const std::string &inputDir,
 						   const std::string &outputModel,
-						   bool /*force*/,
+						   bool force,
 						   std::string &logbuf)
 							 {
-								 std::string train_dir = inputDir.empty()
-								 ? fa_user_image_dir(cfg, user)
-								 : inputDir;
+								 // Directory immagini
+								 std::string train_dir =
+								 inputDir.empty() ? fa_user_image_dir(cfg, user) : inputDir;
 
 								 if (!fs::exists(train_dir)) {
-									 log_tool(cfg, "ERROR", "Training dir missing: %s", train_dir.c_str());
-		return false;
+									 log_tool(cfg, "ERROR", "Training directory missing: %s",
+											  train_dir.c_str());
+									 return false;
 								 }
 
-	std::vector<cv::Mat> images;
-	std::vector<int>    labels;
+								 std::vector<cv::Mat> images;
+								 std::vector<int> labels;
 
-	auto has_suffix = [](const std::string &s, const char *suf) {
-		const size_t ls = s.size();
-		const size_t lf = std::strlen(suf);
-		return (ls >= lf && s.compare(ls - lf, lf, suf) == 0);
-	};
+								 auto has_suffix = [](const std::string &s, const char *suf){
+									 size_t ls = s.size(), lf = strlen(suf);
+									 return (ls >= lf && s.compare(ls - lf, lf, suf) == 0);
+								 };
 
-	int img_w = -1;
-	int img_h = -1;
+								 // ---------------------
+								 // CARICAMENTO IMMAGINI
+								 // ---------------------
+								 for (auto &entry : fs::directory_iterator(train_dir)) {
+									 if (!entry.is_regular_file()) continue;
 
-	for (auto &entry : fs::directory_iterator(train_dir)) {
-		if (!entry.is_regular_file()) continue;
+									 std::string path = entry.path().string();
+									 std::string lower = path;
+									 for (char &c: lower) c = (char)tolower((unsigned char)c);
 
-		std::string path = entry.path().string();
+									 if (!(has_suffix(lower, ".jpg") ||
+										 has_suffix(lower, ".jpeg") ||
+										 has_suffix(lower, ".png")))
+										 continue;
 
-		std::string lower = path;
-		for (char &c : lower)
-			c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+									 cv::Mat img = cv::imread(path, cv::IMREAD_GRAYSCALE);
+									 if (img.empty()) continue;
 
-		if (!(has_suffix(lower, ".png") ||
-			  has_suffix(lower, ".jpg") ||
-			  has_suffix(lower, ".jpeg")))
-			continue;
+									 cv::equalizeHist(img, img);
 
-		cv::Mat img = cv::imread(path, cv::IMREAD_GRAYSCALE);
-		if (img.empty())
-			continue;
+									 // *** Resize obbligatorio per eigen/fisher ***
+									 if (method == "eigen" || method == "fisher") {
+										 cv::resize(img, img, cv::Size(200, 200));
+									 }
 
-		if (img_w < 0 || img_h < 0) {
-			img_w = img.cols;
-			img_h = img.rows;
-		} else if (img.cols != img_w || img.rows != img_h) {
-			cv::resize(img, img, cv::Size(img_w, img_h));
-		}
+									 images.push_back(img);
+									 labels.push_back(0);
+								 }
 
-		images.push_back(img);
-	}
+								 if (images.empty()) {
+									 log_tool(cfg, "ERROR", "No valid training images found");
+									 return false;
+								 }
 
-	if (images.empty()) {
-		log_tool(cfg, "ERROR", "No valid images in training directory");
-		return false;
-	}
+								 // ---------------------
+								 // CREAZIONE MODELLO
+								 // ---------------------
+								 FaceRecWrapper rec(method);
 
-	std::string method_l = method;
-	for (char &c : method_l)
-		c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+								 if (!rec.CreateRecognizer()) {
+									 log_tool(cfg, "ERROR", "Recognizer creation failed");
+									 return false;
+								 }
+
+								 if (!rec.Train(images, labels)) {
+									 log_tool(cfg, "ERROR", "Training failed");
+									 return false;
+								 }
 
 								 std::string model_out =
 								 outputModel.empty() ? fa_user_model_path(cfg, user) : outputModel;
 
-								 if (method_l == "eigen" || method_l == "fisher") {
-									 int n = static_cast<int>(images.size());
-									 if (n < 2) {
-										 log_tool(cfg, "ERROR",
-												  "Eigen/Fisher need at least 2 images, got %d", n);
-										 return false;
-									 }
-
-									 labels.resize(n);
-									 int half = n / 2;
-									 if (half <= 0) half = 1;
-									 int rest = n - half;
-									 if (rest <= 0) rest = 1;
-
-									 for (int i = 0; i < n; ++i)
-										 labels[i] = (i < half ? 0 : 1);
-
-									 if (method_l == "eigen") {
-										 cv::Ptr<cv::face::FaceRecognizer> rec =
-										 cv::face::EigenFaceRecognizer::create(
-											 cfg.eigen_components, DBL_MAX);
-										 rec->train(images, labels);
-										 ensure_dirs(fs::path(model_out).parent_path().string());
-										 rec->write(model_out);
-										 log_tool(cfg, "INFO", "Eigen: trained with %d images, comps=%d",
-												  n, cfg.eigen_components);
-									 } else {
-										 cv::Ptr<cv::face::FaceRecognizer> rec =
-										 cv::face::FisherFaceRecognizer::create(
-											 cfg.fisher_components, DBL_MAX);
-										 rec->train(images, labels);
-										 ensure_dirs(fs::path(model_out).parent_path().string());
-										 rec->write(model_out);
-										 log_tool(cfg, "INFO", "Fisher: trained with %d images, comps=%d",
-												  n, cfg.fisher_components);
-									 }
-
-									 log_tool(cfg, "INFO", "Model saved to %s", model_out.c_str());
-									 return true;
-								 }
-
-								 // LBPH: etichetta unica
-								 labels.assign(images.size(), 0);
-
-								 {
-									 FaceRecWrapper rec("lbph");
-									 if (!rec.Train(images, labels)) {
-										 log_tool(cfg, "ERROR", "Training failed (LBPH)");
-			return false;
-									 }
-
-		if (!rec.Save(model_out)) {
-			log_tool(cfg, "ERROR", "Cannot save model to %s", model_out.c_str());
-			return false;
-		}
+								 if (!rec.Save(model_out)) {
+									 log_tool(cfg, "ERROR", "Cannot save model: %s", model_out.c_str());
+		return false;
 								 }
 
 	log_tool(cfg, "INFO", "Model saved to %s", model_out.c_str());
 	return true;
 							 }
+
 // ==========================================================
 // TEST USER
 // ==========================================================
@@ -590,58 +548,58 @@ bool fa_test_user(const std::string &user,
 				  std::string &logbuf,
 				  double threshold_override)
 {
-	(void)logbuf;
-
 	std::string model_file =
 		modelPath.empty() ? fa_user_model_path(cfg, user) : modelPath;
 
 	if (!file_exists(model_file)) {
-		log_tool(cfg, "ERROR", "Model missing: %s", model_file.c_str());
+		log_tool(cfg, "ERROR", "Model file missing: %s", model_file.c_str());
 		return false;
 	}
 
-	FaceRecWrapper rec("lbph");
+	std::string model_type = fa_detect_model_type(model_file);
+
+	FaceRecWrapper rec(model_type);
+
+	if (!rec.CreateRecognizer()) {
+		log_tool(cfg, "ERROR", "Recognizer creation failed (%s)",
+				 model_type.c_str());
+		return false;
+	}
+
 	if (!rec.Load(model_file)) {
 		log_tool(cfg, "ERROR", "Cannot load model: %s", model_file.c_str());
 		return false;
 	}
 
-	if (cfg.haar_cascade_path.empty() || !file_exists(cfg.haar_cascade_path)) {
-		log_tool(cfg, "ERROR", "haar_cascade_path is missing or invalid in config");
-		return false;
-	}
-
-	if (!rec.InitCascade(cfg.haar_cascade_path)) {
-		log_tool(cfg, "ERROR", "Cannot load HAAR cascade from %s",
-				 cfg.haar_cascade_path.c_str());
-		return false;
-	}
-
-	std::string model_type = rec.GetModelType(); // "lbph", "eigen", "fisher"
-
-	std::string dev_used;
 	cv::VideoCapture cap;
+	std::string dev_used;
 
 	if (!open_camera(cfg, cap, dev_used)) {
-		log_tool(cfg, "ERROR", "Cannot open camera: %s", cfg.device.c_str());
+		log_tool(cfg, "ERROR", "Cannot open camera: %s",
+				 cfg.device.c_str());
 		return false;
 	}
 
 	log_tool(cfg, "INFO", "Testing user %s on device %s",
 			 user.c_str(), dev_used.c_str());
 
-	// Soglia: per metodo, oppure override
-	double threshold = cfg.lbph_threshold;
-	if (model_type == "eigen")   threshold = cfg.eigen_threshold;
-	if (model_type == "fisher")  threshold = cfg.fisher_threshold;
-	if (threshold_override > 0.0) threshold = threshold_override;
-
 	best_conf  = 1e9;
 	best_label = -1;
+
+	// Soglia per metodo
+	double threshold;
+	if (threshold_override > 0.0) {
+		threshold = threshold_override;
+	} else {
+		if (model_type == "eigen")       threshold = cfg.eigen_threshold;
+		else if (model_type == "fisher") threshold = cfg.fisher_threshold;
+		else                             threshold = cfg.lbph_threshold;
+	}
 
 	cv::Mat frame;
 
 	for (int i = 0; i < cfg.frames; i++) {
+
 		cap >> frame;
 		if (frame.empty()) continue;
 
@@ -655,8 +613,11 @@ bool fa_test_user(const std::string &user,
 		cv::cvtColor(face, gray, cv::COLOR_BGR2GRAY);
 		cv::equalizeHist(gray, gray);
 
-		int    label = -1;
-		double conf  = 1e9;
+		if (model_type == "eigen" || model_type == "fisher")
+			cv::resize(gray, gray, cv::Size(200, 200));
+
+		int label = -1;
+		double conf = 1e9;
 
 		if (!rec.Predict(gray, label, conf))
 			continue;
@@ -682,6 +643,8 @@ bool fa_test_user(const std::string &user,
 
 	return false;
 }
+
+
 
 // ==========================================================
 // Maintenance
@@ -1048,11 +1011,11 @@ int facial_test_cli_main(int argc, char *argv[])
 	bool debug_opt = false;
 	bool nogui_opt = false;
 
-	double threshold_override = -1.0;
-
 	enum {
 		OPT_THRESHOLD = 2000
 	};
+
+	double threshold_override = -1.0;
 
 	struct option long_opts[] = {
 		{"user",      required_argument, nullptr, 'u'},
@@ -1061,12 +1024,13 @@ int facial_test_cli_main(int argc, char *argv[])
 		{"device",    required_argument, nullptr, 'd'},
 		{"threshold", required_argument, nullptr, OPT_THRESHOLD},
 		{"verbose",   no_argument,       nullptr, 'v'},
-		{"nogui",     no_argument,       nullptr,  1 },
+		{"nogui",     no_argument,       nullptr, 1},
 		{"help",      no_argument,       nullptr, 'h'},
 		{nullptr,0,nullptr,0}
 	};
 
 	int opt, idx = 0;
+
 	while ((opt = getopt_long(argc, argv, "u:m:c:d:vh", long_opts, &idx)) != -1) {
 		switch (opt) {
 			case 'u': user       = optarg; break;
@@ -1093,6 +1057,7 @@ int facial_test_cli_main(int argc, char *argv[])
 		}
 	}
 
+	// Config
 	if (!read_kv_config(config_path, cfg, &logbuf)) {
 		std::cerr << "[ERROR] Cannot read config file: " << config_path << "\n";
 		if (!logbuf.empty()) std::cerr << logbuf;
@@ -1117,15 +1082,26 @@ int facial_test_cli_main(int argc, char *argv[])
 	double best_conf = 0.0;
 	int    best_label = -1;
 
+	// -----------------------------
+	// VERSIONE CORRETTA (6 param)
+	// -----------------------------
 	bool ok = fa_test_user(user, cfg, model_path,
 						   best_conf, best_label, logbuf,
 						threshold_override);
 
+
 	if (!ok) {
-		std::cerr << "Authentication FAILED (best_conf=" << best_conf
-		<< ", threshold=" << (threshold_override > 0.0 ? threshold_override
-		: cfg.lbph_threshold)
-		<< ")\n";
+		double eff_thr = -1.0;
+
+		// soglia effettiva per stampa
+		if (threshold_override > 0.0)
+			eff_thr = threshold_override;
+		else
+			eff_thr = cfg.lbph_threshold;
+
+		std::cerr << "Authentication FAILED (best_conf="
+		<< best_conf << ", threshold=" << eff_thr << ")\n";
+
 		if (!logbuf.empty()) std::cerr << logbuf;
 		return 2;
 	}
