@@ -24,10 +24,14 @@ namespace fs = std::filesystem;
 
 std::string trim(const std::string &s) {
 	size_t b = s.find_first_not_of(" \t\r\n");
-	if (b == std::string::npos) return "";
-	size_t e = s.find_last_not_of(" \t\r\n");
+	if (b == std::string::npos)
+		return "";
+
+	size_t e = s.find_last_not_of(" \t\r\n");   // <-- FIX QUI
+
 	return s.substr(b, e - b + 1);
 }
+
 
 bool str_to_bool(const std::string &s, bool defval) {
 	std::string t = trim(s);
@@ -162,6 +166,7 @@ bool read_kv_config(const std::string &path,
 
 	return true;
 }
+
 // ==========================================================
 // Model type detection from XML
 // ==========================================================
@@ -328,6 +333,7 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 								 faceROI = faces[0];
 								 return true;
 							 }
+
 							 // ==========================================================
 							 // Camera helper
 							 // ==========================================================
@@ -429,6 +435,11 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 									 cv::cvtColor(face, gray, cv::COLOR_BGR2GRAY);
 									 cv::equalizeHist(gray, gray);
 
+									 // normalizziamo anche qui a 200x200 per coerenza
+									 if (gray.cols < 60 || gray.rows < 60)
+										 continue;
+									 cv::resize(gray, gray, cv::Size(200, 200));
+
 									 char buf[64];
 									 std::snprintf(buf, sizeof(buf), "img_%03d.%s",
 												   start_idx + captured + 1, fmt.c_str());
@@ -454,7 +465,7 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 						   const std::string &method,
 						   const std::string &inputDir,
 						   const std::string &outputModel,
-						   bool force,
+						   bool /*force*/,
 						   std::string &logbuf)
 							 {
 								 // Directory immagini
@@ -493,12 +504,14 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 									 cv::Mat img = cv::imread(path, cv::IMREAD_GRAYSCALE);
 									 if (img.empty()) continue;
 
+									 // scarta immagini troppo piccole
+									 if (img.cols < 60 || img.rows < 60)
+										 continue;
+
 									 cv::equalizeHist(img, img);
 
-									 // *** Resize obbligatorio per eigen/fisher ***
-									 if (method == "eigen" || method == "fisher") {
-										 cv::resize(img, img, cv::Size(200, 200));
-									 }
+									 // *** Resize uniforme per TUTTI i metodi ***
+									 cv::resize(img, img, cv::Size(200, 200));
 
 									 images.push_back(img);
 									 labels.push_back(0);
@@ -556,6 +569,7 @@ bool fa_test_user(const std::string &user,
 		return false;
 	}
 
+	// Determina il tipo modello dal file
 	std::string model_type = fa_detect_model_type(model_file);
 
 	FaceRecWrapper rec(model_type);
@@ -568,6 +582,19 @@ bool fa_test_user(const std::string &user,
 
 	if (!rec.Load(model_file)) {
 		log_tool(cfg, "ERROR", "Cannot load model: %s", model_file.c_str());
+		return false;
+	}
+
+	// Carichiamo la HAAR cascade come in capture()
+	if (cfg.haar_cascade_path.empty() || !file_exists(cfg.haar_cascade_path)) {
+		log_tool(cfg, "ERROR",
+				 "haar_cascade_path is missing or invalid in config");
+		return false;
+	}
+
+	if (!rec.InitCascade(cfg.haar_cascade_path)) {
+		log_tool(cfg, "ERROR", "Cannot load HAAR cascade from %s",
+				 cfg.haar_cascade_path.c_str());
 		return false;
 	}
 
@@ -587,14 +614,12 @@ bool fa_test_user(const std::string &user,
 	best_label = -1;
 
 	// Soglia per metodo
-	double threshold;
-	if (threshold_override > 0.0) {
+	double threshold = cfg.lbph_threshold;
+	if (model_type == "eigen")  threshold = cfg.eigen_threshold;
+	if (model_type == "fisher") threshold = cfg.fisher_threshold;
+
+	if (threshold_override > 0.0)
 		threshold = threshold_override;
-	} else {
-		if (model_type == "eigen")       threshold = cfg.eigen_threshold;
-		else if (model_type == "fisher") threshold = cfg.fisher_threshold;
-		else                             threshold = cfg.lbph_threshold;
-	}
 
 	cv::Mat frame;
 
@@ -613,11 +638,14 @@ bool fa_test_user(const std::string &user,
 		cv::cvtColor(face, gray, cv::COLOR_BGR2GRAY);
 		cv::equalizeHist(gray, gray);
 
-		if (model_type == "eigen" || model_type == "fisher")
-			cv::resize(gray, gray, cv::Size(200, 200));
+		if (gray.cols < 60 || gray.rows < 60)
+			continue;
 
-		int label = -1;
-		double conf = 1e9;
+		// *** Resize uniforme per tutti i metodi ***
+		cv::resize(gray, gray, cv::Size(200, 200));
+
+		int    label = -1;
+		double conf  = 1e9;
 
 		if (!rec.Predict(gray, label, conf))
 			continue;
@@ -643,8 +671,6 @@ bool fa_test_user(const std::string &user,
 
 	return false;
 }
-
-
 
 // ==========================================================
 // Maintenance
@@ -1082,52 +1108,16 @@ int facial_test_cli_main(int argc, char *argv[])
 	double best_conf = 0.0;
 	int    best_label = -1;
 
-	// -----------------------------
-	// VERSIONE CORRETTA (6 param)
-	// -----------------------------
-	// ==========================================================
-	// TEST USER
-	// ==========================================================
+	bool ok = fa_test_user(user, cfg, model_path,
+						   best_conf, best_label, logbuf,
+						threshold_override);
 
-	// ========================================
-	// ESECUZIONE TEST (6 parametri reali)
-	// ========================================
-
-	bool ok = fa_test_user(
-		user, cfg, model_path,
-		best_conf, best_label, logbuf
-	);
-
-	// ----------------------------------------
-	// Gestione fallimento
-	// ----------------------------------------
 	if (!ok) {
-
-		double eff_thr;
-
-		if (threshold_override > 0.0)
-			eff_thr = threshold_override;
-		else {
-			// soglia in base al tipo modello
-			std::string mtype = fa_detect_model_type(model_path);
-			if (mtype == "eigen")      eff_thr = cfg.eigen_threshold;
-			else if (mtype == "fisher") eff_thr = cfg.fisher_threshold;
-			else                        eff_thr = cfg.lbph_threshold;
-		}
-
-		std::cerr << "Authentication FAILED (best_conf=" << best_conf
-		<< ", threshold=" << eff_thr << ")\n";
-
-		if (!logbuf.empty())
-			std::cerr << logbuf;
-
+		std::cerr << "Authentication FAILED (best_conf=" << best_conf << ")\n";
+		if (!logbuf.empty()) std::cerr << logbuf;
 		return 2;
 	}
 
-	// ----------------------------------------
-	// SUCCESSO
-	// ----------------------------------------
 	std::cout << "[OK] Authentication SUCCESS (conf=" << best_conf << ")\n";
 	return 0;
 }
-
