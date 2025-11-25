@@ -1,68 +1,53 @@
-.TH FACIAL_TRAINING 1 "2025-01" "pam_facial_auth" "User Commands"
+.TH facial_training 1 "November 2025" "pam_facial_auth 1.0" "User Commands"
 .SH NAME
-facial_training \- train the facial recognition model
-
+facial_training \- train a facial recognition model for a user
 .SH SYNOPSIS
 .B facial_training
-\-u USER
-[\-i DIR] [\-o FILE]
-[\-f] [\-v] [\-c FILE]
-
+\-u USER \-m METHOD
+[\-i DIR] [\-o FILE] [\-f] [\-v]
 .SH DESCRIPTION
 The
 .B facial_training
-tool loads previously captured face images for a user and trains an LBPH
-(Local Binary Patterns Histograms) facial recognition model.
+utility creates or updates a facial recognition model for a user based
+on previously captured images.
 
-The resulting model is stored as an XML file under
-.BR /etc/pam_facial_auth/models .
+Supported recognition methods:
+.IP \(bu 4
+LBPH (Local Binary Pattern Histogram)
+.IP \(bu
+Eigenfaces
+.IP \(bu
+Fisherfaces
 
-This model is used by the PAM module for authentication.
+All images are normalized to 200x200 grayscale frames for consistent
+model training.
 
 .SH OPTIONS
 .TP
-.B \-u, --user USER
-User for which to train the model. Required.
-
+.BR \-u " " USER ", " \-\-user=USER
+User whose model is to be trained.
 .TP
-.B \-i, --input DIR
-Input directory containing training images
-(default:
-.BR /etc/pam_facial_auth/images/USER ).
-
+.BR \-m " " METHOD ", " \-\-method=METHOD
+Recognition method: \fBlbph\fR, \fBeigen\fR, or \fBfisher\fR.
 .TP
-.B \-o, --output FILE
-Output model file
-(default:
-/etc/pam_facial_auth/models/USER.xml).
-
+.BR \-i " " DIR ", " \-\-input=DIR
+Specify a different base directory for images.
 .TP
-.B \-f, --force
-Overwrite an existing model file.
-
+.BR \-o " " FILE ", " \-\-output=FILE
+Specify output path for the model XML file.
 .TP
-.B \-v, --verbose
-Enable verbose/debug logging.
-
+.BR \-f ", " \-\-force
+Force model overwrite.
 .TP
-.B \-c, --config FILE
-Configuration file (default:
-/etc/security/pam_facial.conf).
-
-.TP
-.B --help
-Show usage and exit.
-
+.BR \-v ", " \-\-verbose
+Enable debug mode.
 .SH FILES
 .TP
-.B /etc/pam_facial_auth/images/USER
-Training image directory.
-.TP
-.B /etc/pam_facial_auth/models/USER.xml
-Generated LBPH model.
-.TP
-.B /etc/security/pam_facial.conf
-Global configuration.
-
+.I /etc/security/pam_facial.conf
+Configuration file used for default settings.
+.SH SEE ALSO
+.BR facial_capture (1),
+.BR facial_test (1),
+.BR pam_facial_auth (8)
 .SH AUTHOR
-Andrea Postiglione
+Andrea Postiglione and contributors.

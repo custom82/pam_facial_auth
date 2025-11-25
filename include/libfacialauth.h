@@ -3,118 +3,169 @@
 
 #include <string>
 #include <vector>
-
 #include <opencv2/opencv.hpp>
 #include <opencv2/face.hpp>
 
 // ==========================================================
-// Default config file path
-// ==========================================================
-#ifndef FACIALAUTH_CONFIG_DEFAULT
-#define FACIALAUTH_CONFIG_DEFAULT "/etc/security/pam_facial.conf"
-#endif
-
-// ==========================================================
-// Extra utility helpers
+// CONFIG
 // ==========================================================
 
-// Valid image formats: .jpg .jpeg .png
-bool fa_is_valid_image(const std::string &path);
-
-
-// ==========================================================
-// Global configuration structure
-// ==========================================================
 struct FacialAuthConfig {
+
+    // ATTENZIONE — basedir:
+    // - default assoluto: /etc/pam_facial_auth
+    // - può essere cambiata SOLO dal file di configurazione
     std::string basedir = "/etc/pam_facial_auth";
-    std::string device = "/dev/video0";
+
+    std::string device  = "/dev/video0";
+    int         width   = 640;
+    int         height  = 480;
+
+    int         frames    = 15;
+    int         sleep_ms  = 200;
+
+    bool        nogui    = true;
+    bool        debug    = false;
+    bool        fallback_device = false;
+
+    // soglie per i vari metodi
+    double      lbph_threshold   = 80.0;
+    double      eigen_threshold  = 5000.0;
+    double      fisher_threshold = 500.0;
+
+    // numero componenti per eigen/fisher
+    int         eigen_components  = 100;
+    int         fisher_components = 10;
+
+    // File modello (override opzionale)
     std::string model_path;
-    std::string haar_cascade_path = "/usr/share/opencv4/haarcascades/haarcascade_frontalface_default.xml";
-    std::string training_method = "lbph";
-    std::string face_detection_method = "haar";
-    std::string log_file = "/var/log/pam_facial_auth.log";
 
-    int width = 640;
-    int height = 480;
-    int frames = 5;
-    int timeout = 5;
-    int sleep_ms = 500;
+    // Path assoluto al file HAAR (OBBLIGATORIO — nessun fallback)
+    std::string haar_cascade_path;
 
-    double threshold = 80.0;
+    // training method preferito (lbph/eigen/fisher) – opzionale
+    std::string training_method;
 
-    bool debug = false;
-    bool nogui = false;
-    bool fallback_device = true;
-    bool force_overwrite = false;
-    bool ignore_failure = false;
+    // log file opzionale
+    std::string log_file;
+
+    bool        force_overwrite = false;
+    bool        ignore_failure  = false;
 };
 
+#define FACIALAUTH_CONFIG_DEFAULT "/etc/security/pam_facial.conf"
+
 // ==========================================================
-// Utility functions
+// UTILS
 // ==========================================================
+
 std::string trim(const std::string &s);
-bool str_to_bool(const std::string &s, bool defval);
-bool read_kv_config(const std::string &path, FacialAuthConfig &cfg, std::string *logbuf);
-void ensure_dirs(const std::string &path);
+bool        str_to_bool(const std::string &s, bool defval);
+
+bool read_kv_config(const std::string &path,
+                    FacialAuthConfig &cfg,
+                    std::string *logbuf = nullptr);
+
 bool file_exists(const std::string &path);
-std::string join_path(const std::string &a, const std::string &b);
-void sleep_ms(int ms);
 
-// Logging
-void log_tool(const FacialAuthConfig &cfg, const char *level, const char *fmt, ...);
+// Helpers per path
+std::string fa_user_model_path(const FacialAuthConfig &cfg,
+                               const std::string &user);
 
-// Camera / path helpers
-bool open_camera(const FacialAuthConfig &cfg, cv::VideoCapture &cap, std::string &device_used);
-std::string fa_user_image_dir(const FacialAuthConfig &cfg, const std::string &user);
-std::string fa_user_model_path(const FacialAuthConfig &cfg, const std::string &user);
+std::string fa_user_image_dir(const FacialAuthConfig &cfg,
+                              const std::string &user);
+
+// Riconosce automaticamente il tipo modello dal file XML
+// Ritorna "lbph", "eigen", "fisher", oppure "lbph" come fallback.
+std::string fa_detect_model_type(const std::string &xmlPath);
+
 
 // ==========================================================
-// OpenCV FaceRecognizer wrapper
+// FaceRecWrapper
 // ==========================================================
+
 class FaceRecWrapper {
 public:
-    explicit FaceRecWrapper(const std::string &modelType_ = "lbph");
+    explicit FaceRecWrapper(const std::string &modelType = "lbph");
 
-    bool Load(const std::string &modelFile);
-    bool Save(const std::string &modelFile) const;
-    bool Train(const std::vector<cv::Mat> &images, const std::vector<int> &labels);
-    bool Predict(const cv::Mat &face, int &prediction, double &confidence) const;
-    bool DetectFace(const cv::Mat &frame, cv::Rect &faceROI);
+    // Carica un modello e imposta il tipo corretto
+    bool Load(const std::string &file);
+
+    // Salvataggio
+    bool Save(const std::string &file) const;
+
+    // Training
+    bool Train(const std::vector<cv::Mat> &images,
+               const std::vector<int>    &labels);
+
+    // Predict
+    bool Predict(const cv::Mat &face,
+                 int &prediction,
+                 double &confidence) const;
+
+                 // Face detection
+                 bool DetectFace(const cv::Mat &frame,
+                                 cv::Rect &faceROI);
+
+                 // Carica HAAR
+                 bool InitCascade(const std::string &cascadePath);
+
+                 // Crea riconoscitore corretto (LBPH/EIGEN/FISHER)
+                 bool CreateRecognizer();
+
+                 const std::string &GetModelType() const { return modelType; }
 
 private:
-    std::string modelType;
+    std::string modelType;  // "lbph", "eigen", "fisher"
     cv::Ptr<cv::face::FaceRecognizer> recognizer;
     cv::CascadeClassifier faceCascade;
 };
 
+
 // ==========================================================
-// High-level API
+// API HIGH LEVEL
 // ==========================================================
+
+// Cattura immagini
 bool fa_capture_images(const std::string &user,
                        const FacialAuthConfig &cfg,
                        bool force,
-                       std::string &log,
-                       const std::string &img_format = "png");
+                       std::string &logbuf,
+                       const std::string &img_format = "jpg");
 
+// Training
 bool fa_train_user(const std::string &user,
                    const FacialAuthConfig &cfg,
                    const std::string &method,
                    const std::string &inputDir,
                    const std::string &outputModel,
                    bool force,
-                   std::string &log);
+                   std::string &logbuf);
 
+// Test
 bool fa_test_user(const std::string &user,
                   const FacialAuthConfig &cfg,
                   const std::string &modelPath,
                   double &best_conf,
                   int &best_label,
-                  std::string &log);
+                  std::string &logbuf,
+                  double threshold_override = -1.0);
 
-// Maintenance helpers and root check
+// Maintenance
 bool fa_clean_images(const FacialAuthConfig &cfg, const std::string &user);
-bool fa_clean_model(const FacialAuthConfig &cfg, const std::string &user);
+bool fa_clean_model (const FacialAuthConfig &cfg, const std::string &user);
 void fa_list_images(const FacialAuthConfig &cfg, const std::string &user);
+
+// Root check
 bool fa_check_root(const char *tool_name);
 
-#endif // LIBFACIALAUTH_H
+
+// ==========================================================
+// CLI WRAPPERS
+// ==========================================================
+
+int facial_capture_cli_main (int argc, char *argv[]);
+int facial_training_cli_main(int argc, char *argv[]);
+int facial_test_cli_main    (int argc, char *argv[]);
+
+#endif
