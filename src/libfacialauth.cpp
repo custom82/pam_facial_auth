@@ -636,6 +636,12 @@ bool fa_test_user(const std::string &user,
 		cv::cvtColor(face, gray, cv::COLOR_BGR2GRAY);
 		cv::equalizeHist(gray, gray);
 
+// NORMALIZZAZIONE PER EIGEN & FISHER: obbligatoria
+		if (model_type == "eigen" || model_type == "fisher") {
+			cv::resize(gray, gray, cv::Size(200, 200));
+		}
+
+
 		int    label = -1;
 		double conf  = 1e9;
 
