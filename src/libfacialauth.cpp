@@ -910,8 +910,12 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 								 if (output_file.empty())
 									 output_file = fa_user_model_path(cfg, user);
 
-								 // Train using images from <basedir>/images/<user>
-								 std::string train_dir = fa_user_image_dir(cfg, user);
+								 // Se NON è specificata con -i, usa <basedir>/images/<user>
+								 if (input_dir.empty())
+									 input_dir = fa_user_image_dir(cfg, user);
+
+								 // input_dir ora è DEFINITIVAMENTE la directory di training
+								 std::string train_dir = input_dir;
 
 								 if (!fa_train_user(user, cfg, method, train_dir, output_file, force, logbuf)) {
 									 std::cerr << "Training failed\n";
