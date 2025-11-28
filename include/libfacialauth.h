@@ -7,81 +7,71 @@
 #include <opencv2/face.hpp>
 
 // ==========================================================
-// CONFIG
+// CONFIG STRUCTURE
 // ==========================================================
 
 struct FacialAuthConfig {
 
-    // ATTENZIONE — basedir:
-    // - default assoluto: /etc/pam_facial_auth
-    // - può essere cambiata SOLO dal file di configurazione
+    // Directory base
     std::string basedir = "/etc/pam_facial_auth";
 
-    std::string device  = "/dev/video0";
-    int         width   = 640;
-    int         height  = 480;
+    // Video
+    std::string device = "/dev/video0";
+    int width  = 640;
+    int height = 480;
 
-    int         frames    = 15;
-    int         sleep_ms  = 200;
+    int frames   = 15;
+    int sleep_ms = 200;
 
-    bool        nogui    = true;
-    bool        debug    = false;
-    bool        fallback_device = false;
+    bool nogui  = true;
+    bool debug  = false;
+    bool fallback_device = false;
 
-    // soglie per i vari metodi classici
-    double      lbph_threshold   = 80.0;
-    double      eigen_threshold  = 5000.0;
-    double      fisher_threshold = 500.0;
+    // Thresholds for classical recognizers
+    double lbph_threshold   = 80.0;
+    double eigen_threshold  = 5000.0;
+    double fisher_threshold = 500.0;
 
-    // numero componenti per eigen/fisher
-    int         eigen_components  = 100;
-    int         fisher_components = 10;
+    // PCA components
+    int eigen_components  = 100;
+    int fisher_components = 10;
 
-    // File modello (override opzionale per LBPH/Eigen/Fisher)
+    // Force override (not used in CLI now)
+    bool force_overwrite = false;
+    bool ignore_failure  = false;
+
     std::string model_path;
-
-    // Path assoluto al file HAAR (OBBLIGATORIO se si usa HAAR)
     std::string haar_cascade_path;
 
-    // training method preferito (lbph/eigen/fisher/sface) – opzionale
+    // ------------------------------
+    // Modern DNN pipeline (YUNet + SFace)
+    // ------------------------------
+
+    // Face detector: "haar", "yunet_cpu", "yunet_cuda"
+    std::string detector_profile = "haar";
+
+    // Path ai modelli DNN
+    std::string yunet_model;   // ONNX YUNet
+    std::string sface_model;   // ONNX SFace recognizer
+
+    // SFace cosine distance threshold
+    double sface_threshold = 0.50;
+
+    // Directory embedding (default → basedir/embeddings)
+    std::string embeddings_dir;
+
+    // Preferred training method: lbph/eigen/fisher/sface
     std::string training_method;
 
-    // log file opzionale
+    // Logfile opzionale
     std::string log_file;
-
-    bool        force_overwrite = false;
-    bool        ignore_failure  = false;
-
-    // ======================================================
-    // DNN / YuNet detector
-    // ======================================================
-    // detector_profile:
-    //   "" / "haar" = usa Haar cascade classico
-    //   "yunet"     = usa YuNet DNN (FaceDetectorYN)
-    std::string detector_profile;
-
-    // Modello ONNX YuNet
-    std::string yunet_model_path;
-
-    // Parametri YuNet
-    float yunet_score_thresh = 0.90f;
-    float yunet_nms_thresh   = 0.30f;
-    int   yunet_top_k        = 5000;
-
-    // ======================================================
-    // SFace recognition (DNN)
-    // ======================================================
-    // Modello SFace ONNX (face_recognition_sface_2021dec.onnx)
-    std::string sface_model_path;
-
-    // soglia SFace (cosine distance, 0.3–0.5 tipico)
-    double      sface_threshold = 0.42;
 };
 
 #define FACIALAUTH_CONFIG_DEFAULT "/etc/security/pam_facial.conf"
 
+
 // ==========================================================
-// UTILS
+// Utility functions
 // ==========================================================
 
 std::string trim(const std::string &s);
@@ -93,93 +83,65 @@ bool read_kv_config(const std::string &path,
 
 bool file_exists(const std::string &path);
 
-// Helpers per path
-std::string fa_user_model_path(const FacialAuthConfig &cfg,
-                               const std::string &user);
-
+// Path helpers
 std::string fa_user_image_dir(const FacialAuthConfig &cfg,
                               const std::string &user);
 
-// Riconosce automaticamente il tipo modello dal file XML
-// Ritorna "lbph", "eigen", "fisher", oppure "lbph" come fallback.
+std::string fa_user_model_path(const FacialAuthConfig &cfg,
+                               const std::string &user);
+
+std::string fa_user_embedding_path(const FacialAuthConfig &cfg,
+                                   const std::string &user);
+
+// Detect model type from XML header
 std::string fa_detect_model_type(const std::string &xmlPath);
 
 
 // ==========================================================
-// FaceRecWrapper (LBPH/Eigen/Fisher + detector HAAR/YuNet)
+// FaceRecWrapper (LBPH / Eigen / Fisher)
 // ==========================================================
 
 class FaceRecWrapper {
 public:
     explicit FaceRecWrapper(const std::string &modelType = "lbph");
 
-    // Carica un modello LBPH/Eigen/Fisher
     bool Load(const std::string &file);
-
-    // Salvataggio modello LBPH/Eigen/Fisher
     bool Save(const std::string &file) const;
 
-    // Training LBPH/Eigen/Fisher
     bool Train(const std::vector<cv::Mat> &images,
                const std::vector<int>    &labels);
 
-    // Predict LBPH/Eigen/Fisher
     bool Predict(const cv::Mat &face,
                  int &prediction,
                  double &confidence) const;
 
-                 // Face detection con HAAR
                  bool DetectFace(const cv::Mat &frame,
                                  cv::Rect &faceROI);
 
-                 // Face detection con YuNet
-                 bool DetectFaceYuNet(const cv::Mat &frame,
-                                      cv::Rect &faceROI);
-
-                 // Carica HAAR
                  bool InitCascade(const std::string &cascadePath);
-
-                 // Inizializza YuNet
-                 bool InitYuNet(const FacialAuthConfig &cfg);
-
-                 // Crea riconoscitore corretto (LBPH/EIGEN/FISHER)
                  bool CreateRecognizer();
 
                  const std::string &GetModelType() const { return modelType; }
 
 private:
-    std::string modelType;  // "lbph", "eigen", "fisher"
+    std::string modelType;
     cv::Ptr<cv::face::FaceRecognizer> recognizer;
-    cv::CascadeClassifier             faceCascade;
-    cv::Ptr<cv::FaceDetectorYN>       yunet;
-};
-
-// ==========================================================
-// SFaceWrapper — DNN SFace (feature + cosine distance)
-// ==========================================================
-
-class SFaceWrapper {
-public:
-    bool Init(const std::string &modelPath);
-    bool ExtractFeature(const cv::Mat &face, cv::Mat &feature) const;
-
-private:
-    cv::Ptr<cv::FaceRecognizerSF> sface;
+    cv::CascadeClassifier faceCascade;
 };
 
 
 // ==========================================================
-// API HIGH LEVEL
+// HIGH LEVEL API
 // ==========================================================
 
-// Cattura immagini
+// Capture images using HAAR or YUNet
 bool fa_capture_images(const std::string &user,
                        const FacialAuthConfig &cfg,
                        bool force,
                        std::string &logbuf,
                        const std::string &img_format = "jpg");
 
-// Training
+// Training (classic or SFace embedding)
 bool fa_train_user(const std::string &user,
                    const FacialAuthConfig &cfg,
                    const std::string &method,
@@ -188,7 +150,7 @@ bool fa_train_user(const std::string &user,
                    bool force,
                    std::string &logbuf);
 
-// Test
+// Authentication
 bool fa_test_user(const std::string &user,
                   const FacialAuthConfig &cfg,
                   const std::string &modelPath,
@@ -207,11 +169,11 @@ bool fa_check_root(const char *tool_name);
 
 
 // ==========================================================
-// CLI WRAPPERS
+// CLI ENTRY POINTS
 // ==========================================================
 
 int facial_capture_cli_main (int argc, char *argv[]);
 int facial_training_cli_main(int argc, char *argv[]);
 int facial_test_cli_main    (int argc, char *argv[]);
 
-#endif
+#endif // LIBFACIALAUTH_H
