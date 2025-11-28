@@ -27,11 +27,9 @@ std::string trim(const std::string &s) {
 	if (b == std::string::npos)
 		return "";
 
-	size_t e = s.find_last_not_of(" \t\r\n");   // <-- FIX QUI
-
+	size_t e = s.find_last_not_of(" \t\r\n");
 	return s.substr(b, e - b + 1);
 }
-
 
 bool str_to_bool(const std::string &s, bool defval) {
 	std::string t = trim(s);
@@ -135,28 +133,44 @@ bool read_kv_config(const std::string &path,
 				// Solo il file di configurazione ha il permesso di cambiare basedir
 				cfg.basedir = val;
 			}
-			else if (key == "device") cfg.device = val;
-			else if (key == "width")  cfg.width  = std::max(64, std::stoi(val));
-			else if (key == "height") cfg.height = std::max(64, std::stoi(val));
-			else if (key == "frames") cfg.frames = std::max(1,  std::stoi(val));
-			else if (key == "sleep_ms") cfg.sleep_ms = std::max(0, std::stoi(val));
-			else if (key == "debug") cfg.debug = str_to_bool(val, cfg.debug);
-			else if (key == "nogui") cfg.nogui = str_to_bool(val, cfg.nogui);
-			else if (key == "fallback_device") cfg.fallback_device = str_to_bool(val, cfg.fallback_device);
-			else if (key == "model_path") cfg.model_path = val;
-			else if (key == "haar_cascade_path") cfg.haar_cascade_path = val;
+			else if (key == "device")           cfg.device  = val;
+			else if (key == "width")            cfg.width   = std::max(64, std::stoi(val));
+			else if (key == "height")           cfg.height  = std::max(64, std::stoi(val));
+			else if (key == "frames")           cfg.frames  = std::max(1,  std::stoi(val));
+			else if (key == "sleep_ms")         cfg.sleep_ms = std::max(0, std::stoi(val));
+			else if (key == "debug")            cfg.debug   = str_to_bool(val, cfg.debug);
+			else if (key == "nogui")            cfg.nogui   = str_to_bool(val, cfg.nogui);
+			else if (key == "fallback_device")  cfg.fallback_device = str_to_bool(val, cfg.fallback_device);
+			else if (key == "model_path")       cfg.model_path = val;
+			else if (key == "haar_cascade_path")cfg.haar_cascade_path = val;
 			else if (key == "training_method")  cfg.training_method  = val;
 			else if (key == "log_file")         cfg.log_file        = val;
 			else if (key == "force_overwrite")  cfg.force_overwrite = str_to_bool(val, cfg.force_overwrite);
 			else if (key == "ignore_failure")   cfg.ignore_failure  = str_to_bool(val, cfg.ignore_failure);
 
-			// vecchio parametro "threshold" -> usa LBPH
-			else if (key == "threshold")        cfg.lbph_threshold = std::stod(val);
-			else if (key == "lbph_threshold")   cfg.lbph_threshold = std::stod(val);
-			else if (key == "eigen_threshold")  cfg.eigen_threshold = std::stod(val);
+			// soglie classiche
+			else if (key == "threshold")        cfg.lbph_threshold   = std::stod(val);
+			else if (key == "lbph_threshold")   cfg.lbph_threshold   = std::stod(val);
+			else if (key == "eigen_threshold")  cfg.eigen_threshold  = std::stod(val);
 			else if (key == "fisher_threshold") cfg.fisher_threshold = std::stod(val);
-			else if (key == "eigen_components") cfg.eigen_components = std::stoi(val);
+			else if (key == "eigen_components") cfg.eigen_components  = std::stoi(val);
 			else if (key == "fisher_components")cfg.fisher_components = std::stoi(val);
+
+			// Detector / YuNet
+			else if (key == "detector_profile") {
+				std::string p = val;
+				for (char &c : p)
+					c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+				cfg.detector_profile = p;
+			}
+			else if (key == "yunet_model_path")   cfg.yunet_model_path   = val;
+			else if (key == "yunet_score_thresh") cfg.yunet_score_thresh = std::stof(val);
+			else if (key == "yunet_nms_thresh")   cfg.yunet_nms_thresh   = std::stof(val);
+			else if (key == "yunet_top_k")        cfg.yunet_top_k        = std::stoi(val);
+
+			// SFace
+			else if (key == "sface_model_path")   cfg.sface_model_path   = val;
+			else if (key == "sface_threshold")    cfg.sface_threshold    = std::stod(val);
 		}
 		catch (const std::exception &e) {
 			if (logbuf)
@@ -209,6 +223,7 @@ std::string fa_user_model_path(const FacialAuthConfig &cfg,
 FaceRecWrapper::FaceRecWrapper(const std::string &modelType_)
 : modelType(modelType_)
 {
+	// NB: per LBPH/Eigen/Fisher; per SFace non viene usato
 	CreateRecognizer();
 }
 
@@ -245,10 +260,30 @@ bool FaceRecWrapper::InitCascade(const std::string &cascadePath)
 	}
 }
 
+bool FaceRecWrapper::InitYuNet(const FacialAuthConfig &cfg)
+{
+	if (cfg.yunet_model_path.empty() || !file_exists(cfg.yunet_model_path))
+		return false;
+
+	try {
+		yunet = cv::FaceDetectorYN::create(
+			cfg.yunet_model_path,
+			"",
+			cv::Size(cfg.width, cfg.height),
+										   cfg.yunet_score_thresh,
+									 cfg.yunet_nms_thresh,
+									 cfg.yunet_top_k
+		);
+		return !yunet.empty();
+	} catch (...) {
+		yunet.release();
+		return false;
+	}
+}
+
 bool FaceRecWrapper::Load(const std::string &file)
 {
 	try {
-		// auto-detect type dal file XML
 		std::string detected = fa_detect_model_type(file);
 
 		if (detected != modelType) {
@@ -334,6 +369,83 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 								 return true;
 							 }
 
+							 bool FaceRecWrapper::DetectFaceYuNet(const cv::Mat &frame, cv::Rect &roi)
+							 {
+								 if (frame.empty())
+									 return false;
+								 if (yunet.empty())
+									 return false;
+
+								 cv::Mat faces;
+								 yunet->setInputSize(frame.size());
+								 yunet->detect(frame, faces);
+
+								 if (faces.rows == 0)
+									 return false;
+
+								 // YuNet output: [x,y,w,h,score,...]
+								 float x = faces.at<float>(0, 0);
+								 float y = faces.at<float>(0, 1);
+								 float w = faces.at<float>(0, 2);
+								 float h = faces.at<float>(0, 3);
+
+								 roi = cv::Rect((int)x, (int)y, (int)w, (int)h);
+								 return true;
+							 }
+
+							 // ==========================================================
+							 // SFaceWrapper IMPLEMENTATION
+							 // ==========================================================
+
+							 bool SFaceWrapper::Init(const std::string &modelPath)
+							 {
+								 if (modelPath.empty() || !file_exists(modelPath))
+									 return false;
+
+								 try {
+									 sface = cv::FaceRecognizerSF::create(modelPath, "");
+									 return !sface.empty();
+								 } catch (...) {
+									 sface.release();
+									 return false;
+								 }
+							 }
+
+							 bool SFaceWrapper::ExtractFeature(const cv::Mat &face, cv::Mat &feature) const
+							 {
+								 if (sface.empty())
+									 return false;
+								 if (face.empty())
+									 return false;
+
+								 try {
+									 cv::Mat bgr;
+									 if (face.channels() == 1)
+										 cv::cvtColor(face, bgr, cv::COLOR_GRAY2BGR);
+									 else
+										 bgr = face.clone();
+
+									 // SFace si aspetta un'immagine allineata tipo 112x112
+									 cv::resize(bgr, bgr, cv::Size(112, 112));
+
+									 sface->feature(bgr, feature);
+									 return !feature.empty();
+								 } catch (...) {
+									 return false;
+								 }
+							 }
+
+							 // distanza coseno (1 - cosine_similarity)
+							 static double cosine_distance(const cv::Mat &a, const cv::Mat &b)
+							 {
+								 double dot = a.dot(b);
+								 double na = cv::norm(a);
+								 double nb = cv::norm(b);
+								 if (na == 0.0 || nb == 0.0)
+									 return 1.0;
+								 return 1.0 - (dot / (na * nb));
+							 }
+
 							 // ==========================================================
 							 // Camera helper
 							 // ==========================================================
@@ -379,16 +491,31 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 
 	log_tool(cfg, "INFO", "Camera opened on %s", dev_used.c_str());
 
-	if (cfg.haar_cascade_path.empty() || !file_exists(cfg.haar_cascade_path)) {
-		log_tool(cfg, "ERROR", "haar_cascade_path is missing or invalid in config");
-		return false;
-	}
+	FaceRecWrapper det("lbph");
 
-	FaceRecWrapper rec("lbph");
-	if (!rec.InitCascade(cfg.haar_cascade_path)) {
-		log_tool(cfg, "ERROR", "Cannot load HAAR cascade from %s",
-				 cfg.haar_cascade_path.c_str());
-		return false;
+	// Inizializza detector (HAAR oppure YuNet)
+	if (cfg.detector_profile == "yunet") {
+		if (cfg.yunet_model_path.empty() || !file_exists(cfg.yunet_model_path)) {
+			log_tool(cfg, "ERROR", "yunet_model_path is missing or invalid in config");
+			return false;
+		}
+		if (!det.InitYuNet(cfg)) {
+			log_tool(cfg, "ERROR", "Cannot load YuNet model from %s",
+					 cfg.yunet_model_path.c_str());
+			return false;
+		}
+		log_tool(cfg, "INFO", "Using YuNet detector");
+	} else {
+		if (cfg.haar_cascade_path.empty() || !file_exists(cfg.haar_cascade_path)) {
+			log_tool(cfg, "ERROR", "haar_cascade_path is missing or invalid in config");
+			return false;
+		}
+		if (!det.InitCascade(cfg.haar_cascade_path)) {
+			log_tool(cfg, "ERROR", "Cannot load HAAR cascade from %s",
+					 cfg.haar_cascade_path.c_str());
+			return false;
+		}
+		log_tool(cfg, "INFO", "Using HAAR detector");
 	}
 
 	std::string img_dir = fa_user_image_dir(cfg, user);
@@ -424,7 +551,15 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 										 break;
 
 									 cv::Rect roi;
-									 if (!rec.DetectFace(frame, roi)) {
+									 bool ok = false;
+
+									 if (cfg.detector_profile == "yunet") {
+										 ok = det.DetectFaceYuNet(frame, roi);
+									 } else {
+										 ok = det.DetectFace(frame, roi);
+									 }
+
+									 if (!ok) {
 										 log_tool(cfg, "DEBUG", "No face detected");
 										 continue;
 									 }
@@ -435,9 +570,10 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 									 cv::cvtColor(face, gray, cv::COLOR_BGR2GRAY);
 									 cv::equalizeHist(gray, gray);
 
-									 // normalizziamo anche qui a 200x200 per coerenza
 									 if (gray.cols < 60 || gray.rows < 60)
 										 continue;
+
+									 // normalizziamo anche qui a 200x200 per coerenza
 									 cv::resize(gray, gray, cv::Size(200, 200));
 
 									 char buf[64];
@@ -478,6 +614,76 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 									 return false;
 								 }
 
+								 // ---- CASO SFACE (DNN) ----
+								 if (method == "sface") {
+									 if (cfg.sface_model_path.empty() || !file_exists(cfg.sface_model_path)) {
+										 log_tool(cfg, "ERROR", "sface_model_path is missing or invalid");
+										 return false;
+									 }
+
+									 SFaceWrapper srec;
+									 if (!srec.Init(cfg.sface_model_path)) {
+										 log_tool(cfg, "ERROR", "Cannot init SFace model: %s",
+												  cfg.sface_model_path.c_str());
+										 return false;
+									 }
+
+									 std::vector<cv::Mat> feats;
+
+									 auto has_suffix = [](const std::string &s, const char *suf){
+										 size_t ls = s.size(), lf = strlen(suf);
+										 return (ls >= lf && s.compare(ls - lf, lf, suf) == 0);
+									 };
+
+									 for (auto &entry : fs::directory_iterator(train_dir)) {
+										 if (!entry.is_regular_file()) continue;
+
+										 std::string path = entry.path().string();
+										 std::string lower = path;
+										 for (char &c: lower)
+											 c = (char)tolower((unsigned char)c);
+
+										 if (!(has_suffix(lower, ".jpg") ||
+											 has_suffix(lower, ".jpeg") ||
+											 has_suffix(lower, ".png")))
+											 continue;
+
+										 // Leggiamo a colori (anche se il file è stato salvato in scala di grigi)
+										 cv::Mat img = cv::imread(path, cv::IMREAD_COLOR);
+										 if (img.empty()) continue;
+
+										 cv::Mat feat;
+										 if (!srec.ExtractFeature(img, feat))
+											 continue;
+
+										 feats.push_back(feat.clone());
+									 }
+
+									 if (feats.empty()) {
+										 log_tool(cfg, "ERROR", "No SFace features extracted for training");
+										 return false;
+									 }
+
+									 std::string model_out = outputModel;
+									 if (model_out.empty()) {
+										 model_out = join_path(join_path(cfg.basedir, "models"),
+															   user + ".sface");
+									 }
+
+									 ensure_dirs(fs::path(model_out).parent_path().string());
+									 cv::FileStorage fs(model_out, cv::FileStorage::WRITE);
+									 fs << "features" << "[";
+									 for (const auto &f : feats)
+										 fs << f;
+									 fs << "]";
+									 fs.release();
+
+									 log_tool(cfg, "INFO", "SFace model saved to %s", model_out.c_str());
+									 return true;
+								 }
+
+								 // ---- CASO CLASSICO (LBPH/Eigen/Fisher) ----
+
 								 std::vector<cv::Mat> images;
 								 std::vector<int> labels;
 
@@ -486,15 +692,14 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 									 return (ls >= lf && s.compare(ls - lf, lf, suf) == 0);
 								 };
 
-								 // ---------------------
 								 // CARICAMENTO IMMAGINI
-								 // ---------------------
 								 for (auto &entry : fs::directory_iterator(train_dir)) {
 									 if (!entry.is_regular_file()) continue;
 
 									 std::string path = entry.path().string();
 									 std::string lower = path;
-									 for (char &c: lower) c = (char)tolower((unsigned char)c);
+									 for (char &c: lower)
+										 c = (char)tolower((unsigned char)c);
 
 									 if (!(has_suffix(lower, ".jpg") ||
 										 has_suffix(lower, ".jpeg") ||
@@ -540,9 +745,7 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 									 return false;
 								 }
 
-								 // ---------------------
 								 // CREAZIONE MODELLO
-								 // ---------------------
 								 FaceRecWrapper rec(method);
 
 								 if (!rec.CreateRecognizer()) {
@@ -567,7 +770,6 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 	return true;
 							 }
 
-
 // ==========================================================
 // TEST USER
 // ==========================================================
@@ -588,7 +790,150 @@ bool fa_test_user(const std::string &user,
 		return false;
 	}
 
-	// Determina il tipo modello dal file
+	// Riconoscimento SFace se estensione .sface
+	bool is_sface = false;
+	if (model_file.size() >= 6 &&
+		model_file.substr(model_file.size() - 6) == ".sface")
+	{
+		is_sface = true;
+	}
+
+	// Apriamo la camera
+	cv::VideoCapture cap;
+	std::string dev_used;
+
+	if (!open_camera(cfg, cap, dev_used)) {
+		log_tool(cfg, "ERROR", "Cannot open camera: %s",
+				 cfg.device.c_str());
+		return false;
+	}
+
+	log_tool(cfg, "INFO", "Testing user %s on device %s",
+			 user.c_str(), dev_used.c_str());
+
+	// Inizializziamo sempre un FaceRecWrapper solo come DETECTOR
+	FaceRecWrapper det("lbph");
+
+	if (cfg.detector_profile == "yunet") {
+		if (cfg.yunet_model_path.empty() || !file_exists(cfg.yunet_model_path)) {
+			log_tool(cfg, "ERROR",
+					 "yunet_model_path is missing or invalid in config");
+			return false;
+		}
+		if (!det.InitYuNet(cfg)) {
+			log_tool(cfg, "ERROR", "Cannot load YuNet model from %s",
+					 cfg.yunet_model_path.c_str());
+			return false;
+		}
+		log_tool(cfg, "INFO", "Using YuNet detector");
+	} else {
+		if (cfg.haar_cascade_path.empty() || !file_exists(cfg.haar_cascade_path)) {
+			log_tool(cfg, "ERROR",
+					 "haar_cascade_path is missing or invalid in config");
+			return false;
+		}
+
+		if (!det.InitCascade(cfg.haar_cascade_path)) {
+			log_tool(cfg, "ERROR", "Cannot load HAAR cascade from %s",
+					 cfg.haar_cascade_path.c_str());
+			return false;
+		}
+		log_tool(cfg, "INFO", "Using HAAR detector");
+	}
+
+	// ======================================================
+	// CASO SFACE
+	// ======================================================
+	if (is_sface) {
+		if (cfg.sface_model_path.empty() || !file_exists(cfg.sface_model_path)) {
+			log_tool(cfg, "ERROR", "sface_model_path is missing or invalid");
+			return false;
+		}
+
+		// Carica embeddings utente
+		std::vector<cv::Mat> feats;
+		cv::FileStorage fs(model_file, cv::FileStorage::READ);
+		cv::FileNode fn = fs["features"];
+		if (fn.empty()) {
+			log_tool(cfg, "ERROR", "SFace model has no 'features' node");
+			return false;
+		}
+		for (auto it = fn.begin(); it != fn.end(); ++it) {
+			cv::Mat f;
+			(*it) >> f;
+			if (!f.empty())
+				feats.push_back(f);
+		}
+		fs.release();
+
+		if (feats.empty()) {
+			log_tool(cfg, "ERROR", "SFace model contains no features");
+			return false;
+		}
+
+		SFaceWrapper srec;
+		if (!srec.Init(cfg.sface_model_path)) {
+			log_tool(cfg, "ERROR", "Cannot init SFace model %s",
+					 cfg.sface_model_path.c_str());
+			return false;
+		}
+
+		best_conf  = 1.0;
+		best_label = -1; // non usato per SFace
+
+		cv::Mat frame;
+
+		for (int i = 0; i < cfg.frames; i++) {
+
+			cap >> frame;
+			if (frame.empty()) continue;
+
+			cv::Rect roi;
+			bool ok = false;
+
+			if (cfg.detector_profile == "yunet") {
+				ok = det.DetectFaceYuNet(frame, roi);
+			} else {
+				ok = det.DetectFace(frame, roi);
+			}
+
+			if (!ok)
+				continue;
+
+			cv::Mat face = frame(roi).clone();
+
+			cv::Mat feat_input;
+			if (!srec.ExtractFeature(face, feat_input))
+				continue;
+
+			for (const auto &f : feats) {
+				double dist = cosine_distance(feat_input, f);
+
+				if (dist < best_conf)
+					best_conf = dist;
+
+				if (dist <= cfg.sface_threshold) {
+					log_tool(cfg, "INFO",
+							 "Auth success (model=sface): dist=%.4f <= %.4f",
+							 dist, cfg.sface_threshold);
+					return true;
+				}
+			}
+
+			sleep_ms(cfg.sleep_ms);
+		}
+
+		log_tool(cfg, "WARN",
+				 "Auth failed (model=sface): best_dist=%.4f threshold=%.4f",
+				 best_conf, cfg.sface_threshold);
+
+		return false;
+	}
+
+	// ======================================================
+	// CASO CLASSICO (LBPH/Eigen/Fisher)
+	// ======================================================
+
 	std::string model_type = fa_detect_model_type(model_file);
 
 	FaceRecWrapper rec(model_type);
@@ -604,35 +949,9 @@ bool fa_test_user(const std::string &user,
 		return false;
 	}
 
-	// Carichiamo la HAAR cascade come in capture()
-	if (cfg.haar_cascade_path.empty() || !file_exists(cfg.haar_cascade_path)) {
-		log_tool(cfg, "ERROR",
-				 "haar_cascade_path is missing or invalid in config");
-		return false;
-	}
-
-	if (!rec.InitCascade(cfg.haar_cascade_path)) {
-		log_tool(cfg, "ERROR", "Cannot load HAAR cascade from %s",
-				 cfg.haar_cascade_path.c_str());
-		return false;
-	}
-
-	cv::VideoCapture cap;
-	std::string dev_used;
-
-	if (!open_camera(cfg, cap, dev_used)) {
-		log_tool(cfg, "ERROR", "Cannot open camera: %s",
-				 cfg.device.c_str());
-		return false;
-	}
-
-	log_tool(cfg, "INFO", "Testing user %s on device %s",
-			 user.c_str(), dev_used.c_str());
-
 	best_conf  = 1e9;
 	best_label = -1;
 
-	// Soglia per metodo
 	double threshold = cfg.lbph_threshold;
 	if (model_type == "eigen")  threshold = cfg.eigen_threshold;
 	if (model_type == "fisher") threshold = cfg.fisher_threshold;
@@ -648,7 +967,15 @@ bool fa_test_user(const std::string &user,
 		if (frame.empty()) continue;
 
 		cv::Rect roi;
-		if (!rec.DetectFace(frame, roi))
+		bool ok = false;
+
+		if (cfg.detector_profile == "yunet") {
+			ok = det.DetectFaceYuNet(frame, roi);
+		} else {
+			ok = det.DetectFace(frame, roi);
+		}
+
+		if (!ok)
 			continue;
 
 		cv::Mat face = frame(roi).clone();
@@ -714,16 +1041,22 @@ bool fa_clean_images(const FacialAuthConfig &cfg, const std::string &user)
 
 bool fa_clean_model(const FacialAuthConfig &cfg, const std::string &user)
 {
-	std::string model = fa_user_model_path(cfg, user);
-	if (!fs::exists(model))
-		return true;
+	std::string model_xml   = fa_user_model_path(cfg, user);
+	std::string model_sface = join_path(join_path(cfg.basedir, "models"),
+										user + ".sface");
+
+	bool ok = true;
+	try {
+		if (fs::exists(model_xml))
+			fs::remove(model_xml);
+	} catch (...) { ok = false; }
 
 	try {
-		fs::remove(model);
-		return true;
-	} catch (...) {
-		return false;
-	}
+		if (fs::exists(model_sface))
+			fs::remove(model_sface);
+	} catch (...) { ok = false; }
+
+	return ok;
 }
 
 void fa_list_images(const FacialAuthConfig &cfg, const std::string &user)
@@ -921,9 +1254,9 @@ static void print_facial_training_usage(const char *p)
 	"\n"
 	"Options:\n"
 	"  -u, --user <name>           Specify the username to train the model for\n"
-	"  -m, --method <type>         Training method (lbph, eigen, fisher)\n"
+	"  -m, --method <type>         Training method (lbph, eigen, fisher, sface)\n"
 	"  -i, --input <basedir>       Override basedir for images/models\n"
-	"  -o, --output <file>         Path to save the trained model (XML)\n"
+	"  -o, --output <file>         Path to save the trained model (XML/.sface)\n"
 	"  -f, --force                 Force overwrite (non usato internamente)\n"
 	"  -v, --verbose               Enable detailed output\n"
 	"  -h, --help                  Show this help message\n";
@@ -996,19 +1329,28 @@ int facial_training_cli_main(int argc, char *argv[])
 	for (char &c : method_l)
 		c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
 
-	if (method_l != "lbph" && method_l != "eigen" && method_l != "fisher") {
+	if (method_l != "lbph" &&
+		method_l != "eigen" &&
+		method_l != "fisher" &&
+		method_l != "sface") {
 		std::cerr << "ERROR: Invalid method '" << method << "'\n";
-		return 1;
-	}
+	return 1;
+		}
 
-	if (!fa_check_root("facial_training"))
-		return 1;
+		if (!fa_check_root("facial_training"))
+			return 1;
 
 	if (!input_dir.empty())
 		cfg.basedir = input_dir;
 
-	if (output_file.empty())
-		output_file = fa_user_model_path(cfg, user);
+	if (output_file.empty()) {
+		if (method_l == "sface") {
+			output_file = join_path(join_path(cfg.basedir, "models"),
+									user + ".sface");
+		} else {
+			output_file = fa_user_model_path(cfg, user);
+		}
+	}
 
 	std::string train_dir = fa_user_image_dir(cfg, user);
 
@@ -1033,11 +1375,11 @@ static void print_facial_test_usage(const char *p)
 	"\n"
 	"Options:\n"
 	"  -u, --user <user>        Utente da verificare (obbligatorio)\n"
-	"  -m, --model <path>       File modello XML (opzionale; default: basedir/models/<user>.xml)\n"
+	"  -m, --model <path>       File modello XML/.sface (opzionale; default: basedir/models/<user>.{xml|sface})\n"
 	"  -c, --config <file>      File di configurazione\n"
 	"                           (default: /etc/security/pam_facial.conf)\n"
 	"  -d, --device <device>    Dispositivo webcam (es. /dev/video0)\n"
-	"      --threshold <value>  Soglia di confidenza (override globale)\n"
+	"      --threshold <value>  Soglia di confidenza (override globale LBPH/Eigen/Fisher)\n"
 	"  -v, --verbose            Modalità verbosa\n"
 	"      --nogui              Disabilita la GUI\n"
 	"  -h, --help               Mostra questo messaggio\n";
@@ -1121,8 +1463,19 @@ int facial_test_cli_main(int argc, char *argv[])
 	if (!fa_check_root("facial_test"))
 		return 1;
 
-	if (model_path.empty())
-		model_path = fa_user_model_path(cfg, user);
+	if (model_path.empty()) {
+		// Preferisci XML se esiste, altrimenti .sface
+		std::string xml   = fa_user_model_path(cfg, user);
+		std::string sface = join_path(join_path(cfg.basedir, "models"),
+									  user + ".sface");
+
+		if (file_exists(xml))
+			model_path = xml;
+		else if (file_exists(sface))
+			model_path = sface;
+		else
+			model_path = xml; // per il messaggio d'errore successivo
+	}
 
 	double best_conf = 0.0;
 	int    best_label = -1;
