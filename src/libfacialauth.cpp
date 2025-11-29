@@ -190,32 +190,33 @@ bool fa_load_config(FacialAuthConfig &cfg,
 
     string line;
     int lineno = 0;
+
     while (std::getline(in, line)) {
         lineno++;
         string orig = line;
         line = trim(line);
-        if (line.empty()) continue;
-        if (line[0] == '#') continue;
 
-        string key, val;
+        if (line.empty() || line[0] == '#')
+            continue;
+
         size_t eq = line.find('=');
         if (eq == string::npos) {
-            logbuf += "Invalid line " + std::to_string(lineno) + " in config\n";
+            logbuf += "Invalid line " + std::to_string(lineno) + "\n";
             continue;
         }
 
-        key = trim(line.substr(0, eq));
-        val = trim(line.substr(eq + 1));
+        string key = trim(line.substr(0, eq));
+        string val = trim(line.substr(eq + 1));
 
         try {
             if (key == "basedir")               cfg.basedir            = val;
             else if (key == "device")           cfg.device             = val;
             else if (key == "fallback_device")  cfg.fallback_device    = str_to_bool(val, cfg.fallback_device);
 
-            else if (key == "width")            cfg.width              = std::max(64, std::stoi(val));
-            else if (key == "height")           cfg.height             = std::max(64, std::stoi(val));
-            else if (key == "frames")           cfg.frames             = std::max(1,  std::stoi(val));
-            else if (key == "sleep_ms")         cfg.sleep_ms           = std::max(0,  std::stoi(val));
+            else if (key == "width")            cfg.width              = std::max(64,  std::stoi(val));
+            else if (key == "height")           cfg.height             = std::max(64,  std::stoi(val));
+            else if (key == "frames")           cfg.frames             = std::max(1,   std::stoi(val));
+            else if (key == "sleep_ms")         cfg.sleep_ms           = std::max(0,   std::stoi(val));
 
             else if (key == "debug")            cfg.debug              = str_to_bool(val, cfg.debug);
             else if (key == "nogui")            cfg.nogui              = str_to_bool(val, cfg.nogui);
@@ -223,6 +224,7 @@ bool fa_load_config(FacialAuthConfig &cfg,
             else if (key == "model_path")       cfg.model_path         = val;
             else if (key == "haar_cascade_path" ||
                 key == "haar_model")       cfg.haar_cascade_path  = val;
+
             else if (key == "training_method")  cfg.training_method    = val;
             else if (key == "log_file")         cfg.log_file           = val;
 
@@ -237,21 +239,30 @@ bool fa_load_config(FacialAuthConfig &cfg,
             else if (key == "fisher_components")cfg.fisher_components  = std::stoi(val);
 
             else if (key == "detector_profile") cfg.detector_profile   = val;
+
+            // ------- YuNet + DNN -------
             else if (key == "yunet_backend")    cfg.yunet_backend      = val;
             else if (key == "dnn_backend")      cfg.dnn_backend        = val;
+            else if (key == "dnn_target")       cfg.dnn_target         = val;       // <── AGGIUNTO
             else if (key == "yunet_model")      cfg.yunet_model        = val;
             else if (key == "yunet_model_int8") cfg.yunet_model_int8   = val;
 
+            // ------- SFace -------
             else if (key == "recognizer_profile") cfg.recognizer_profile = val;
             else if (key == "sface_model")        cfg.sface_model        = val;
             else if (key == "sface_model_int8")   cfg.sface_model_int8   = val;
             else if (key == "sface_threshold")    cfg.sface_threshold    = std::stod(val);
+
             else if (key == "save_failed_images") cfg.save_failed_images = str_to_bool(val, cfg.save_failed_images);
+
+            // ------- image format -------
+            else if (key == "image_format")       cfg.image_format       = val;     // <── AGGIUNTO
 
             else {
                 logbuf += "Unknown key at line " + std::to_string(lineno)
                 + ": " + key + "\n";
             }
+
         } catch (const std::exception &e) {
             logbuf += "Error parsing line " + std::to_string(lineno)
             + ": " + orig + " (" + e.what() + ")\n";
