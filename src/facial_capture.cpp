@@ -28,10 +28,10 @@ static void print_help()
     "  -g, --nogui            Disable GUI\n"
     "      --detector NAME    auto|haar|yunet|yunet_int8\n"
     "      --clean            Remove user images\n"
-    "      --reset            Remove user images + model\n"
+    "      --reset            Remove user model + images\n"
+    "      --format EXT       jpg|png\n"
     "  -v, --debug            Enable debug\n"
     "  -c, --config FILE      Config file path\n"
-    "      --format EXT       Image format (jpg, png)\n"
     "\n";
 }
 
@@ -47,7 +47,7 @@ int facial_capture_main(int argc, char *argv[])
 
     std::string user;
     std::string cfg_path;
-    std::string opt_format;     // <- formato richiesto da CLI
+    std::string opt_format;
 
     bool opt_force  = false;
     bool opt_clean  = false;
@@ -63,9 +63,6 @@ int facial_capture_main(int argc, char *argv[])
     int opt_frames = -1;
     int opt_sleep  = -1;
 
-    // -----------------------------
-    // Parse CLI
-    // -----------------------------
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
 
@@ -96,11 +93,11 @@ int facial_capture_main(int argc, char *argv[])
         else if (a == "--reset")
             opt_reset = true;
         else if (a == "--format" && i + 1 < argc)
-            opt_format = argv[++i];     // <-- salva formato
-            else if (a == "--help") {
-                print_help();
-                return 0;
-            }
+            opt_format = argv[++i];
+        else if (a == "--help") {
+            print_help();
+            return 0;
+        }
     }
 
     if (user.empty()) {
@@ -108,9 +105,7 @@ int facial_capture_main(int argc, char *argv[])
         return 1;
     }
 
-    // -----------------------------
-    // Load config
-    // -----------------------------
+    // load config
     FacialAuthConfig cfg;
     std::string logbuf;
 
@@ -121,46 +116,62 @@ int facial_capture_main(int argc, char *argv[])
         std::cerr << logbuf;
     logbuf.clear();
 
-    // -----------------------------
-    // CLI override
-    // -----------------------------
-    if (!opt_device.empty())   cfg.device           = opt_device;
-    if (!opt_detector.empty()) cfg.detector_profile = opt_detector;
-    if (opt_width  > 0)        cfg.width            = opt_width;
-    if (opt_height > 0)        cfg.height           = opt_height;
-    if (opt_frames > 0)        cfg.frames           = opt_frames;
-    if (opt_sleep >= 0)        cfg.sleep_ms         = opt_sleep;
-    if (opt_debug)             cfg.debug            = true;
-    if (opt_nogui)             cfg.nogui            = true;
+    // apply CLI overrides
+    if (!opt_device.empty())     cfg.device           = opt_device;
+    if (!opt_detector.empty())   cfg.detector_profile = opt_detector;
+    if (opt_width  > 0)          cfg.width            = opt_width;
+    if (opt_height > 0)          cfg.height           = opt_height;
+    if (opt_frames > 0)          cfg.frames           = opt_frames;
+    if (opt_sleep >= 0)          cfg.sleep_ms         = opt_sleep;
+    if (opt_debug)               cfg.debug            = true;
+    if (opt_nogui)               cfg.nogui            = true;
+    if (!opt_format.empty())     cfg.image_format     = opt_format;
 
-    // override formato immagine
-    if (!opt_format.empty())
-        cfg.image_format = opt_format;
-
-    // -----------------------------
-    // Clean / Reset
-    // -----------------------------
     std::string user_img_dir = fa_user_image_dir(cfg, user);
     std::string user_model   = fa_user_model_path(cfg, user);
 
+    // --reset: remove images + model
     if (opt_reset) {
-        fs::remove_all(user_img_dir);
-        if (fs::exists(user_model))
+        bool removed = false;
+
+        if (fs::exists(user_img_dir)) {
+            fs::remove_all(user_img_dir);
+            std::cout << "[INFO] Removed all images for user '" << user << "'\n";
+            removed = true;
+        }
+
+        if (fs::exists(user_model)) {
             fs::remove(user_model);
+            std::cout << "[INFO] Removed model for user '" << user << "'\n";
+            removed = true;
+        }
+
+        if (!removed)
+            std::cout << "[INFO] Nothing to reset for user '" << user << "'\n";
+
         return 0;
     }
 
+    // --clean: remove only images
     if (opt_clean) {
-        fs::remove_all(user_img_dir);
+        if (fs::exists(user_img_dir)) {
+            fs::remove_all(user_img_dir);
+            std::cout << "[INFO] Removed all images for user '" << user << "'\n";
+        } else {
+            std::cout << "[INFO] No images to remove for user '" << user << "'\n";
+        }
         return 0;
     }
 
-    if (opt_force)
-        fs::remove_all(user_img_dir);
+    // --force: remove existing images before capture
+    if (opt_force) {
+        if (fs::exists(user_img_dir)) {
+            fs::remove_all(user_img_dir);
+            std::cout << "[INFO] Forced removal of existing images for user '" << user << "'\n";
+        }
+    }
 
-    // -----------------------------
-    // CHIAMATA ALLA LIBRERIA — CORRETTA
-    // -----------------------------
+    // perform capture
     bool ok = fa_capture_images(user, cfg, cfg.image_format, logbuf);
 
     if (!logbuf.empty())
