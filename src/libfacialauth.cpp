@@ -463,58 +463,135 @@ static bool fa_load_sface_embeddings(const std::string &file,
     }
 }
 
-bool load_sface_model_dnn(const FacialAuthConfig &cfg,
-                          const std::string &profile,
-                          cv::dnn::Net &net,
-                          std::string &err)
+static bool load_sface_model_dnn(
+    const FacialAuthConfig &cfg,
+    const std::string &profile,
+    cv::dnn::Net &sface_net,
+    std::string &err)
 {
     std::string model_path;
 
-    if (profile == "sface_int8")
-        model_path = "/usr/share/opencv4/dnn/models/face_recognition_sface_2021dec_int8.onnx";
-    else
-        model_path = "/usr/share/opencv4/dnn/models/face_recognition_sface_2021dec.onnx";
+    // Normalizza profilo
+    std::string prof = profile;
+    for (char &c : prof) c = (char)std::tolower((unsigned char)c);
 
-    if (!fs::exists(model_path)) {
-        err = "SFace model not found: " + model_path;
+    // INT8 → usa model_int8 se disponibile
+    if (prof == "sface_int8") {
+        if (!cfg.sface_model_int8.empty() && file_exists(cfg.sface_model_int8))
+            model_path = cfg.sface_model_int8;
+        else if (!cfg.sface_model.empty() && file_exists(cfg.sface_model))
+            model_path = cfg.sface_model;
+    } else {
+        if (!cfg.sface_model.empty() && file_exists(cfg.sface_model))
+            model_path = cfg.sface_model;
+        else if (!cfg.sface_model_int8.empty() && file_exists(cfg.sface_model_int8))
+            model_path = cfg.sface_model_int8;
+    }
+
+    if (model_path.empty()) {
+        err = "No SFace model found (check sface_model / sface_model_int8)";
         return false;
     }
 
+    // ============================================================
+    // Carica modello
+    // ============================================================
     try {
-        net = cv::dnn::readNet(model_path);
+        sface_net = cv::dnn::readNetFromONNX(model_path);
     } catch (const std::exception &e) {
-        err = std::string("Cannot load SFace ONNX: ") + e.what();
+        err = std::string("Failed to load SFace ONNX model: ") + e.what();
+        return false;
+    } catch (...) {
+        err = "Failed to load SFace ONNX model (unknown error)";
         return false;
     }
 
-    bool cuda_enabled = false;
+    if (sface_net.empty()) {
+        err = "SFace DNN net is empty after creation";
+        return false;
+    }
 
-    // ------------------------------------------------------------
-    //   TENTATIVO BACKEND CUDA
-    // ------------------------------------------------------------
+    // ============================================================
+    // BACKEND → CPU, CUDA, FP16, OpenCL, Auto
+    // ============================================================
+
+    std::string backend = cfg.dnn_backend;
+    std::string target  = cfg.dnn_target;
+
+    for (char &c : backend) c = (char)std::tolower((unsigned char)c);
+    for (char &c : target)  c = (char)std::tolower((unsigned char)c);
+
+    int be = cv::dnn::DNN_BACKEND_OPENCV;
+    int tg = cv::dnn::DNN_TARGET_CPU;
+
+    // --------------------------
+    // BACKEND SELECTION
+    // --------------------------
+
+    if (backend == "auto") {
+        // Preferisci CUDA → CPU
+        if (cv::cuda::getCudaEnabledDeviceCount() > 0) {
+            be = cv::dnn::DNN_BACKEND_CUDA;
+            tg = cv::dnn::DNN_TARGET_CUDA;
+        } else {
+            be = cv::dnn::DNN_BACKEND_OPENCV;
+            tg = cv::dnn::DNN_TARGET_CPU;
+        }
+    }
+    else if (backend == "cuda") {
+        be = cv::dnn::DNN_BACKEND_CUDA;
+        tg = cv::dnn::DNN_TARGET_CUDA;
+    }
+    else if (backend == "cuda_fp16") {
+        be = cv::dnn::DNN_BACKEND_CUDA;
+        tg = cv::dnn::DNN_TARGET_CUDA_FP16;
+    }
+    else if (backend == "opencl") {
+        be = cv::dnn::DNN_BACKEND_DEFAULT;
+        tg = cv::dnn::DNN_TARGET_OPENCL;
+    }
+    else if (backend == "cpu") {
+        be = cv::dnn::DNN_BACKEND_OPENCV;
+        tg = cv::dnn::DNN_TARGET_CPU;
+    }
+    else {
+        err = "Unknown dnn_backend: " + backend;
+        return false;
+    }
+
+    // --------------------------
+    // TARGET OVERRIDE
+    // --------------------------
+    if (target == "cpu")
+        tg = cv::dnn::DNN_TARGET_CPU;
+    else if (target == "cuda")
+        tg = cv::dnn::DNN_TARGET_CUDA;
+    else if (target == "cuda_fp16")
+        tg = cv::dnn::DNN_TARGET_CUDA_FP16;
+    else if (target == "opencl")
+        tg = cv::dnn::DNN_TARGET_OPENCL;
+    else if (target != "auto") {
+        err = "Unknown dnn_target: " + target;
+        return false;
+    }
+
+    // ============================================================
+    // APPLICA BACKEND E TARGET
+    // ============================================================
     try {
-        net.setPreferableBackend(cv::dnn::DNN_BACKEND_CUDA);
-        net.setPreferableTarget(cv::dnn::DNN_TARGET_CUDA);
-
-        cuda_enabled = true;
-
-        if (cfg.debug)
-            std::cerr << "[DEBUG] SFace backend set to CUDA (cuDNN active)\n";
-    }
-    catch (...) {
-        cuda_enabled = false;
+        sface_net.setPreferableBackend(be);
+        sface_net.setPreferableTarget(tg);
+    } catch (...) {
+        err = "Failed to set backend/target for SFace";
+        return false;
     }
 
-    // ------------------------------------------------------------
-    //   FALLBACK CPU
-    // ------------------------------------------------------------
-    if (!cuda_enabled) {
-        net.setPreferableBackend(cv::dnn::DNN_BACKEND_OPENCV);
-        net.setPreferableTarget(cv::dnn::DNN_TARGET_CPU);
-
-        if (cfg.debug)
-            std::cerr << "[DEBUG] SFace backend set to CPU (fallback)\n";
-    }
+    // Log debug
+    log_debug(cfg,
+              "Loaded SFace model '%s' backend=%s target=%s",
+              model_path.c_str(),
+              backend.c_str(),
+              target.c_str());
 
     return true;
 }
