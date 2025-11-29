@@ -94,8 +94,11 @@ int facial_training_main(int argc, char *argv[])
         std::cerr << logbuf;
     logbuf.clear();
 
+    // Override recognizer if passed explicitly
+    cfg.recognizer_profile = method;
+
     // --------------------------------------------------------
-    // Auto defaults from config
+    // Default paths
     // --------------------------------------------------------
     if (input_dir.empty())
         input_dir = fa_user_image_dir(cfg, user);
@@ -103,8 +106,11 @@ int facial_training_main(int argc, char *argv[])
     if (output_model.empty())
         output_model = fa_user_model_path(cfg, user);
 
+    cfg.training_input_dir = input_dir;
+    cfg.training_model_path = output_model;
+
     // --------------------------------------------------------
-    // Check input directory
+    // Validate input directory
     // --------------------------------------------------------
     if (!fs::exists(input_dir) || !fs::is_directory(input_dir)) {
         std::cerr << "[ERROR] Image directory does not exist: " << input_dir << "\n";
@@ -112,7 +118,7 @@ int facial_training_main(int argc, char *argv[])
     }
 
     // --------------------------------------------------------
-    // Handle existing model
+    // Overwrite handling
     // --------------------------------------------------------
     if (fs::exists(output_model) && !opt_force) {
         std::cerr << "[ERROR] Model already exists: " << output_model << "\n";
@@ -124,25 +130,22 @@ int facial_training_main(int argc, char *argv[])
         fs::remove(output_model);
 
     // --------------------------------------------------------
-    // Verbose info
+    // Verbose print
     // --------------------------------------------------------
     if (opt_verbose) {
-        std::cout << "[INFO] Training user model\n"
+        std::cout << "[INFO] Training model\n"
         << "  User:        " << user << "\n"
         << "  Method:      " << method << "\n"
         << "  Input dir:   " << input_dir << "\n"
-        << "  Output file: " << output_model << "\n";
+        << "  Output XML:  " << output_model << "\n";
     }
 
     // --------------------------------------------------------
-    // Execute training
+    // Call to libfacialauth
     // --------------------------------------------------------
     bool ok = fa_train_user(
         user,
-        method,
         cfg,
-        output_model,
-        input_dir,
         logbuf
     );
 
@@ -155,12 +158,11 @@ int facial_training_main(int argc, char *argv[])
     }
 
     if (opt_verbose)
-        std::cout << "[INFO] Training completed successfully.\n";
+        std::cout << "[INFO] Training finished successfully.\n";
 
     return 0;
 }
 
-// Actual main()
 int main(int argc, char *argv[])
 {
     return facial_training_main(argc, argv);
