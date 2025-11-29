@@ -1,5 +1,5 @@
 // =============================================================
-// libfacialauth.cpp - OpenCV 4.12 + YUNet + SFace (DNN ONNX)
+// libfacialauth.cpp - OpenCV 4.12 + YUNet + SFace (ONNX via DNN)
 // =============================================================
 
 #include "../include/libfacialauth.h"
@@ -8,10 +8,10 @@
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/imgcodecs.hpp>
-#include <opencv2/objdetect.hpp>   // Haar + FaceDetectorYN (cv::FaceDetectorYN)
+#include <opencv2/objdetect.hpp>   // Haar + FaceDetectorYN
 #include <opencv2/videoio.hpp>
 #include <opencv2/face.hpp>        // LBPH/Eigen/Fisher
-#include <opencv2/dnn.hpp>         // DNN per SFace ONNX
+#include <opencv2/dnn.hpp>         // SFace ONNX
 
 // ===== standard =====
 #include <iostream>
@@ -25,9 +25,38 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <cstdarg>
-#include <vector>
 
 namespace fs = std::filesystem;
+
+// ==========================================================
+// Config defaults
+// ==========================================================
+
+FacialAuthConfig::FacialAuthConfig()
+: basedir("/etc/pam_facial_auth"),
+device("/dev/video0"),
+fallback_device(true),
+width(1280),
+height(720),
+frames(50),
+sleep_ms(50),
+debug(false),
+nogui(false),
+detector_profile("auto"),
+haar_cascade_path("/usr/share/opencv4/haarcascades/haarcascade_frontalface_default.xml"),
+yunet_model("/usr/share/opencv4/dnn/models/face_detection_yunet_2023mar.onnx"),
+yunet_model_int8("/usr/share/opencv4/dnn/models/face_detection_yunet_2023mar_int8.onnx"),
+sface_model("/usr/share/opencv4/dnn/models/face_recognition_sface_2021dec.onnx"),
+sface_model_int8("/usr/share/opencv4/dnn/models/face_recognition_sface_2021dec_int8.onnx"),
+sface_prefer_fp32(true),
+sface_threshold(0.40),
+lbph_threshold(80.0),
+eigen_threshold(350.0),
+fisher_threshold(150.0),
+recognizer("auto"),
+log_file(""),
+force_overwrite(false)
+{}
 
 // ==========================================================
 // Utility helpers
@@ -75,7 +104,7 @@ static void sleep_ms(int ms) {
 	if (ms > 0) usleep(static_cast<useconds_t>(ms) * 1000);
 }
 
-// suffix helper
+// suffix helper (niente std::string::ends_with per evitare C++20)
 static bool has_suffix(const std::string &s, const std::string &suf) {
 	if (s.size() < suf.size()) return false;
 	return std::equal(suf.rbegin(), suf.rend(), s.rbegin());
@@ -99,7 +128,7 @@ static void log_tool(const FacialAuthConfig &cfg,
 	std::string lev = level ? level : "";
 	std::string msg = "[" + lev + "] " + buf + "\n";
 
-	bool is_err = (lev == "ERROR");
+	bool is_err = (lev == std::string("ERROR"));
 
 	if (cfg.debug || is_err)
 		std::fwrite(msg.c_str(), 1, msg.size(), stderr);
@@ -141,38 +170,71 @@ bool read_kv_config(const std::string &path,
 		}
 
 		try {
-			if (key == "basedir")              cfg.basedir = val;
-			else if (key == "device")          cfg.device = val;
-			else if (key == "width")           cfg.width  = std::stoi(val);
-			else if (key == "height")          cfg.height = std::stoi(val);
-			else if (key == "frames")          cfg.frames = std::stoi(val);
-			else if (key == "sleep_ms")        cfg.sleep_ms = std::stoi(val);
-			else if (key == "debug")           cfg.debug = str_to_bool(val, cfg.debug);
-			else if (key == "nogui")           cfg.nogui = str_to_bool(val, cfg.nogui);
-			else if (key == "fallback_device") cfg.fallback_device = str_to_bool(val, cfg.fallback_device);
+			// Normalizza a lowercase
+			std::string key_l = key;
+			for (char &c : key_l)
+				c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+			if (key_l == "basedir")               cfg.basedir = val;
+			else if (key_l == "models_dir") {
+				fs::path p(val);
+				if (p.has_parent_path())
+					cfg.basedir = p.parent_path().string();
+			}
+			else if (key_l == "work_dir")         cfg.basedir = val;
+
+			else if (key_l == "device")           cfg.device = val;
+			else if (key_l == "width")            cfg.width  = std::stoi(val);
+			else if (key_l == "height")           cfg.height = std::stoi(val);
+			else if (key_l == "capture_count"
+				|| key_l == "frames")           cfg.frames = std::stoi(val);
+			else if (key_l == "capture_delay"
+				|| key_l == "sleep_ms")         cfg.sleep_ms = std::stoi(val);
+			else if (key_l == "debug")            cfg.debug = str_to_bool(val, cfg.debug);
+			else if (key_l == "nogui")            cfg.nogui = str_to_bool(val, cfg.nogui);
+			else if (key_l == "fallback_device")  cfg.fallback_device = str_to_bool(val, cfg.fallback_device);
 
 			// detector
-			else if (key == "detector_profile")   cfg.detector_profile = val;
-			else if (key == "haar_cascade_path")  cfg.haar_cascade_path = val;
-			else if (key == "yunet_model")        cfg.yunet_model = val;
+			else if (key_l == "detector_profile") cfg.detector_profile = val;
+			else if (key_l == "haar_model"
+				|| key_l == "haar_cascade_path")
+				cfg.haar_cascade_path = val;
+			else if (key_l == "yunet_model")      cfg.yunet_model = val;
+			else if (key_l == "yunet_model_int8") cfg.yunet_model_int8 = val;
 
 			// SFace
-			else if (key == "sface_model")        cfg.sface_model = val;
-			else if (key == "sface_threshold")    cfg.sface_threshold = std::stod(val);
+			else if (key_l == "sface_model")      cfg.sface_model = val;
+			else if (key_l == "sface_model_int8") cfg.sface_model_int8 = val;
+			else if (key_l == "sface_threshold")  cfg.sface_threshold = std::stod(val);
+			else if (key_l == "sface_prefer_fp32")cfg.sface_prefer_fp32 = str_to_bool(val, cfg.sface_prefer_fp32);
 
 			// thresholds classici
-			else if (key == "lbph_threshold")     cfg.lbph_threshold = std::stod(val);
-			else if (key == "eigen_threshold")    cfg.eigen_threshold = std::stod(val);
-			else if (key == "fisher_threshold")   cfg.fisher_threshold = std::stod(val);
+			else if (key_l == "lbph_threshold")   cfg.lbph_threshold = std::stod(val);
+			else if (key_l == "eigen_threshold")  cfg.eigen_threshold = std::stod(val);
+			else if (key_l == "fisher_threshold") cfg.fisher_threshold = std::stod(val);
+
+			// recognizer
+			else if (key_l == "recognizer")       cfg.recognizer = val;
 
 			// log
-			else if (key == "log_file")           cfg.log_file = val;
-			else if (key == "force_overwrite")    cfg.force_overwrite = str_to_bool(val, cfg.force_overwrite);
+			else if (key_l == "log_file")         cfg.log_file = val;
+			else if (key_l == "force_overwrite")  cfg.force_overwrite = str_to_bool(val, cfg.force_overwrite);
 
 		} catch (...) {
 			if (logbuf) *logbuf += "Bad config line: " + line + "\n";
 		}
 	}
+
+	// normalizza alcuni campi
+	for (char &c : cfg.detector_profile)
+		c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+	for (char &c : cfg.recognizer)
+		c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+	if (cfg.detector_profile.empty())
+		cfg.detector_profile = "auto";
+	if (cfg.recognizer.empty())
+		cfg.recognizer = "auto";
 
 	return true;
 }
@@ -182,13 +244,13 @@ bool read_kv_config(const std::string &path,
 // ==========================================================
 
 std::string fa_user_image_dir(const FacialAuthConfig &cfg,
-							  const std::string &user)
+							  const std::string      &user)
 {
 	return join_path(join_path(cfg.basedir, "images"), user);
 }
 
 std::string fa_user_model_path(const FacialAuthConfig &cfg,
-							   const std::string &user)
+							   const std::string      &user)
 {
 	return join_path(join_path(cfg.basedir, "models"), user + ".xml");
 }
@@ -196,16 +258,6 @@ std::string fa_user_model_path(const FacialAuthConfig &cfg,
 // ==========================================================
 // Model type detection from XML
 // ==========================================================
-//
-// Strategia:
-//  1) se troviamo "facialauth_model_type" usiamo quello.
-//  2) altrimenti fallback sui tag OpenCV classici:
-//     - opencv_lbphfaces   -> "lbph"
-//     - opencv_eigenfaces  -> "eigen"
-//     - opencv_fisherfaces -> "fisher"
-//     - opencv_sface_model -> "sface"
-//  3) default "lbph"
-//
 
 static std::string fa_detect_model_type(const std::string &xmlPath)
 {
@@ -214,58 +266,24 @@ static std::string fa_detect_model_type(const std::string &xmlPath)
 		return "lbph";
 
 	std::string line;
-	std::string fallback;
-
 	while (std::getline(in, line)) {
-		if (line.find("facialauth_model_type") != std::string::npos) {
-			if (line.find("sface")  != std::string::npos) return "sface";
-			if (line.find("eigen")  != std::string::npos) return "eigen";
-			if (line.find("fisher") != std::string::npos) return "fisher";
-			if (line.find("lbph")   != std::string::npos) return "lbph";
-		}
-
-		if (line.find("opencv_sface_model")   != std::string::npos) fallback = "sface";
-		if (line.find("opencv_eigenfaces")    != std::string::npos) fallback = "eigen";
-		if (line.find("opencv_fisherfaces")   != std::string::npos) fallback = "fisher";
-		if (line.find("opencv_lbphfaces")     != std::string::npos) fallback = "lbph";
+		if (line.find("opencv_lbphfaces")   != std::string::npos) return "lbph";
+		if (line.find("opencv_eigenfaces")  != std::string::npos) return "eigen";
+		if (line.find("opencv_fisherfaces") != std::string::npos) return "fisher";
+		if (line.find("opencv_sface_model") != std::string::npos) return "sface";
 	}
-
-	if (!fallback.empty())
-		return fallback;
-
 	return "lbph";
 }
 
 // ==========================================================
-// FaceRecWrapper IMPLEMENTATION (LBPH/Eigen/Fisher)
+// FaceRecWrapper IMPLEMENTATION
 // ==========================================================
 
-class FaceRecWrapper {
-public:
-	explicit FaceRecWrapper(const std::string &type)
-	: modelType(type)
-	{
-		CreateRecognizer();
-	}
-
-	bool CreateRecognizer();
-	bool InitCascade(const std::string &cascadePath);
-	bool Load(const std::string &file);
-	bool Save(const std::string &file) const;
-	bool Train(const std::vector<cv::Mat> &images,
-			   const std::vector<int>    &labels);
-	bool Predict(const cv::Mat &face,
-				 int &prediction,
-			  double &confidence) const;
-			  bool DetectFace(const cv::Mat &frame,
-							  cv::Rect &faceROI);
-
-			  std::string modelType;
-
-private:
-	cv::Ptr<cv::face::FaceRecognizer> recognizer;
-	cv::CascadeClassifier faceCascade;
-};
+FaceRecWrapper::FaceRecWrapper(const std::string &type)
+: modelType(type)
+{
+	CreateRecognizer();
+}
 
 bool FaceRecWrapper::CreateRecognizer()
 {
@@ -322,16 +340,7 @@ bool FaceRecWrapper::Save(const std::string &file) const
 {
 	try {
 		ensure_dirs(fs::path(file).parent_path().string());
-
-		// scrive il modello OpenCV
 		recognizer->write(file);
-
-		// appende il tipo di modello per facialauth
-		cv::FileStorage fs(file, cv::FileStorage::APPEND);
-		if (fs.isOpened()) {
-			fs << "facialauth_model_type" << modelType;
-		}
-
 		return true;
 	} catch (...) {
 		return false;
@@ -461,14 +470,65 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 							 }
 
 							 // ==========================================================
-							 // CAPTURE IMAGES (HAAR / YUNET_CPU / YUNET_CUDA)
+							 // YUNet helper (sceglie FP32 / INT8 in base a config)
 							 // ==========================================================
 
-							 static bool fa_capture_images(const std::string &user,
-														   const FacialAuthConfig &cfg,
-									  bool force,
-									  std::string &logbuf,
-									  const std::string &img_format)
+							 static bool fa_yunet_available(const FacialAuthConfig &cfg)
+							 {
+								 return (!cfg.yunet_model.empty()     && file_exists(cfg.yunet_model)) ||
+								 (!cfg.yunet_model_int8.empty()&& file_exists(cfg.yunet_model_int8));
+							 }
+
+							 static std::string fa_choose_yunet_model(const FacialAuthConfig &cfg)
+							 {
+								 // Per semplicità: se detector_profile è "yunet_int8" forziamo INT8
+								 std::string det = cfg.detector_profile;
+								 for (char &c : det)
+									 c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+								 if (det == "yunet_int8") {
+									 if (!cfg.yunet_model_int8.empty() && file_exists(cfg.yunet_model_int8))
+										 return cfg.yunet_model_int8;
+								 }
+
+								 // default: preferiamo FP32 se esiste
+								 if (!cfg.yunet_model.empty() && file_exists(cfg.yunet_model))
+									 return cfg.yunet_model;
+								 if (!cfg.yunet_model_int8.empty() && file_exists(cfg.yunet_model_int8))
+									 return cfg.yunet_model_int8;
+
+								 return std::string();
+							 }
+
+							 // ==========================================================
+							 // SFace DNN helper
+							 // ==========================================================
+
+							 static std::string fa_choose_sface_model(const FacialAuthConfig &cfg)
+							 {
+								 if (cfg.sface_prefer_fp32) {
+									 if (!cfg.sface_model.empty() && file_exists(cfg.sface_model))
+										 return cfg.sface_model;
+									 if (!cfg.sface_model_int8.empty() && file_exists(cfg.sface_model_int8))
+										 return cfg.sface_model_int8;
+								 } else {
+									 if (!cfg.sface_model_int8.empty() && file_exists(cfg.sface_model_int8))
+										 return cfg.sface_model_int8;
+									 if (!cfg.sface_model.empty() && file_exists(cfg.sface_model))
+										 return cfg.sface_model;
+								 }
+								 return std::string();
+							 }
+
+							 // ==========================================================
+							 // CAPTURE IMAGES (auto / HAAR / YUNET)
+							 // ==========================================================
+
+							 bool fa_capture_images(const std::string &user,
+													const FacialAuthConfig &cfg,
+							   bool force,
+							   std::string &logbuf,
+							   const std::string &img_format)
 							 {
 								 std::string dev_used;
 								 cv::VideoCapture cap;
@@ -480,41 +540,55 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 
 	log_tool(cfg, "INFO", "Camera opened on %s", dev_used.c_str());
 
-	// detector_profile: "haar", "yunet_cpu", "yunet_cuda"
+	// detector_profile: auto / haar / yunet / yunet_int8
 	std::string det = cfg.detector_profile;
 	for (char &c : det)
 		c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
 
-	bool use_yunet = (det == "yunet_cpu" || det == "yunet_cuda");
+	bool want_yunet = false;
+	bool want_haar  = false;
+
+	if (det == "auto" || det.empty()) {
+		if (fa_yunet_available(cfg))
+			want_yunet = true;
+		else
+			want_haar = true;
+	} else if (det == "yunet" || det == "yunet_int8") {
+		want_yunet = true;
+	} else if (det == "haar") {
+		want_haar = true;
+	}
 
 	// --- HAAR fallback / default ---
 	FaceRecWrapper haar_rec("lbph");
 	bool use_haar = false;
 
-	if (!cfg.haar_cascade_path.empty() &&
-		file_exists(cfg.haar_cascade_path) &&
-		haar_rec.InitCascade(cfg.haar_cascade_path))
-	{
-		use_haar = true;
-	} else if (!use_yunet) {
-		log_tool(cfg, "ERROR",
-				 "HAAR selected but haar_cascade_path is invalid");
-		return false;
+	if (want_haar) {
+		if (!cfg.haar_cascade_path.empty() &&
+			file_exists(cfg.haar_cascade_path) &&
+			haar_rec.InitCascade(cfg.haar_cascade_path))
+		{
+			use_haar = true;
+		} else {
+			log_tool(cfg, "ERROR",
+					 "HAAR selected but haar_cascade_path is invalid");
+			return false;
+		}
 	}
 
 	// --- YUNet (cv::FaceDetectorYN) ---
 	cv::Ptr<cv::FaceDetectorYN> yunet;
 	bool yunet_ok = false;
+	std::string yunet_path;
 
-	if (use_yunet) {
-		if (!cfg.yunet_model.empty() && file_exists(cfg.yunet_model)) {
-			yunet_ok = true; // creato lazy al primo frame
-		} else {
+	if (want_yunet) {
+		yunet_path = fa_choose_yunet_model(cfg);
+		if (!yunet_path.empty())
+			yunet_ok = true;
+		else
 			log_tool(cfg, "WARN",
-					 "detector_profile=%s but yunet_model not found, fallback to HAAR",
+					 "detector_profile=%s but no YUNet model found, fallback to HAAR",
 			cfg.detector_profile.c_str());
-			use_yunet = false;
-		}
 	}
 
 	if (!use_haar && !yunet_ok) {
@@ -555,12 +629,12 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 		cv::Rect face_roi;
 		bool detected = false;
 
-		// --- YUNet ---
+		// --- YUNet (cv::FaceDetectorYN) ---
 		if (yunet_ok) {
 			try {
 				if (yunet.empty()) {
 					yunet = cv::FaceDetectorYN::create(
-						cfg.yunet_model,
+						yunet_path,
 						"",
 						frame.size(),
 													   0.9f,   // score threshold
@@ -605,7 +679,7 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 		cv::Mat face = frame(face_roi).clone();
 		if (face.empty()) continue;
 
-		// grayscale + normalize 200x200
+		// grayscale + normalize 200x200 per i metodi classici
 		cv::Mat gray;
 		cv::cvtColor(face, gray, cv::COLOR_BGR2GRAY);
 		cv::equalizeHist(gray, gray);
@@ -629,47 +703,8 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 							 }
 
 							 // ==========================================================
-							 // SFace embedding (DNN ONNX) — OpenCV 4.12
+							 // SFace embedding (ONNX via DNN) — OpenCV 4.12
 							 // ==========================================================
-							 //
-							 // Implementato con cv::dnn::Net, senza FaceRecognizerSF.
-							 //
-							 // NOTA: usiamo la stessa pipeline in training e in test, quindi
-							 // anche se la pre-elaborazione non è identica al sample ufficiale
-							 // la metrica resta consistente.
-							 //
-
-							 static bool fa_sface_forward(cv::dnn::Net &net,
-														  const cv::Mat &bgr,
-									 cv::Mat &feat)
-							 {
-								 feat.release();
-								 if (bgr.empty()) return false;
-
-								 cv::Mat resized;
-								 cv::resize(bgr, resized, cv::Size(112, 112));
-
-								 // BLOB: 1/255, swapRB=true, crop=false
-								 cv::Mat blob = cv::dnn::blobFromImage(
-									 resized,
-									 1.0 / 255.0,
-									 cv::Size(112, 112),
-																	   cv::Scalar(0.0, 0.0, 0.0),
-																	   true,
-											   false
-								 );
-
-								 net.setInput(blob);
-								 cv::Mat out = net.forward();
-								 if (out.empty())
-									 return false;
-
-								 if (out.dims > 2)
-									 out = out.reshape(1, 1);
-
-								 feat = fa_l2_norm(out);
-								 return !feat.empty();
-							 }
 
 							 static bool fa_compute_sface_embedding(
 								 const FacialAuthConfig &cfg,
@@ -679,8 +714,9 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 							 {
 								 out_emb.release();
 
-								 if (cfg.sface_model.empty() || !file_exists(cfg.sface_model)) {
-									 logbuf += "SFace model missing (sface_model)\n";
+								 std::string modelPath = fa_choose_sface_model(cfg);
+								 if (modelPath.empty()) {
+									 logbuf += "SFace model missing\n";
 									 return false;
 								 }
 
@@ -691,7 +727,7 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 
 								 cv::dnn::Net net;
 								 try {
-									 net = cv::dnn::readNet(cfg.sface_model);
+									 net = cv::dnn::readNet(modelPath);
 								 } catch (const std::exception &e) {
 									 logbuf += std::string("SFace readNet failed: ") + e.what() + "\n";
 									 return false;
@@ -703,12 +739,38 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 								 cv::Mat accum;
 								 int count = 0;
 
-								 for (const auto &img : images_bgr) {
-									 if (img.empty()) continue;
+								 for (const auto &img0 : images_bgr) {
+									 if (img0.empty()) continue;
+
+									 cv::Mat img = img0;
+									 if (img.channels() == 1)
+										 cv::cvtColor(img0, img, cv::COLOR_GRAY2BGR);
+
+									 cv::Mat resized;
+									 cv::resize(img, resized, cv::Size(112, 112));
+
+									 cv::Mat blob = cv::dnn::blobFromImage(
+										 resized,
+										 1.0 / 255.0,
+										 cv::Size(112, 112),
+																		   cv::Scalar(0, 0, 0),
+																		   true,   // swapRB
+												false   // crop
+									 );
 
 									 cv::Mat feat;
-									 if (!fa_sface_forward(net, img, feat))
+									 try {
+										 net.setInput(blob);
+										 feat = net.forward();
+									 } catch (...) {
 										 continue;
+									 }
+
+									 if (feat.empty())
+										 continue;
+
+									 feat = feat.reshape(1, 1);
+									 feat = fa_l2_norm(feat);
 
 									 if (accum.empty())
 										 accum = feat.clone();
@@ -739,11 +801,16 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 								 if (emb.empty()) return false;
 
 								 try {
-									 cv::FileStorage fs(xmlPath, cv::FileStorage::APPEND);
+									 ensure_dirs(fs::path(xmlPath).parent_path().string());
+
+									 // Sovrascriviamo e scriviamo header minimale + embedding
+									 cv::FileStorage fs(xmlPath, cv::FileStorage::WRITE);
 									 if (!fs.isOpened()) return false;
 
+									 fs << "opencv_sface_model" << 1;
 									 cv::Mat normed = fa_l2_norm(emb).reshape(1,1).clone();
 									 fs << "sface_embedding" << normed;
+
 									 return true;
 								 } catch (...) {
 									 return false;
@@ -773,13 +840,13 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 							 // fa_train_user() — training LBPH/Eigen/Fisher + SFace
 							 // ==========================================================
 
-							 static bool fa_train_user(const std::string &user,
-													   const FacialAuthConfig &cfg,
-								  const std::string &method,
-								  const std::string &inputDir,
-								  const std::string &outputModel,
-								  bool /*force*/,
-								  std::string &logbuf)
+							 bool fa_train_user(const std::string &user,
+												const FacialAuthConfig &cfg,
+						   const std::string &method,
+						   const std::string &inputDir,
+						   const std::string &outputModel,
+						   bool /*force*/,
+						   std::string &logbuf)
 							 {
 								 std::string train_dir = inputDir.empty()
 								 ? fa_user_image_dir(cfg, user)
@@ -822,6 +889,12 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 
 									 for (auto &p : img_paths) {
 										 cv::Mat img = cv::imread(p, cv::IMREAD_COLOR);
+										 if (img.empty()) {
+											 // prova come grayscale
+											 img = cv::imread(p, cv::IMREAD_GRAYSCALE);
+											 if (!img.empty())
+												 cv::cvtColor(img, img, cv::COLOR_GRAY2BGR);
+										 }
 										 if (!img.empty()) imgs.push_back(img);
 									 }
 
@@ -841,16 +914,6 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 									 ? fa_user_model_path(cfg, user)
 									 : outputModel;
 
-									 ensure_dirs(fs::path(out_path).parent_path().string());
-
-									 // header XML minimale + tipo modello
-									 {
-										 cv::FileStorage fs(out_path, cv::FileStorage::WRITE);
-										 fs << "opencv_sface_model" << 1;
-										 fs << "facialauth_model_type" << "sface";
-									 }
-
-									 // append embedding
 									 if (!fa_save_embedding_xml(out_path, emb)) {
 										 log_tool(cfg, "ERROR", "Cannot save SFace embedding XML");
 										 return false;
@@ -915,13 +978,13 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 							 // fa_test_user (prima SFace, poi fallback LBPH/Eigen/Fisher)
 							 // ==========================================================
 
-							 static bool fa_test_user(const std::string &user,
-													  const FacialAuthConfig &cfg,
-								 const std::string &modelPath,
-								 double &best_conf,
-								 int &best_label,
-								 std::string &logbuf,
-								 double threshold_override)
+							 bool fa_test_user(const std::string &user,
+											   const FacialAuthConfig &cfg,
+						  const std::string &modelPath,
+						  double &best_conf,
+						  int &best_label,
+						  std::string &logbuf,
+						  double threshold_override)
 							 {
 								 best_conf  = 9999.0;
 								 best_label = -1;
@@ -938,23 +1001,23 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 	// 1) Tentativo SFace: embedding dentro l'XML
 	// ======================================================
 	cv::Mat emb_ref;
-	bool have_sface_emb = fa_load_embedding_xml(xml_model, emb_ref) && !emb_ref.empty();
+	if (fa_load_embedding_xml(xml_model, emb_ref) && !emb_ref.empty()) {
 
-	if (have_sface_emb) {
-		if (cfg.sface_model.empty() || !file_exists(cfg.sface_model)) {
+		std::string modelPathSFace = fa_choose_sface_model(cfg);
+		if (modelPathSFace.empty()) {
 			log_tool(cfg, "ERROR",
 					 "SFace embedding found in XML, but sface_model is missing");
 			// fallback classico dopo
 		} else {
 			cv::dnn::Net net;
 			try {
-				net = cv::dnn::readNet(cfg.sface_model);
+				net = cv::dnn::readNet(modelPathSFace);
 			} catch (const std::exception &e) {
 				log_tool(cfg, "ERROR",
-						 "Cannot create SFace DNN: %s", e.what());
+						 "Cannot create SFace net: %s", e.what());
 			} catch (...) {
 				log_tool(cfg, "ERROR",
-						 "Cannot create SFace DNN (unknown error)");
+						 "Cannot create SFace net (unknown error)");
 			}
 
 			if (!net.empty()) {
@@ -982,27 +1045,41 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 				for (char &c : det)
 					c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
 
-				bool use_yunet = (det == "yunet_cpu" || det == "yunet_cuda");
+				bool want_yunet = false;
+				bool want_haar  = false;
+
+				if (det == "auto" || det.empty()) {
+					if (fa_yunet_available(cfg))
+						want_yunet = true;
+					else
+						want_haar = true;
+				} else if (det == "yunet" || det == "yunet_int8") {
+					want_yunet = true;
+				} else if (det == "haar") {
+					want_haar = true;
+				}
 
 				cv::Ptr<cv::FaceDetectorYN> yunet;
 				bool yunet_ok = false;
+				std::string yunet_path;
 
-				if (use_yunet &&
-					!cfg.yunet_model.empty() &&
-					file_exists(cfg.yunet_model))
-				{
-					yunet_ok = true;
+				if (want_yunet) {
+					yunet_path = fa_choose_yunet_model(cfg);
+					if (!yunet_path.empty())
+						yunet_ok = true;
 				}
 
 				// HAAR fallback
 				FaceRecWrapper haar("lbph");
 				bool use_haar = false;
 
-				if (!cfg.haar_cascade_path.empty() &&
-					file_exists(cfg.haar_cascade_path) &&
-					haar.InitCascade(cfg.haar_cascade_path))
-				{
-					use_haar = true;
+				if (want_haar) {
+					if (!cfg.haar_cascade_path.empty() &&
+						file_exists(cfg.haar_cascade_path) &&
+						haar.InitCascade(cfg.haar_cascade_path))
+					{
+						use_haar = true;
+					}
 				}
 
 				cv::Mat frame;
@@ -1019,7 +1096,7 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 						try {
 							if (yunet.empty()) {
 								yunet = cv::FaceDetectorYN::create(
-									cfg.yunet_model,
+									yunet_path,
 									"",
 									frame.size(),
 																   0.9f,
@@ -1064,10 +1141,30 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 					if (face.empty())
 						continue;
 
+					cv::Mat resized;
+					cv::resize(face, resized, cv::Size(112, 112));
+
+					cv::Mat blob = cv::dnn::blobFromImage(
+						resized,
+						1.0 / 255.0,
+						cv::Size(112, 112),
+														  cv::Scalar(0, 0, 0),
+														  true,
+										   false
+					);
+
 					cv::Mat feat;
-					if (!fa_sface_forward(net, face, feat))
+					try {
+						net.setInput(blob);
+						feat = net.forward();
+					} catch (...) {
+						continue;
+					}
+
+					if (feat.empty())
 						continue;
 
+					feat = feat.reshape(1,1);
 					double dist = fa_cosine(emb_ref, feat);
 					if (dist < best_conf)
 						best_conf = dist;
@@ -1097,11 +1194,6 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 	// ======================================================
 
 	std::string type = fa_detect_model_type(xml_model);
-
-	if (type == "sface" && !have_sface_emb) {
-		// vecchio XML "sface" senza embedding -> fall back LBPH
-		type = "lbph";
-	}
 
 	FaceRecWrapper rec(type);
 	if (!rec.CreateRecognizer()) {
@@ -1271,7 +1363,7 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 								 << "  -s, --sleep MS\n"
 								 << "  -f, --force\n"
 								 << "  -g, --nogui\n"
-								 << "      --detector NAME   Face detector: haar|yunet_cpu|yunet_cuda\n"
+								 << "      --detector NAME   Face detector: auto|haar|yunet|yunet_int8\n"
 								 << "      --clean           Remove all user images\n"
 								 << "      --reset           Remove user model + images\n"
 								 << "  -v, --debug\n"
@@ -1422,7 +1514,7 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 								 "Options:\n"
 								 "  -u, --user <name>        Username\n"
 								 "  -m, --method <type>      lbph | eigen | fisher | sface\n"
-								 "  -i, --input <basedir>    Override basedir per immagini/modelli\n"
+								 "  -i, --input <basedir>    Override basedir for images/models\n"
 								 "  -o, --output <file>      Output model XML path\n"
 								 "  -f, --force              (unused, reserved)\n"
 								 "  -v, --verbose            Verbose output\n"
@@ -1681,7 +1773,7 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 
 								 std::string model = fa_user_model_path(cfg, user);
 
-								 double best_conf  = 0.0;
+								 double best_conf = 0.0;
 								 int    best_label = -1;
 
 								 bool ok = fa_test_user(user, cfg, model,
