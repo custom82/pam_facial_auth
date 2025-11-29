@@ -40,7 +40,6 @@ int facial_test_cli_main(int argc, char *argv[])
 
     std::string opt_device;
     std::string opt_detector;
-
     bool opt_debug = false;
     bool opt_nogui = false;
 
@@ -51,9 +50,9 @@ int facial_test_cli_main(int argc, char *argv[])
 
     double opt_threshold = -1.0;
 
-    // --------------------------------------------------------
-    // PARSE CLI
-    // --------------------------------------------------------
+    // ---------------------------------------------------------
+    // Parse args
+    // ---------------------------------------------------------
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
 
@@ -63,32 +62,37 @@ int facial_test_cli_main(int argc, char *argv[])
             cfg_path = argv[++i];
         else if ((a == "-d" || a == "--device") && i + 1 < argc)
             opt_device = argv[++i];
-        else if (a == "--threshold" && i + 1 < argc)
-            opt_threshold = atof(argv[++i]);
+        else if ((a == "-w" || a == "--width") && i + 1 < argc)
+            opt_width = atoi(argv[++i]);
+        else if ((a == "-h" || a == "--height") && i + 1 < argc)
+            opt_height = atoi(argv[++i]);
+        else if ((a == "-n" || a == "--frames") && i + 1 < argc)
+            opt_frames = atoi(argv[++i]);
+        else if ((a == "-s" || a == "--sleep") && i + 1 < argc)
+            opt_sleep = atoi(argv[++i]);
         else if (a == "--detector" && i + 1 < argc)
             opt_detector = argv[++i];
-        else if (a == "-v" || a == "--verbose")
+        else if ((a == "-t" || a == "--threshold") && i + 1 < argc)
+            opt_threshold = atof(argv[++i]);
+        else if (a == "-v" || a == "--debug")
             opt_debug = true;
         else if (a == "--nogui")
             opt_nogui = true;
-        else if (a == "-h" || a == "--help") {
-            print_help();
+        else if (a == "--help") {
+            std::cout << "Usage: facial_test -u <user> [options]\n";
             return 0;
         }
     }
 
-    // --------------------------------------------------------
-    // REQUIRE ONLY USER
-    // --------------------------------------------------------
     if (user.empty()) {
-        std::cerr << "[ERROR] Parametri obbligatori mancanti (-u).\n";
-        print_help();
+        std::cerr << "[ERROR] Missing required parameter -u\n";
+        std::cout << "Usage: facial_test -u <user> [options]\n";
         return 1;
     }
 
-    // --------------------------------------------------------
-    // LOAD CONFIG
-    // --------------------------------------------------------
+    // ---------------------------------------------------------
+    // Load config
+    // ---------------------------------------------------------
     FacialAuthConfig cfg;
     std::string logbuf;
 
@@ -99,41 +103,54 @@ int facial_test_cli_main(int argc, char *argv[])
         std::cerr << logbuf;
     logbuf.clear();
 
-    // --------------------------------------------------------
-    // APPLY OVERRIDES
-    // --------------------------------------------------------
     if (!opt_device.empty())   cfg.device           = opt_device;
     if (!opt_detector.empty()) cfg.detector_profile = opt_detector;
     if (opt_debug)             cfg.debug            = true;
     if (opt_nogui)             cfg.nogui            = true;
-
     if (opt_width  > 0)        cfg.width            = opt_width;
     if (opt_height > 0)        cfg.height           = opt_height;
     if (opt_frames > 0)        cfg.frames           = opt_frames;
     if (opt_sleep >= 0)        cfg.sleep_ms         = opt_sleep;
 
-    double threshold = (opt_threshold > 0.0) ? opt_threshold : -1.0;
-
-    // --------------------------------------------------------
-    // EXEC TEST
-    // --------------------------------------------------------
-    double best_conf  = 0.0;
+    double best_conf  = -1.0;
     int    best_label = -1;
 
+    // Determina percorso modello automaticamente
+    std::string model_path =
+    cfg.model_path.empty()
+    ? fa_user_model_path(cfg, user)
+    : cfg.model_path;
+
+    // ---------------------------------------------------------
+    // Esegui test
+    // ---------------------------------------------------------
     bool ok = fa_test_user(
         user,
         cfg,
-        cfg.model_path,
+        model_path,
         best_conf,
         best_label,
         logbuf,
-        threshold
+        opt_threshold
     );
 
     if (!logbuf.empty())
         std::cerr << logbuf;
 
-    return ok ? 0 : 1;
+    // ---------------------------------------------------------
+    // RISULTATI FINALI
+    // ---------------------------------------------------------
+    if (ok) {
+        std::cout << "\n✔ AUTH SUCCESS for user '" << user << "'\n";
+        if (cfg.debug)
+            std::cout << "  Best similarity = " << best_conf << "\n";
+        return 0;
+    } else {
+        std::cout << "\n❌ AUTH FAILED for user '" << user << "'\n";
+        if (cfg.debug)
+            std::cout << "  Best similarity = " << best_conf << "\n";
+        return 1;
+    }
 }
 
 int main(int argc, char *argv[])
