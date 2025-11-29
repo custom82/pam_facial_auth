@@ -6,6 +6,9 @@
 #include <cstring>
 #include <cstdlib>
 #include <unistd.h>
+#include <filesystem>
+
+namespace fs = std::filesystem;
 
 // ------------------------------------------------------------
 // HELP
@@ -20,15 +23,15 @@ static void print_help()
     "  -w, --width N          Override width\n"
     "  -h, --height N         Override height\n"
     "  -n, --frames N         Override number of frames\n"
-    "  -s, --sleep MS         Override delay between frames\n"
-    "  -f, --force            Force overwrite of existing images\n"
+    "  -s, --sleep MS         Delay between frames\n"
+    "  -f, --force            Overwrite existing images\n"
     "  -g, --nogui            Disable GUI\n"
     "      --detector NAME    auto|haar|yunet|yunet_int8\n"
     "      --clean            Remove user images\n"
     "      --reset            Remove user images + model\n"
     "  -v, --debug            Enable debug\n"
-    "  -c, --config FILE      Use alternate config file\n"
-    "      --format EXT       (not used by library yet, reserved)\n"
+    "  -c, --config FILE      Config file path\n"
+    "      --format EXT       Reserved (jpg/png)\n"
     "\n";
 }
 
@@ -45,23 +48,22 @@ int facial_capture_main(int argc, char *argv[])
     std::string user;
     std::string cfg_path;
 
-    // flags → verranno applicati DOPO la config
     bool opt_force  = false;
     bool opt_clean  = false;
     bool opt_reset  = false;
+    bool opt_debug  = false;
+    bool opt_nogui  = false;
+
     std::string opt_device;
     std::string opt_detector;
+
     int opt_width  = -1;
     int opt_height = -1;
     int opt_frames = -1;
     int opt_sleep  = -1;
-    bool opt_debug = false;
-    bool opt_nogui = false;
+
     std::string opt_format;
 
-    // ------------------------------------------------------------
-    // Parse CLI (solo store variabili, NO logica)
-    // ------------------------------------------------------------
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
 
@@ -92,11 +94,11 @@ int facial_capture_main(int argc, char *argv[])
         else if (a == "--reset")
             opt_reset = true;
         else if (a == "--format" && i + 1 < argc)
-            opt_format = argv[++i];    // NON usato per ora
-            else if (a == "--help") {
-                print_help();
-                return 0;
-            }
+            opt_format = argv[++i];
+        else if (a == "--help") {
+            print_help();
+            return 0;
+        }
     }
 
     if (user.empty()) {
@@ -104,9 +106,7 @@ int facial_capture_main(int argc, char *argv[])
         return 1;
     }
 
-    // ------------------------------------------------------------
-    // Load config (NESSUNA LOGICA QUI)
-    // ------------------------------------------------------------
+    // load config
     FacialAuthConfig cfg;
     std::string logbuf;
 
@@ -117,45 +117,33 @@ int facial_capture_main(int argc, char *argv[])
         std::cerr << logbuf;
     logbuf.clear();
 
-    // ------------------------------------------------------------
-    // Apply CLI overrides to the config (soft override)
-    // ------------------------------------------------------------
+    // apply CLI overrides
     if (!opt_device.empty())   cfg.device           = opt_device;
+    if (!opt_detector.empty()) cfg.detector_profile = opt_detector;
     if (opt_width  > 0)        cfg.width            = opt_width;
     if (opt_height > 0)        cfg.height           = opt_height;
     if (opt_frames > 0)        cfg.frames           = opt_frames;
-    if (opt_sleep  >= 0)       cfg.sleep_ms         = opt_sleep;
-    if (!opt_detector.empty()) cfg.detector_profile = opt_detector;
+    if (opt_sleep >= 0)        cfg.sleep_ms         = opt_sleep;
+    if (opt_debug)             cfg.debug            = true;
+    if (opt_nogui)             cfg.nogui            = true;
 
-    if (opt_debug) cfg.debug = true;
-    if (opt_nogui) cfg.nogui = true;
-
-    // Opzioni gestione file (non sono parte di lib)
     std::string user_img_dir = fa_user_image_dir(cfg, user);
     std::string user_model   = fa_user_model_path(cfg, user);
 
-    // ------------------------------------------------------------
-    // clean / reset (WRAPPER, non libfacialauth)
-    // ------------------------------------------------------------
     if (opt_reset) {
-        std::filesystem::remove_all(user_img_dir);
-        if (std::filesystem::exists(user_model))
-            std::filesystem::remove(user_model);
+        fs::remove_all(user_img_dir);
+        if (fs::exists(user_model))
+            fs::remove(user_model);
         return 0;
     }
 
     if (opt_clean) {
-        std::filesystem::remove_all(user_img_dir);
+        fs::remove_all(user_img_dir);
         return 0;
     }
 
-    // ------------------------------------------------------------
-    // Cattura immagini (core delegato a libreria)
-    // ------------------------------------------------------------
-    // Forzatura overwrite gestita come wrapper esterno:
-    // se --force → cancella immagini esistenti PRIMA del capture
     if (opt_force)
-        std::filesystem::remove_all(user_img_dir);
+        fs::remove_all(user_img_dir);
 
     bool ok = fa_capture_images(user, cfg, logbuf);
 
@@ -163,4 +151,9 @@ int facial_capture_main(int argc, char *argv[])
         std::cerr << logbuf;
 
     return ok ? 0 : 1;
+}
+
+int main(int argc, char *argv[])
+{
+    return facial_capture_main(argc, argv);
 }
