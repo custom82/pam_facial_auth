@@ -768,6 +768,7 @@ static bool train_classic(const std::string &user,
 
 bool fa_capture_images(const std::string &user,
                        const FacialAuthConfig &cfg,
+                       const std::string &format,
                        std::string &log)
 {
     // -----------------------------------------
@@ -910,8 +911,17 @@ bool fa_capture_images(const std::string &user,
         // Save image
         // -----------------------------------------
         char name[256];
+        std::string ext = format;
+        if (ext.empty())
+            ext = "jpg";
+
+        // rimuovi eventuale punto
+        if (!ext.empty() && ext[0] == '.')
+            ext = ext.substr(1);
+
         snprintf(name, sizeof(name),
-                 "%s/img_%04d.jpg", userdir.c_str(), saved);
+                 "%s/img_%04d.%s",
+                 userdir.c_str(), saved, ext.c_str());
 
         log_debug(cfg, "Saving face crop to: %s", name);
 
