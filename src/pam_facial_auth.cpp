@@ -1,141 +1,128 @@
 #include <security/pam_modules.h>
 #include <security/pam_ext.h>
 #include <security/pam_appl.h>
-#include <syslog.h>
 
-#include <cstring>
 #include <string>
+#include <cstring>
+#include <cctype>
+
+#include <sys/stat.h>   // <-- necessario per stat, S_ISREG
+#include <syslog.h>     // <-- necessario per LOG_ERR, LOG_INFO
 
 #include "../include/libfacialauth.h"
 
+// =====================================================================
+// Helpers locali
+// =====================================================================
+
+// tiny str_to_bool locale
+static bool local_str_to_bool(const char *s, bool defval)
+{
+    if (!s) return defval;
+
+    std::string t = s;
+    for (char &c : t)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+    if (t == "1" || t == "true"  || t == "yes" || t == "on")  return true;
+    if (t == "0" || t == "false" || t == "no"  || t == "off") return false;
+
+    return defval;
+}
+
+// tiny file_exists locale
+static bool local_file_exists(const std::string &path)
+{
+    struct stat st {};
+    return (::stat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode));
+}
+
+// =====================================================================
+// PAM Auth
+// =====================================================================
+
 extern "C" {
 
-    /*
-     * =====================================================================
-     *  PAM facial authentication
-     * =====================================================================
-     *
-     *  - Carica configurazione da pam_facial.conf
-     *  - Determina automaticamente il modello da:
-     *        <basedir>/models/<user>.xml
-     *  - Usa le soglie specifiche nel file di configurazione:
-     *        lbph_threshold=
-     *        eigen_threshold=
-     *        fisher_threshold=
-     *  - Non accetta parametri particolari dal PAM (solo config= debug=)
-     *  - In caso di errore -> ritorna sempre PAM_AUTH_ERR
-     *
-     */
-
-    int pam_sm_authenticate(pam_handle_t *pamh, int flags,
-                            int argc, const char **argv)
+    PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
+                                       int flags,
+                                       int argc,
+                                       const char **argv)
     {
         (void)flags;
 
-        const char *user = nullptr;
-        const char *config_path = FACIALAUTH_CONFIG_DEFAULT;
+        const char *user_c = nullptr;
+        if (pam_get_user(pamh, &user_c, nullptr) != PAM_SUCCESS || !user_c)
+            return PAM_AUTH_ERR;
 
+        std::string user(user_c);
+
+        // -----------------------------------------------------
+        // Config + override
+        // -----------------------------------------------------
         FacialAuthConfig cfg;
+        std::string cfg_path = FACIALAUTH_CONFIG_DEFAULT;
+
+        bool debug_override = false;
+
+        for (int i = 0; i < argc; ++i) {
+            if (!argv[i]) continue;
+
+            if (strncmp(argv[i], "config=", 7) == 0)
+                cfg_path = std::string(argv[i] + 7);
+
+            else if (strncmp(argv[i], "debug=", 6) == 0)
+                debug_override = local_str_to_bool(argv[i] + 6, false);
+        }
+
         std::string logbuf;
+        read_kv_config(cfg_path, cfg, &logbuf);
 
-        bool debug_override_set = false;
-        bool debug_override_val = false;
+        if (debug_override)
+            cfg.debug = true;
 
-        // ---------------------------------------------------------
-        // Parse argomenti da stack PAM
-        // ---------------------------------------------------------
-        for (int i = 0; i < argc; i++) {
-            if (strncmp(argv[i], "config=", 7) == 0) {
-                config_path = argv[i] + 7;
-            } else if (strncmp(argv[i], "debug=", 6) == 0) {
-                debug_override_set = true;
-                debug_override_val = str_to_bool(argv[i] + 6, false);
-            }
-        }
-
-        // ---------------------------------------------------------
-        // Ottieni l’utente
-        // ---------------------------------------------------------
-        if (pam_get_user(pamh, &user, nullptr) != PAM_SUCCESS ||
-            !user || !*user)
-        {
-            pam_syslog(pamh, LOG_ERR, "Unable to determine username");
-            return PAM_AUTH_ERR;
-        }
-
-        // ---------------------------------------------------------
-        // Carica configurazione
-        // ---------------------------------------------------------
-        if (!read_kv_config(config_path, cfg, &logbuf)) {
-            pam_syslog(pamh, LOG_ERR,
-                       "Cannot read config file: %s",
-                       config_path);
-            return PAM_AUTH_ERR;
-        }
-
-        if (debug_override_set)
-            cfg.debug = debug_override_val;
-
-        // ---------------------------------------------------------
-        // Determina il modello utente:
-        //     <basedir>/models/<user>.xml
-        // ---------------------------------------------------------
+        // -----------------------------------------------------
+        // Percorso modello utente
+        // -----------------------------------------------------
         std::string model_path = fa_user_model_path(cfg, user);
-
-        if (!file_exists(model_path)) {
+        if (!local_file_exists(model_path)) {
             pam_syslog(pamh, LOG_ERR,
-                       "Model file not found for user %s: %s",
-                       user, model_path.c_str());
+                       "[pam_facial_auth] model not found: %s",
+                       model_path.c_str());
             return PAM_AUTH_ERR;
         }
 
-        // ---------------------------------------------------------
-        // Esegue la verifica
-        // ---------------------------------------------------------
-        double best_conf = 0.0;
-        int best_label = -1;
+        // -----------------------------------------------------
+        // Test
+        // -----------------------------------------------------
+        double confidence = 9999.0;
 
-        bool ok = fa_test_user(
-            user,
-            cfg,
-            model_path,
-            best_conf,
-            best_label,
-            logbuf,
-            -1.0        // NO override threshold — usa quella del modello
-        );
+        bool ok = fa_test(user, cfg, confidence, logbuf);
 
         if (!ok) {
-            pam_syslog(pamh, LOG_NOTICE,
-                       "FaceAuth FAILED for %s (conf=%.2f)",
-                       user, best_conf);
+            pam_syslog(pamh, LOG_ERR,
+                       "[pam_facial_auth] auth FAILED user=%s conf=%.3f",
+                       user.c_str(), confidence);
             return PAM_AUTH_ERR;
         }
 
         pam_syslog(pamh, LOG_INFO,
-                   "FaceAuth SUCCESS for %s (conf=%.2f)",
-                   user, best_conf);
+                   "[pam_facial_auth] auth OK user=%s conf=%.3f",
+                   user.c_str(), confidence);
 
         return PAM_SUCCESS;
     }
 
-
-    // =====================================================================
-    // NO-OP
-    // =====================================================================
-
-    int pam_sm_setcred(pam_handle_t *pamh, int flags,
-                       int argc, const char **argv)
+    PAM_EXTERN int pam_sm_setcred(pam_handle_t *pamh,
+                                  int flags,
+                                  int argc,
+                                  const char **argv)
     {
-        (void)pamh; (void)flags; (void)argc; (void)argv;
-        return PAM_SUCCESS;
-    }
-
-    int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags,
-                         int argc, const char **argv)
-    {
-        (void)pamh; (void)flags; (void)argc; (void)argv;
+        (void)pamh;
+        (void)flags;
+        (void)argc;
+        (void)argv;
         return PAM_SUCCESS;
     }
 
 } // extern "C"
+
