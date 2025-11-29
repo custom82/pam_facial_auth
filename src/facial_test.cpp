@@ -1,6 +1,5 @@
-#include "../include/libfacialauth.h"
+#include "libfacialauth.h"
 
-int main(int argc, char *argv[])
-{
-	return facial_test_cli_main(argc, argv);
+int main(int argc, char **argv) {
+    return facial_test_cli_main(argc, argv);
 }
