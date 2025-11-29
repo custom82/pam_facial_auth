@@ -985,11 +985,19 @@ bool fa_train_user(const std::string &user,
 
     bool use_sface = (rp == "sface" || rp == "sface_int8");
 
+    // ------------------------------------------------------------
+    // 1) CLASSIC TRAINING (LBPH/EIGEN/FISHER)
+    // ------------------------------------------------------------
     if (!use_sface) {
         return train_classic(user, cfg, img_dir, model_path,
-                             cfg.training_method, cfg.force_overwrite, logbuf);
+                             cfg.training_method,
+                             cfg.force_overwrite,
+                             logbuf);
     }
 
+    // ------------------------------------------------------------
+    // 2) SFACE TRAINING (DNN)
+    // ------------------------------------------------------------
     cv::dnn::Net sface;
     std::string err;
     if (!load_sface_model_dnn(cfg, rp, sface, err)) {
@@ -997,74 +1005,39 @@ bool fa_train_user(const std::string &user,
         return false;
     }
 
-    DetectorWrapper det;
-    if (!init_detector(cfg, det)) {
-        logbuf += "Cannot init detector (YuNet/HAAR) for SFace training\n";
-        return false;
-    }
-
     std::vector<cv::Mat> embeddings;
 
-    for (auto &entry : fs::directory_iterator(img_dir)) {
-        if (!entry.is_regular_file()) continue;
-        std::string path = entry.path().string();
+    // Niente detector qui: le immagini sono già facce croppate!
 
+    for (auto &entry : fs::directory_iterator(img_dir)) {
+        if (!entry.is_regular_file())
+            continue;
+
+        std::string path = entry.path().string();
         std::string lower = path;
-        for (char &c : lower) c = (char)std::tolower((unsigned char)c);
+        for (char &c : lower) c = std::tolower((unsigned char)c);
+
         if (!(str_ends_with(lower, ".jpg")
             || str_ends_with(lower, ".jpeg")
             || str_ends_with(lower, ".png")))
             continue;
 
         cv::Mat img = cv::imread(path);
-        if (img.empty()) continue;
+        if (img.empty())
+            continue;
 
-        cv::Rect roi;
-        bool have_face = false;
-
-        if (det.kind == DetectorWrapper::HAAR) {
-            cv::Mat gray;
-            cv::cvtColor(img, gray, cv::COLOR_BGR2GRAY);
-            cv::equalizeHist(gray, gray);
-            std::vector<cv::Rect> faces;
-            det.haar.detectMultiScale(gray, faces, 1.08, 3, 0, cv::Size(60, 60));
-            if (!faces.empty()) {
-                roi = faces[0];
-                have_face = true;
-            }
-        } else if (det.kind == DetectorWrapper::YUNET) {
-            cv::Mat resized;
-            if (img.size() != cv::Size(cfg.width, cfg.height))
-                cv::resize(img, resized, cv::Size(cfg.width, cfg.height));
-            else
-                resized = img;
-
-            cv::Mat dets;
-            det.yunet->detect(resized, dets);
-            int best_i = -1;
-            float best_score = 0.0f;
-            for (int j = 0; j < dets.rows; ++j) {
-                float score = dets.at<float>(j, 4);
-                if (score > 0.9f && score > best_score) {
-                    best_score = score;
-                    best_i = j;
-                }
-            }
-            if (best_i >= 0) {
-                float x = dets.at<float>(best_i, 0);
-                float y = dets.at<float>(best_i, 1);
-                float w = dets.at<float>(best_i, 2);
-                float h = dets.at<float>(best_i, 3);
-                roi = cv::Rect(cv::Point2f(x, y), cv::Size2f(w, h));
-                have_face = true;
-            }
-        }
-
-        if (!have_face) continue;
+        // Usiamo tutta l’immagine come ROI
+        cv::Rect roi(0, 0, img.cols, img.rows);
 
         cv::Mat feat;
-        if (!sface_feature_from_roi(sface, img, roi, feat))
+        if (!sface_feature_from_roi(sface, img, roi, feat)) {
+            log_debug(cfg, "SFace: feature extraction FAILED for %s",
+                      path.c_str());
             continue;
+        }
+
+        log_debug(cfg, "SFace: extracted embedding from %s",
+                  path.c_str());
 
         embeddings.push_back(feat.clone());
     }
@@ -1081,6 +1054,7 @@ bool fa_train_user(const std::string &user,
 
     log_info(cfg, "Saved SFace model (%zu embeddings) to %s",
              embeddings.size(), model_path.c_str());
+
     return true;
 }
 
