@@ -1535,7 +1535,7 @@ int facial_capture_main (int argc, char *argv[])
     if (force)
         fs::remove_all(user_img_dir);
 
-    bool ok = fa_capture_images(user, cfg, logbuf);
+    bool ok = fa_capture_images(user, cfg, cfg.image_format, logbuf);
 
     if (!logbuf.empty())
         std::cerr << logbuf;
