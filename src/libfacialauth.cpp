@@ -5,6 +5,8 @@
 #include <opencv2/videoio.hpp>
 #include <opencv2/objdetect.hpp>
 #include <opencv2/dnn.hpp>
+#include <opencv2/face.hpp>
+#include <opencv2/core/cuda.hpp>
 
 #include <iostream>
 #include <fstream>

@@ -3,6 +3,9 @@
 
 #include <string>
 
+#define FACIALAUTH_CONFIG_DEFAULT "/etc/security/pam_facial.conf"
+
+
 /**
  * Configurazione principale della libreria FacialAuth.
  * Viene riempita tramite fa_load_config() oppure tramite override
