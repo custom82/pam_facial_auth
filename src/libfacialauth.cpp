@@ -770,125 +770,145 @@ bool fa_capture_images(const std::string &user,
                        const FacialAuthConfig &cfg,
                        std::string &log)
 {
+    // ----------------------------
+    // Open camera
+    // ----------------------------
     cv::VideoCapture cap(cfg.device, cv::CAP_V4L2);
-
     if (!cap.isOpened()) {
-        log << "[ERROR] Cannot open device: " << cfg.device << "\n";
+        log += "[ERROR] Cannot open device: " + cfg.device + "\n";
         return false;
     }
 
     cap.set(cv::CAP_PROP_FRAME_WIDTH,  cfg.width);
     cap.set(cv::CAP_PROP_FRAME_HEIGHT, cfg.height);
 
+    // ----------------------------
+    // Prepare user directory
+    // ----------------------------
     std::string userdir = fa_user_image_dir(cfg, user);
     fs::create_directories(userdir);
 
+    // ----------------------------
+    // Init detector
+    // ----------------------------
     DetectorWrapper det;
-
-    // ----------------------------------------------------
-    // Inizializza detector
-    // ----------------------------------------------------
     if (!init_detector(cfg, det)) {
-        log << "[ERROR] Cannot initialize face detector\n";
+        log += "[ERROR] Cannot initialize face detector\n";
         return false;
     }
 
-    if (cfg.debug)
-        log << "[DEBUG] Starting capture using detector: "
-        << cfg.detector_profile << "\n";
+    if (cfg.debug) {
+        log += "[DEBUG] Detector active: ";
+        if (det.kind == DetectorWrapper::YUNET) log += "YUNet\n";
+        else if (det.kind == DetectorWrapper::HAAR) log += "HAAR\n";
+        else log += "NONE\n";
+    }
 
+    // ----------------------------
+    // Capture loop
+    // ----------------------------
     int saved = 0;
     int frame_id = 0;
 
     while (saved < cfg.frames) {
+
         cv::Mat frame;
         if (!cap.read(frame) || frame.empty()) {
-            log << "[WARN] Failed to capture frame\n";
+            log += "[WARN] Failed to capture frame\n";
             continue;
         }
 
-        // -------------------------------------------
-        // RUN DETECTOR
-        // -------------------------------------------
+        // ---------------------------------------------------------
+        // FACE DETECTION
+        // ---------------------------------------------------------
         std::vector<cv::Rect> faces;
 
-        if (det.type == DET_HAAR && !det.haar.empty()) {
-            det.haar.detectMultiScale(frame, faces, 1.1, 4,
-                                      0 | cv::CASCADE_SCALE_IMAGE,
-                                      cv::Size(80, 80));
-        }
-        else if (det.type == DET_YUNET_FP32 && det.yunet_fp32) {
-            cv::Mat blob = cv::dnn::blobFromImage(frame, 1.0, cv::Size(320, 320));
-            det.yunet_fp32->setInput(blob);
-            cv::Mat out = det.yunet_fp32->forward();
+        // --------- HAAR ---------
+        if (det.kind == DetectorWrapper::HAAR) {
 
-            for (int i = 0; i < out.rows; i++) {
-                float score = out.at<float>(i, 4);
-                if (score > 0.6f) {
-                    int x = out.at<float>(i, 0);
-                    int y = out.at<float>(i, 1);
-                    int w = out.at<float>(i, 2);
-                    int h = out.at<float>(i, 3);
-                    faces.emplace_back(x, y, w, h);
-                }
+            cv::Mat gray;
+            cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
+            cv::equalizeHist(gray, gray);
+
+            det.haar.detectMultiScale(
+                gray,
+                faces,
+                1.08, 3,
+                0,
+                cv::Size(60, 60)
+            );
+        }
+
+        // --------- YUNET ---------
+        else if (det.kind == DetectorWrapper::YUNET) {
+            cv::Mat resized;
+
+            // YuNet richiede stessa size del modello
+            if (frame.size() != cv::Size(cfg.width, cfg.height))
+                cv::resize(frame, resized, cv::Size(cfg.width, cfg.height));
+            else
+                resized = frame;
+
+            cv::Mat dets;
+            det.yunet->detect(resized, dets);
+
+            for (int i = 0; i < dets.rows; i++) {
+                float score = dets.at<float>(i, 4);
+                if (score < 0.6f) continue;
+
+                float x = dets.at<float>(i, 0);
+                float y = dets.at<float>(i, 1);
+                float w = dets.at<float>(i, 2);
+                float h = dets.at<float>(i, 3);
+
+                faces.emplace_back((int)x, (int)y, (int)w, (int)h);
             }
         }
-        else if (det.type == DET_YUNET_INT8 && det.yunet_int8) {
-            cv::Mat blob = cv::dnn::blobFromImage(frame, 1.0, cv::Size(320, 320));
-            det.yunet_int8->setInput(blob);
-            cv::Mat out = det.yunet_int8->forward();
 
-            for (int i = 0; i < out.rows; i++) {
-                float score = out.at<float>(i, 4);
-                if (score > 0.6f) {
-                    int x = out.at<float>(i, 0);
-                    int y = out.at<float>(i, 1);
-                    int w = out.at<float>(i, 2);
-                    int h = out.at<float>(i, 3);
-                    faces.emplace_back(x, y, w, h);
-                }
-            }
+        if (cfg.debug) {
+            log += "[DEBUG] Frame ";
+            log += std::to_string(frame_id);
+            log += ": detected ";
+            log += std::to_string(faces.size());
+            log += " faces\n";
         }
 
-        // -------------------------------------------
-        // DEBUG info sul numero di facce rilevate
-        // -------------------------------------------
-        if (cfg.debug)
-            log << "[DEBUG] Frame " << frame_id
-            << ": detected " << faces.size() << " faces\n";
+        frame_id++;
 
-        // Se non ci sono facce: ignora frame
-        if (faces.empty()) {
-            frame_id++;
-            continue;
-        }
+        // Se nessuna faccia → continua
+        if (faces.empty()) continue;
 
-        // Usa la faccia più grande
+        // Prendi la faccia più grande
         cv::Rect roi = faces[0];
-        for (auto &f : faces)
+        for (const auto &f : faces)
             if (f.area() > roi.area())
                 roi = f;
 
-        // Fallback se ROI esce dai bordi
+        // Clampa ROI ai bordi
         roi = roi & cv::Rect(0, 0, frame.cols, frame.rows);
 
         cv::Mat face = frame(roi).clone();
+        if (face.empty()) continue;
 
-        // -------------------------------------------
+        // ----------------------------
         // Save image
-        // -------------------------------------------
+        // ----------------------------
         char name[256];
         snprintf(name, sizeof(name),
                  "%s/img_%04d.jpg", userdir.c_str(), saved);
 
         if (!cv::imwrite(name, face)) {
-            log << "[ERROR] Cannot save image: " << name << "\n";
+            log += "[ERROR] Cannot save image: ";
+            log += name;
+            log += "\n";
             continue;
         }
 
-        log << "[INFO] Captured " << name << "\n";
+        log += "[INFO] Captured ";
+        log += name;
+        log += "\n";
+
         saved++;
-        frame_id++;
 
         if (cfg.sleep_ms > 0)
             usleep(cfg.sleep_ms * 1000);
@@ -896,6 +916,7 @@ bool fa_capture_images(const std::string &user,
 
     return true;
 }
+
 
 // ==========================================================
 // fa_train_user
