@@ -3,111 +3,87 @@
 #include <iostream>
 #include <string>
 #include <vector>
-#include <cstring>
-#include <cstdlib>
-#include <unistd.h>
 #include <filesystem>
+#include <cstdlib>
 
 namespace fs = std::filesystem;
 
 // ------------------------------------------------------------
 // HELP
 // ------------------------------------------------------------
-
 static void print_help()
 {
     std::cout <<
-    "Usage: facial_training -u USER [options]\n"
-    "  -u, --user USER        Username\n"
-    "  -d, --device DEV       Override device\n"
-    "  -w, --width N          Override width\n"
-    "  -h, --height N         Override height\n"
-    "  -n, --frames N         Override number of frames\n"
-    "  -s, --sleep MS         Delay between frames\n"
-    "  -f, --force            Overwrite existing model\n"
-    "  -g, --nogui            Disable GUI\n"
-    "      --detector NAME    auto|haar|yunet|yunet_int8\n"
-    "      --clean            Remove user images only\n"
-    "      --reset            Remove user model + images\n"
-    "  -v, --debug            Enable debug\n"
-    "  -c, --config FILE      Config file path\n"
-    "\n";
+    "Usage: facial_training -u <user> -m <method> [options]\n"
+    "\nOptions:\n"
+    "  -u, --user <name>           Username (required)\n"
+    "  -m, --method <type>         lbph | eigen | fisher | sface (required)\n"
+    "  -i, --input <dir>           Directory with face images\n"
+    "  -o, --output <file>         Output XML model path\n"
+    "  -f, --force                 Overwrite existing model\n"
+    "  -v, --verbose               Verbose output\n"
+    "  -c, --config <file>         Configuration file\n"
+    "  -h, --help                  Show help\n"
+    "\nIf -i or -o are not specified, defaults from configuration are used.\n";
 }
 
 // ------------------------------------------------------------
-// MAIN WRAPPER
+// MAIN
 // ------------------------------------------------------------
-
-int facial_training_cli_main(int argc, char *argv[])
+int facial_training_main(int argc, char *argv[])
 {
-    const char *prog = "facial_training";
-
-    if (!fa_check_root(prog))
+    if (argc < 2) {
+        print_help();
         return 1;
+    }
 
     std::string user;
+    std::string method;
+    std::string input_dir;
+    std::string output_model;
     std::string cfg_path;
 
-    bool opt_force  = false;
-    bool opt_clean  = false;
-    bool opt_reset  = false;
-    bool opt_debug  = false;
-    bool opt_nogui  = false;
+    bool opt_force   = false;
+    bool opt_verbose = false;
 
-    std::string opt_device;
-    std::string opt_detector;
-
-    int opt_width  = -1;
-    int opt_height = -1;
-    int opt_frames = -1;
-    int opt_sleep  = -1;
-
-    // ------------------------------------------------------------
-    // Parse CLI options (NO logic here)
-    // ------------------------------------------------------------
+    // --------------------------------------------------------
+    // Parse arguments
+    // --------------------------------------------------------
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
 
         if ((a == "-u" || a == "--user") && i + 1 < argc)
             user = argv[++i];
-        else if ((a == "-c" || a == "--config") && i + 1 < argc)
-            cfg_path = argv[++i];
-        else if ((a == "-d" || a == "--device") && i + 1 < argc)
-            opt_device = argv[++i];
-        else if ((a == "-w" || a == "--width") && i + 1 < argc)
-            opt_width = atoi(argv[++i]);
-        else if ((a == "-h" || a == "--height") && i + 1 < argc)
-            opt_height = atoi(argv[++i]);
-        else if ((a == "-n" || a == "--frames") && i + 1 < argc)
-            opt_frames = atoi(argv[++i]);
-        else if ((a == "-s" || a == "--sleep") && i + 1 < argc)
-            opt_sleep = atoi(argv[++i]);
+        else if ((a == "-m" || a == "--method") && i + 1 < argc)
+            method = argv[++i];
+        else if ((a == "-i" || a == "--input") && i + 1 < argc)
+            input_dir = argv[++i];
+        else if ((a == "-o" || a == "--output") && i + 1 < argc)
+            output_model = argv[++i];
         else if (a == "-f" || a == "--force")
             opt_force = true;
-        else if (a == "-g" || a == "--nogui")
-            opt_nogui = true;
-        else if (a == "-v" || a == "--debug")
-            opt_debug = true;
-        else if (a == "--detector" && i + 1 < argc)
-            opt_detector = argv[++i];
-        else if (a == "--clean")
-            opt_clean = true;
-        else if (a == "--reset")
-            opt_reset = true;
-        else if (a == "--help") {
+        else if (a == "-v" || a == "--verbose")
+            opt_verbose = true;
+        else if (a == "-c" || a == "--config")
+            cfg_path = argv[++i];
+        else if (a == "-h" || a == "--help") {
             print_help();
             return 0;
         }
     }
 
-    if (user.empty()) {
+    // --------------------------------------------------------
+    // Validate required arguments
+    // --------------------------------------------------------
+    if (user.empty() || method.empty()) {
+        std::cerr << "[ERROR] -u and -m are required.\n";
         print_help();
         return 1;
     }
 
-    // ------------------------------------------------------------
+    // --------------------------------------------------------
     // Load config
-    // ------------------------------------------------------------
+    // --------------------------------------------------------
     FacialAuthConfig cfg;
     std::string logbuf;
 
@@ -116,52 +92,76 @@ int facial_training_cli_main(int argc, char *argv[])
 
     if (!logbuf.empty())
         std::cerr << logbuf;
-
     logbuf.clear();
 
-    // ------------------------------------------------------------
-    // Apply CLI overrides
-    // ------------------------------------------------------------
-    if (!opt_device.empty())   cfg.device           = opt_device;
-    if (!opt_detector.empty()) cfg.detector_profile = opt_detector;
-    if (opt_width  > 0)        cfg.width            = opt_width;
-    if (opt_height > 0)        cfg.height           = opt_height;
-    if (opt_frames > 0)        cfg.frames           = opt_frames;
-    if (opt_sleep >= 0)        cfg.sleep_ms         = opt_sleep;
-    if (opt_debug)             cfg.debug            = true;
-    if (opt_nogui)             cfg.nogui            = true;
-    if (opt_force)             cfg.force_overwrite  = true;
+    // --------------------------------------------------------
+    // Auto defaults from config
+    // --------------------------------------------------------
+    if (input_dir.empty())
+        input_dir = fa_user_image_dir(cfg, user);
 
-    // ------------------------------------------------------------
-    // Clean / Reset
-    // ------------------------------------------------------------
-    std::string img_dir  = fa_user_image_dir(cfg, user);
-    std::string mdl_path = fa_user_model_path(cfg, user);
+    if (output_model.empty())
+        output_model = fa_user_model_path(cfg, user);
 
-    if (opt_reset) {
-        fs::remove_all(img_dir);
-        if (fs::exists(mdl_path))
-            fs::remove(mdl_path);
-        return 0;
+    // --------------------------------------------------------
+    // Check input directory
+    // --------------------------------------------------------
+    if (!fs::exists(input_dir) || !fs::is_directory(input_dir)) {
+        std::cerr << "[ERROR] Image directory does not exist: " << input_dir << "\n";
+        return 1;
     }
 
-    if (opt_clean) {
-        fs::remove_all(img_dir);
-        return 0;
+    // --------------------------------------------------------
+    // Handle existing model
+    // --------------------------------------------------------
+    if (fs::exists(output_model) && !opt_force) {
+        std::cerr << "[ERROR] Model already exists: " << output_model << "\n";
+        std::cerr << "Use --force to overwrite.\n";
+        return 1;
     }
 
-    // ------------------------------------------------------------
-    // Train (delegated fully to library)
-    // ------------------------------------------------------------
-    bool ok = fa_train_user(user, cfg, logbuf);
+    if (opt_force && fs::exists(output_model))
+        fs::remove(output_model);
+
+    // --------------------------------------------------------
+    // Verbose info
+    // --------------------------------------------------------
+    if (opt_verbose) {
+        std::cout << "[INFO] Training user model\n"
+        << "  User:        " << user << "\n"
+        << "  Method:      " << method << "\n"
+        << "  Input dir:   " << input_dir << "\n"
+        << "  Output file: " << output_model << "\n";
+    }
+
+    // --------------------------------------------------------
+    // Execute training
+    // --------------------------------------------------------
+    bool ok = fa_train_user(
+        user,
+        method,
+        cfg,
+        output_model,
+        input_dir,
+        logbuf
+    );
 
     if (!logbuf.empty())
         std::cerr << logbuf;
 
-    return ok ? 0 : 1;
+    if (!ok) {
+        std::cerr << "[ERROR] Training failed.\n";
+        return 1;
+    }
+
+    if (opt_verbose)
+        std::cout << "[INFO] Training completed successfully.\n";
+
+    return 0;
 }
 
+// Actual main()
 int main(int argc, char *argv[])
 {
-    return facial_training_cli_main(argc, argv);
+    return facial_training_main(argc, argv);
 }
