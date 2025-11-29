@@ -768,59 +768,130 @@ static bool train_classic(const std::string &user,
 
 bool fa_capture_images(const std::string &user,
                        const FacialAuthConfig &cfg,
-                       std::string &logbuf)
+                       std::string &log)
 {
-    cv::VideoCapture cap;
-    std::string dev;
-    if (!open_camera(cfg, cap, dev)) {
-        logbuf += "Cannot open camera for capture\n";
+    cv::VideoCapture cap(cfg.device, cv::CAP_V4L2);
+
+    if (!cap.isOpened()) {
+        log << "[ERROR] Cannot open device: " << cfg.device << "\n";
         return false;
     }
 
-    log_info(cfg, "Capturing images for '%s' on device %s",
-             user.c_str(), dev.c_str());
+    cap.set(cv::CAP_PROP_FRAME_WIDTH,  cfg.width);
+    cap.set(cv::CAP_PROP_FRAME_HEIGHT, cfg.height);
 
-    std::string img_dir = fa_user_image_dir(cfg, user);
-    ensure_dirs(img_dir);
+    std::string userdir = fa_user_image_dir(cfg, user);
+    fs::create_directories(userdir);
 
-    int max_idx = -1;
-    if (fs::exists(img_dir)) {
-        for (auto &entry : fs::directory_iterator(img_dir)) {
-            if (!entry.is_regular_file()) continue;
-            auto name = entry.path().filename().string();
-            if (name.size() < 8) continue;
-            if (name.substr(0, 4) != "img_") continue;
+    DetectorWrapper det;
 
-            int idx = -1;
-            try {
-                idx = std::stoi(name.substr(4, 4));
-            } catch (...) {
-                continue;
-            }
-            if (idx > max_idx) max_idx = idx;
-        }
+    // ----------------------------------------------------
+    // Inizializza detector
+    // ----------------------------------------------------
+    if (!init_detector(cfg, det)) {
+        log << "[ERROR] Cannot initialize face detector\n";
+        return false;
     }
 
-    for (int i = 0; i < cfg.frames; ++i) {
+    if (cfg.debug)
+        log << "[DEBUG] Starting capture using detector: "
+        << cfg.detector_profile << "\n";
+
+    int saved = 0;
+    int frame_id = 0;
+
+    while (saved < cfg.frames) {
         cv::Mat frame;
-        cap >> frame;
-        if (frame.empty()) {
-            logbuf += "Empty frame from camera\n";
+        if (!cap.read(frame) || frame.empty()) {
+            log << "[WARN] Failed to capture frame\n";
             continue;
         }
 
-        int idx = ++max_idx;
-        char buf[32];
-        snprintf(buf, sizeof(buf), "img_%04d.jpg", idx);
+        // -------------------------------------------
+        // RUN DETECTOR
+        // -------------------------------------------
+        std::vector<cv::Rect> faces;
 
-        std::string out_path = (fs::path(img_dir) / buf).string();
-        if (!cv::imwrite(out_path, frame)) {
-            logbuf += "Failed to write image: " + out_path + "\n";
-        } else {
-            log_info(cfg, "Captured %s", out_path.c_str());
+        if (det.type == DET_HAAR && !det.haar.empty()) {
+            det.haar.detectMultiScale(frame, faces, 1.1, 4,
+                                      0 | cv::CASCADE_SCALE_IMAGE,
+                                      cv::Size(80, 80));
+        }
+        else if (det.type == DET_YUNET_FP32 && det.yunet_fp32) {
+            cv::Mat blob = cv::dnn::blobFromImage(frame, 1.0, cv::Size(320, 320));
+            det.yunet_fp32->setInput(blob);
+            cv::Mat out = det.yunet_fp32->forward();
+
+            for (int i = 0; i < out.rows; i++) {
+                float score = out.at<float>(i, 4);
+                if (score > 0.6f) {
+                    int x = out.at<float>(i, 0);
+                    int y = out.at<float>(i, 1);
+                    int w = out.at<float>(i, 2);
+                    int h = out.at<float>(i, 3);
+                    faces.emplace_back(x, y, w, h);
+                }
+            }
+        }
+        else if (det.type == DET_YUNET_INT8 && det.yunet_int8) {
+            cv::Mat blob = cv::dnn::blobFromImage(frame, 1.0, cv::Size(320, 320));
+            det.yunet_int8->setInput(blob);
+            cv::Mat out = det.yunet_int8->forward();
+
+            for (int i = 0; i < out.rows; i++) {
+                float score = out.at<float>(i, 4);
+                if (score > 0.6f) {
+                    int x = out.at<float>(i, 0);
+                    int y = out.at<float>(i, 1);
+                    int w = out.at<float>(i, 2);
+                    int h = out.at<float>(i, 3);
+                    faces.emplace_back(x, y, w, h);
+                }
+            }
         }
 
-        sleep_ms_int(cfg.sleep_ms);
+        // -------------------------------------------
+        // DEBUG info sul numero di facce rilevate
+        // -------------------------------------------
+        if (cfg.debug)
+            log << "[DEBUG] Frame " << frame_id
+            << ": detected " << faces.size() << " faces\n";
+
+        // Se non ci sono facce: ignora frame
+        if (faces.empty()) {
+            frame_id++;
+            continue;
+        }
+
+        // Usa la faccia più grande
+        cv::Rect roi = faces[0];
+        for (auto &f : faces)
+            if (f.area() > roi.area())
+                roi = f;
+
+        // Fallback se ROI esce dai bordi
+        roi = roi & cv::Rect(0, 0, frame.cols, frame.rows);
+
+        cv::Mat face = frame(roi).clone();
+
+        // -------------------------------------------
+        // Save image
+        // -------------------------------------------
+        char name[256];
+        snprintf(name, sizeof(name),
+                 "%s/img_%04d.jpg", userdir.c_str(), saved);
+
+        if (!cv::imwrite(name, face)) {
+            log << "[ERROR] Cannot save image: " << name << "\n";
+            continue;
+        }
+
+        log << "[INFO] Captured " << name << "\n";
+        saved++;
+        frame_id++;
+
+        if (cfg.sleep_ms > 0)
+            usleep(cfg.sleep_ms * 1000);
     }
 
     return true;
