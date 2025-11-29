@@ -104,6 +104,7 @@ std::string fa_user_model_path(const FacialAuthConfig &cfg,
 // Cattura immagini dalla webcam e le salva in fa_user_image_dir(...) per training
 bool fa_capture_images(const std::string &user,
                        const FacialAuthConfig &cfg,
+                       const std::string &format,
                        std::string &logbuf);
 
 // Esegue il training per l'utente usando le immagini in fa_user_image_dir
