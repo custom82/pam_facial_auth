@@ -463,49 +463,59 @@ static bool fa_load_sface_embeddings(const std::string &file,
     }
 }
 
-static bool load_sface_model_dnn(const FacialAuthConfig &cfg,
-                                 const std::string &profile,
-                                 cv::dnn::Net &sface_net,
-                                 std::string &err)
+bool load_sface_model_dnn(const FacialAuthConfig &cfg,
+                          const std::string &profile,
+                          cv::dnn::Net &net,
+                          std::string &err)
 {
     std::string model_path;
 
-    std::string prof = profile;
-    for (char &c : prof) c = (char)std::tolower((unsigned char)c);
+    if (profile == "sface_int8")
+        model_path = "/usr/share/opencv4/dnn/models/face_recognition_sface_2021dec_int8.onnx";
+    else
+        model_path = "/usr/share/opencv4/dnn/models/face_recognition_sface_2021dec.onnx";
 
-    if (prof == "sface_int8") {
-        if (!cfg.sface_model_int8.empty() && file_exists(cfg.sface_model_int8))
-            model_path = cfg.sface_model_int8;
-        else if (!cfg.sface_model.empty() && file_exists(cfg.sface_model))
-            model_path = cfg.sface_model;
-    } else {
-        if (!cfg.sface_model.empty() && file_exists(cfg.sface_model))
-            model_path = cfg.sface_model;
-        else if (!cfg.sface_model_int8.empty() && file_exists(cfg.sface_model_int8))
-            model_path = cfg.sface_model_int8;
-    }
-
-    if (model_path.empty()) {
-        err = "No SFace model found (check sface_model / sface_model_int8)";
+    if (!fs::exists(model_path)) {
+        err = "SFace model not found: " + model_path;
         return false;
     }
 
     try {
-        sface_net = cv::dnn::readNetFromONNX(model_path);
+        net = cv::dnn::readNet(model_path);
     } catch (const std::exception &e) {
-        err = std::string("Failed to load SFace ONNX model: ") + e.what();
-        return false;
-    } catch (...) {
-        err = "Failed to load SFace ONNX model (unknown error)";
+        err = std::string("Cannot load SFace ONNX: ") + e.what();
         return false;
     }
 
-    if (sface_net.empty()) {
-        err = "SFace DNN net is empty after creation";
-        return false;
+    bool cuda_enabled = false;
+
+    // ------------------------------------------------------------
+    //   TENTATIVO BACKEND CUDA
+    // ------------------------------------------------------------
+    try {
+        net.setPreferableBackend(cv::dnn::DNN_BACKEND_CUDA);
+        net.setPreferableTarget(cv::dnn::DNN_TARGET_CUDA);
+
+        cuda_enabled = true;
+
+        if (cfg.debug)
+            std::cerr << "[DEBUG] SFace backend set to CUDA (cuDNN active)\n";
+    }
+    catch (...) {
+        cuda_enabled = false;
     }
 
-    log_debug(cfg, "Loaded SFace model from '%s'", model_path.c_str());
+    // ------------------------------------------------------------
+    //   FALLBACK CPU
+    // ------------------------------------------------------------
+    if (!cuda_enabled) {
+        net.setPreferableBackend(cv::dnn::DNN_BACKEND_OPENCV);
+        net.setPreferableTarget(cv::dnn::DNN_TARGET_CPU);
+
+        if (cfg.debug)
+            std::cerr << "[DEBUG] SFace backend set to CPU (fallback)\n";
+    }
+
     return true;
 }
 
