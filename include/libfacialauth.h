@@ -2,150 +2,135 @@
 #define LIBFACIALAUTH_H
 
 #include <string>
-#include <vector>
 
-#include <opencv2/opencv.hpp>
-#include <opencv2/face.hpp>
-
-// ==========================================================
-// CONFIG
-// ==========================================================
-
+/**
+ * Configurazione principale della libreria FacialAuth.
+ * Viene riempita tramite fa_load_config() oppure tramite override
+ * da parte degli strumenti CLI.
+ */
 struct FacialAuthConfig {
 
-    // Directory base di lavoro
-    //  - default: /etc/pam_facial_auth (o simile)
-    std::string basedir = "/etc/pam_facial_auth";
+    // -----------------------------------------------------------------------------
+    // Directory base per immagini, modelli, log, ecc.
+    // -----------------------------------------------------------------------------
+    std::string basedir;
 
-    // Dispositivo video
-    std::string device = "/dev/video0";
-    bool        fallback_device = true;   // prova /dev/video1 ecc. se fallisce
+    // -----------------------------------------------------------------------------
+    // Parametri della webcam
+    // -----------------------------------------------------------------------------
+    std::string device;
+    bool        fallback_device = true;
 
-    // Risoluzione e cattura
-    int  width    = 640;
-    int  height   = 480;
-    int  frames   = 10;       // numero di frame da catturare/testare
-    int  sleep_ms = 100;      // pausa tra frame (ms)
-    // Formato immagine: "jpg", "png", ecc.
-    std::string image_format = "jpg";
+    int width  = 640;
+    int height = 480;
+    int frames = 15;
+    int sleep_ms = 50;
 
-    // Debug / GUI
+    // -----------------------------------------------------------------------------
+    // Logging ed opzioni runtime
+    // -----------------------------------------------------------------------------
     bool debug = false;
-    bool nogui = true;
+    bool nogui = false;
 
-    // Modello "classico" (LBPH/EIGEN/FISHER)
-    std::string model_path;         // override opzionale del path
-    std::string haar_cascade_path;  // path assoluto cascata HAAR
-    std::string training_method = "lbph"; // lbph/eigen/fisher/auto
-    std::string log_file;           // file di log
+    std::string model_path;
+    std::string haar_cascade_path;
+    std::string training_method = "lbph";
+    std::string log_file;
 
-    bool force_overwrite = false;   // sovrascrive modelli esistenti
-    bool ignore_failure  = false;   // per CLI
+    bool force_overwrite = false;
+    bool ignore_failure  = false;
 
-    // Soglie per i metodi classici
-    double lbph_threshold   = 60.0;
-    double eigen_threshold  = 3500.0;
+    // -----------------------------------------------------------------------------
+    // Parametri modelli classici (LBPH/Eigen/Fisher)
+    // -----------------------------------------------------------------------------
+    double lbph_threshold   = 80.0;
+    double eigen_threshold  = 3000.0;
     double fisher_threshold = 500.0;
 
-    int eigen_components  = 0;      // 0 = auto
-    int fisher_components = 0;
+    int eigen_components  = 80;
+    int fisher_components = 50;
 
-    // -------------------------------
-    // DNN / YuNet
-    // -------------------------------
+    // -----------------------------------------------------------------------------
+    // Detector (HAAR / YuNet)
+    // -----------------------------------------------------------------------------
+    std::string detector_profile;
+    std::string yunet_backend;
+    std::string dnn_backend;   // <-- NUOVO
+    std::string dnn_target;    // <-- NUOVO
 
-    // "haar" | "yunet" | "auto"
-    std::string detector_profile = "auto";
+    std::string yunet_model;
+    std::string yunet_model_int8;
 
-    // backend yuNet/DNN: "cpu" | "cpu_int8"
-    std::string yunet_backend = "cpu";
-
-    // modelli YuNet
-    std::string yunet_model;        // FP32
-    std::string yunet_model_int8;   // INT8 per CPU
-
-    // Alias generico per backend DNN (per compat)
-    std::string dnn_backend;        // se valorizzato, può copiare in yunet_backend
-
-    // -------------------------------
-    // SFace (DNN face recognition)
-    // -------------------------------
-    // Profilo riconoscitore:
-    // "lbph" | "eigen" | "fisher" | "sface" | "sface_int8"
+    // -----------------------------------------------------------------------------
+    // Riconoscimento DNN (SFace)
+    // -----------------------------------------------------------------------------
     std::string recognizer_profile = "sface";
 
-    // Modelli SFace ONNX
-    std::string sface_model;        // modello FP32
-    std::string sface_model_int8;   // modello INT8
-    double      sface_threshold = 0.5; // soglia raccomandata ~0.5
+    std::string sface_model;
+    std::string sface_model_int8;
+    double      sface_threshold = 0.5;
 
-    bool        save_failed_images = false;
+    // -----------------------------------------------------------------------------
+    // Opzioni extra
+    // -----------------------------------------------------------------------------
+    bool save_failed_images = false;
+
+    // -----------------------------------------------------------------------------
+    // Formato immagini salvate da facial_capture
+    // -----------------------------------------------------------------------------
+    std::string image_format = "jpg";
 };
 
-#define FACIALAUTH_CONFIG_DEFAULT "/etc/security/pam_facial.conf"
 
-// ==========================================================
-// UTILS / API di alto livello
-// ==========================================================
+// =================================================================================
+// Funzioni esposte dalla libreria
+// =================================================================================
 
-// Carica la configurazione da file.
-// path vuoto -> FACIALAUTH_CONFIG_DEFAULT.
-// logbuf (opzionale) accumula messaggi di log/errore.
-bool fa_load_config(FacialAuthConfig &cfg,
-                    std::string &logbuf,
-                    const std::string &path = FACIALAUTH_CONFIG_DEFAULT);
+bool fa_load_config(
+    FacialAuthConfig &cfg,
+    std::string &logbuf,
+    const std::string &path
+);
 
-// Directory immagini utente, es: basedir + "/images/<user>"
-std::string fa_user_image_dir(const FacialAuthConfig &cfg,
-                              const std::string &user);
+std::string fa_user_image_dir(
+    const FacialAuthConfig &cfg,
+    const std::string &user
+);
 
-// Path modello utente, es: basedir + "/models/<user>.xml"
-std::string fa_user_model_path(const FacialAuthConfig &cfg,
-                               const std::string &user);
+std::string fa_user_model_path(
+    const FacialAuthConfig &cfg,
+    const std::string &user
+);
 
-// Cattura immagini dalla webcam e le salva in fa_user_image_dir(...) per training
-bool fa_capture_images(const std::string &user,
-                       const FacialAuthConfig &cfg,
-                       const std::string &format,
-                       std::string &logbuf);
+bool fa_capture_images(
+    const std::string &user,
+    const FacialAuthConfig &cfg,
+    const std::string &format,
+    std::string &log
+);
 
-// Esegue il training per l'utente usando le immagini in fa_user_image_dir
-// - per lbph/eigen/fisher -> salva modello classico XML
-// - per sface/sface_int8  -> salva file XML con embeddings DNN
-bool fa_train_user(const std::string &user,
-                   const FacialAuthConfig &cfg,
-                   std::string &logbuf);
+bool fa_train_user(
+    const std::string &user,
+    const FacialAuthConfig &cfg,
+    std::string &logbuf
+);
 
-// Test/Autenticazione utente
-//  - modelPath: se vuoto e uso classico -> fa_user_model_path(cfg,user)
-//  - per SFace: se modelPath vuoto -> usa solo immagini; se è un modello
-//    "sface" compatibile, carica embeddings da XML.
-//  - best_conf: migliore conf/sim trovata
-//  - best_label: label riconosciuta (solo per metodi classici)
-//  - threshold_override: se >0, forza soglia
-bool fa_test_user(const std::string &user,
-                  const FacialAuthConfig &cfg,
-                  const std::string &modelPath,
-                  double &best_conf,
-                  int &best_label,
-                  std::string &logbuf,
-                  double threshold_override = -1.0);
+bool fa_test_user(
+    const std::string &user,
+    const FacialAuthConfig &cfg,
+    const std::string &modelPath,
+    double &best_conf,
+    int &best_label,
+    std::string &logbuf,
+    double threshold_override
+);
 
-// Root check (per CLI)
+// Utility
 bool fa_check_root(const char *tool_name);
 
-
-// ==========================================================
-// CLI WRAPPERS (definiti nel .cpp dei tool)
-// ==========================================================
-
-// facial_capture  -> cattura immagini
-int facial_capture_main (int argc, char *argv[]);
-
-// facial_training -> addestra modello (classico o SFace)
+// Entrypoint CLI
+int facial_capture_main(int argc, char *argv[]);
 int facial_training_cli_main(int argc, char *argv[]);
+int facial_test_cli_main(int argc, char *argv[]);
 
-// facial_test     -> test/auth locale, debug
-int facial_test_cli_main    (int argc, char *argv[]);
-
-#endif
+#endif // LIBFACIALAUTH_H
