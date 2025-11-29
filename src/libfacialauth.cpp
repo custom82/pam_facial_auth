@@ -770,9 +770,6 @@ bool fa_capture_images(const std::string &user,
                        const FacialAuthConfig &cfg,
                        std::string &log)
 {
-    // ----------------------------
-    // Open camera
-    // ----------------------------
     cv::VideoCapture cap(cfg.device, cv::CAP_V4L2);
     if (!cap.isOpened()) {
         log += "[ERROR] Cannot open device: " + cfg.device + "\n";
@@ -782,15 +779,9 @@ bool fa_capture_images(const std::string &user,
     cap.set(cv::CAP_PROP_FRAME_WIDTH,  cfg.width);
     cap.set(cv::CAP_PROP_FRAME_HEIGHT, cfg.height);
 
-    // ----------------------------
-    // Prepare user directory
-    // ----------------------------
     std::string userdir = fa_user_image_dir(cfg, user);
     fs::create_directories(userdir);
 
-    // ----------------------------
-    // Init detector
-    // ----------------------------
     DetectorWrapper det;
     if (!init_detector(cfg, det)) {
         log += "[ERROR] Cannot initialize face detector\n";
@@ -799,14 +790,11 @@ bool fa_capture_images(const std::string &user,
 
     if (cfg.debug) {
         log += "[DEBUG] Detector active: ";
-        if (det.kind == DetectorWrapper::YUNET) log += "YUNet\n";
-        else if (det.kind == DetectorWrapper::HAAR) log += "HAAR\n";
-        else log += "NONE\n";
+        log += (det.kind == DetectorWrapper::YUNET ? "YUNet\n" :
+        det.kind == DetectorWrapper::HAAR  ? "HAAR\n" :
+        "NONE\n");
     }
 
-    // ----------------------------
-    // Capture loop
-    // ----------------------------
     int saved = 0;
     int frame_id = 0;
 
@@ -818,12 +806,11 @@ bool fa_capture_images(const std::string &user,
             continue;
         }
 
-        // ---------------------------------------------------------
-        // FACE DETECTION
-        // ---------------------------------------------------------
         std::vector<cv::Rect> faces;
 
-        // --------- HAAR ---------
+        // ------------------------------
+        // Haar detection
+        // ------------------------------
         if (det.kind == DetectorWrapper::HAAR) {
 
             cv::Mat gray;
@@ -839,11 +826,13 @@ bool fa_capture_images(const std::string &user,
             );
         }
 
-        // --------- YUNET ---------
+        // ------------------------------
+        // YuNet detection
+        // ------------------------------
         else if (det.kind == DetectorWrapper::YUNET) {
+
             cv::Mat resized;
 
-            // YuNet richiede stessa size del modello
             if (frame.size() != cv::Size(cfg.width, cfg.height))
                 cv::resize(frame, resized, cv::Size(cfg.width, cfg.height));
             else
@@ -856,12 +845,12 @@ bool fa_capture_images(const std::string &user,
                 float score = dets.at<float>(i, 4);
                 if (score < 0.6f) continue;
 
-                float x = dets.at<float>(i, 0);
-                float y = dets.at<float>(i, 1);
-                float w = dets.at<float>(i, 2);
-                float h = dets.at<float>(i, 3);
+                int x = dets.at<float>(i, 0);
+                int y = dets.at<float>(i, 1);
+                int w = dets.at<float>(i, 2);
+                int h = dets.at<float>(i, 3);
 
-                faces.emplace_back((int)x, (int)y, (int)w, (int)h);
+                faces.emplace_back(x, y, w, h);
             }
         }
 
@@ -875,24 +864,31 @@ bool fa_capture_images(const std::string &user,
 
         frame_id++;
 
-        // Se nessuna faccia → continua
-        if (faces.empty()) continue;
+        if (faces.empty())
+            continue;
 
-        // Prendi la faccia più grande
+        // Prendi faccia più grande
         cv::Rect roi = faces[0];
         for (const auto &f : faces)
             if (f.area() > roi.area())
                 roi = f;
 
-        // Clampa ROI ai bordi
+        // Clampa ROI
         roi = roi & cv::Rect(0, 0, frame.cols, frame.rows);
 
-        cv::Mat face = frame(roi).clone();
-        if (face.empty()) continue;
+        if (cfg.debug) {
+            log += "[DEBUG] ROI selected: x=" + std::to_string(roi.x)
+            + " y=" + std::to_string(roi.y)
+            + " w=" + std::to_string(roi.width)
+            + " h=" + std::to_string(roi.height) + "\n";
+        }
 
-        // ----------------------------
-        // Save image
-        // ----------------------------
+        cv::Mat face = frame(roi).clone();
+        if (face.empty()) {
+            if (cfg.debug) log += "[DEBUG] Empty ROI after cropping\n";
+            continue;
+        }
+
         char name[256];
         snprintf(name, sizeof(name),
                  "%s/img_%04d.jpg", userdir.c_str(), saved);
@@ -904,9 +900,18 @@ bool fa_capture_images(const std::string &user,
             continue;
         }
 
-        log += "[INFO] Captured ";
+        log += "[INFO] Saved face: ";
         log += name;
-        log += "\n";
+        log += " (";
+        log += std::to_string(face.cols) + "x" + std::to_string(face.rows);
+        log += ")\n";
+
+        if (cfg.debug) {
+            log += "[DEBUG] Image saved from ROI: ";
+            log += std::to_string(roi.x) + "," + std::to_string(roi.y) +
+            "," + std::to_string(roi.width) + "," +
+            std::to_string(roi.height) + "\n";
+        }
 
         saved++;
 
