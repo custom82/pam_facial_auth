@@ -2,7 +2,6 @@
 
 #include <iostream>
 #include <string>
-#include <vector>
 #include <filesystem>
 #include <cstdlib>
 
@@ -18,11 +17,11 @@ static void print_help()
     "\nOptions:\n"
     "  -u, --user <name>           Username (required)\n"
     "  -m, --method <type>         lbph | eigen | fisher | sface (required)\n"
-    "  -i, --input <dir>           Directory with face images\n"
-    "  -o, --output <file>         Output XML model path\n"
-    "  -f, --force                 Overwrite existing model\n"
-    "  -v, --verbose               Verbose output\n"
-    "  -c, --config <file>         Configuration file\n"
+    "  -i, --input <dir>           Directory containing training images\n"
+    "  -o, --output <file>         Where to save the trained model (XML)\n"
+    "  -f, --force                 Overwrite existing model file\n"
+    "  -v, --verbose               Enable verbose output\n"
+    "  -c, --config <file>         Alternative config file\n"
     "  -h, --help                  Show help\n"
     "\nIf -i or -o are not specified, defaults from configuration are used.\n";
 }
@@ -32,11 +31,6 @@ static void print_help()
 // ------------------------------------------------------------
 int facial_training_main(int argc, char *argv[])
 {
-    if (argc < 2) {
-        print_help();
-        return 1;
-    }
-
     std::string user;
     std::string method;
     std::string input_dir;
@@ -46,9 +40,9 @@ int facial_training_main(int argc, char *argv[])
     bool opt_force   = false;
     bool opt_verbose = false;
 
-    // --------------------------------------------------------
+    // -------------------------------------
     // Parse arguments
-    // --------------------------------------------------------
+    // -------------------------------------
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
 
@@ -72,18 +66,18 @@ int facial_training_main(int argc, char *argv[])
         }
     }
 
-    // --------------------------------------------------------
-    // Validate required arguments
-    // --------------------------------------------------------
+    // -------------------------------------
+    // Required arguments
+    // -------------------------------------
     if (user.empty() || method.empty()) {
         std::cerr << "[ERROR] -u and -m are required.\n";
         print_help();
         return 1;
     }
 
-    // --------------------------------------------------------
+    // -------------------------------------
     // Load config
-    // --------------------------------------------------------
+    // -------------------------------------
     FacialAuthConfig cfg;
     std::string logbuf;
 
@@ -94,32 +88,29 @@ int facial_training_main(int argc, char *argv[])
         std::cerr << logbuf;
     logbuf.clear();
 
-    // Override recognizer if passed explicitly
+    // Override recognizer profile
     cfg.recognizer_profile = method;
 
-    // --------------------------------------------------------
-    // Default paths
-    // --------------------------------------------------------
+    // -------------------------------------
+    // Determine paths
+    // -------------------------------------
     if (input_dir.empty())
         input_dir = fa_user_image_dir(cfg, user);
 
     if (output_model.empty())
         output_model = fa_user_model_path(cfg, user);
 
-    cfg.training_input_dir = input_dir;
-    cfg.training_model_path = output_model;
-
-    // --------------------------------------------------------
-    // Validate input directory
-    // --------------------------------------------------------
+    // -------------------------------------
+    // Check input directory
+    // -------------------------------------
     if (!fs::exists(input_dir) || !fs::is_directory(input_dir)) {
-        std::cerr << "[ERROR] Image directory does not exist: " << input_dir << "\n";
+        std::cerr << "[ERROR] Image directory missing: " << input_dir << "\n";
         return 1;
     }
 
-    // --------------------------------------------------------
-    // Overwrite handling
-    // --------------------------------------------------------
+    // -------------------------------------
+    // Model overwrite handling
+    // -------------------------------------
     if (fs::exists(output_model) && !opt_force) {
         std::cerr << "[ERROR] Model already exists: " << output_model << "\n";
         std::cerr << "Use --force to overwrite.\n";
@@ -129,9 +120,9 @@ int facial_training_main(int argc, char *argv[])
     if (opt_force && fs::exists(output_model))
         fs::remove(output_model);
 
-    // --------------------------------------------------------
+    // -------------------------------------
     // Verbose print
-    // --------------------------------------------------------
+    // -------------------------------------
     if (opt_verbose) {
         std::cout << "[INFO] Training model\n"
         << "  User:        " << user << "\n"
@@ -140,14 +131,10 @@ int facial_training_main(int argc, char *argv[])
         << "  Output XML:  " << output_model << "\n";
     }
 
-    // --------------------------------------------------------
-    // Call to libfacialauth
-    // --------------------------------------------------------
-    bool ok = fa_train_user(
-        user,
-        cfg,
-        logbuf
-    );
+    // -------------------------------------
+    // Run training
+    // -------------------------------------
+    bool ok = fa_train_user(user, cfg, logbuf);
 
     if (!logbuf.empty())
         std::cerr << logbuf;
@@ -158,7 +145,7 @@ int facial_training_main(int argc, char *argv[])
     }
 
     if (opt_verbose)
-        std::cout << "[INFO] Training finished successfully.\n";
+        std::cout << "[INFO] Training completed successfully.\n";
 
     return 0;
 }
