@@ -775,7 +775,8 @@ bool fa_capture_images(const std::string &user,
     // -----------------------------------------
     cv::VideoCapture cap(cfg.device, cv::CAP_V4L2);
     if (!cap.isOpened()) {
-        log += "[ERROR] Cannot open device: " + cfg.device + "\n";
+        log_error(cfg, "Cannot open device: %s", cfg.device.c_str());
+        log += "Cannot open device: " + cfg.device + "\n";
         return false;
     }
 
@@ -786,22 +787,29 @@ bool fa_capture_images(const std::string &user,
     // Prepare directory
     // -----------------------------------------
     std::string userdir = fa_user_image_dir(cfg, user);
-    fs::create_directories(userdir);
+    try {
+        fs::create_directories(userdir);
+    } catch (...) {
+        log_error(cfg, "Cannot create directory: %s", userdir.c_str());
+        log += "Cannot create directory: " + userdir + "\n";
+        return false;
+    }
 
     // -----------------------------------------
     // Init face detector
     // -----------------------------------------
     DetectorWrapper det;
     if (!init_detector(cfg, det)) {
-        log += "[ERROR] Cannot initialize face detector\n";
+        log_error(cfg, "Cannot initialize face detector");
+        log += "Cannot initialize face detector\n";
         return false;
     }
 
     if (cfg.debug) {
-        log += "[DEBUG] Detector active: ";
-        if (det.kind == DetectorWrapper::YUNET) log += "YUNet\n";
-        else if (det.kind == DetectorWrapper::HAAR) log += "Haar Cascade\n";
-        else log += "NONE\n";
+        const char *dk = (det.kind == DetectorWrapper::YUNET)
+        ? "YUNet"
+        : (det.kind == DetectorWrapper::HAAR ? "Haar" : "NONE");
+        log_debug(cfg, "Detector active: %s", dk);
     }
 
     // -----------------------------------------
@@ -814,7 +822,7 @@ bool fa_capture_images(const std::string &user,
     {
         cv::Mat frame;
         if (!cap.read(frame) || frame.empty()) {
-            log += "[WARN] Failed to capture frame\n";
+            log_error(cfg, "Failed to capture frame");
             continue;
         }
 
@@ -842,8 +850,8 @@ bool fa_capture_images(const std::string &user,
         // ------ YUNET ------
         else if (det.kind == DetectorWrapper::YUNET)
         {
-            cv::Mat resized;
             cv::Size inSize = det.yunet->getInputSize();
+            cv::Mat resized;
 
             if (frame.size() != inSize)
                 cv::resize(frame, resized, inSize);
@@ -870,51 +878,33 @@ bool fa_capture_images(const std::string &user,
             }
         }
 
-        // Debug numero facce
-        if (cfg.debug) {
-            log += "[DEBUG] Frame ";
-            log += std::to_string(frame_id);
-            log += ": detected ";
-            log += std::to_string(faces.size());
-            log += " faces\n";
-        }
-
+        log_debug(cfg, "Frame %d: detected %zu faces",
+                  frame_id, faces.size());
         frame_id++;
 
         if (faces.empty())
             continue;
 
         // -----------------------------------------
-        // Take the biggest face
+        // Take biggest face
         // -----------------------------------------
         cv::Rect roi = faces[0];
         for (const auto &f : faces)
             if (f.area() > roi.area())
                 roi = f;
 
-        // Clamp ROI to avoid overflow
         roi = roi & cv::Rect(0, 0, frame.cols, frame.rows);
 
-        // Debug ROI
-        if (cfg.debug) {
-            log += "[DEBUG] ROI: x=" + std::to_string(roi.x)
-            + " y=" + std::to_string(roi.y)
-            + " w=" + std::to_string(roi.width)
-            + " h=" + std::to_string(roi.height) + "\n";
-        }
+        log_debug(cfg, "ROI: x=%d y=%d w=%d h=%d",
+                  roi.x, roi.y, roi.width, roi.height);
 
         cv::Mat face = frame(roi).clone();
         if (face.empty()) {
-            if (cfg.debug)
-                log += "[DEBUG] Empty ROI after crop\n";
+            log_debug(cfg, "Empty ROI after crop");
             continue;
         }
 
-        if (cfg.debug) {
-            log += "[DEBUG] Crop size: " +
-            std::to_string(face.cols) + "x" +
-            std::to_string(face.rows) + "\n";
-        }
+        log_debug(cfg, "Crop size: %dx%d", face.cols, face.rows);
 
         // -----------------------------------------
         // Save image
@@ -923,22 +913,14 @@ bool fa_capture_images(const std::string &user,
         snprintf(name, sizeof(name),
                  "%s/img_%04d.jpg", userdir.c_str(), saved);
 
-        if (cfg.debug) {
-            log += "[DEBUG] Saving face crop to: ";
-            log += name;
-            log += "\n";
-        }
+        log_debug(cfg, "Saving face crop to: %s", name);
 
         if (!cv::imwrite(name, face)) {
-            log += "[ERROR] Cannot save image: ";
-            log += name;
-            log += "\n";
+            log_error(cfg, "Cannot save image: %s", name);
             continue;
         }
 
-        log += "[INFO] Saved face: ";
-        log += name;
-        log += "\n";
+        log_info(cfg, "Saved face: %s", name);
 
         saved++;
 
@@ -946,7 +928,13 @@ bool fa_capture_images(const std::string &user,
             usleep(cfg.sleep_ms * 1000);
     }
 
-    return true;
+    log_info(cfg, "Capture finished, saved %d images for user '%s'",
+             saved, user.c_str());
+
+    // se vuoi, puoi anche riempire un riassunto in log:
+    // log += "Capture finished, saved " + std::to_string(saved) + " images\n";
+
+    return (saved > 0);
 }
 
 
