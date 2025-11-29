@@ -9,11 +9,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # ============================================================
 
 find_package(OpenCV REQUIRED)
-find_package(PAM REQUIRED)
 
 include_directories(
     ${OpenCV_INCLUDE_DIRS}
-    ${PAM_INCLUDE_DIRS}
     ${CMAKE_SOURCE_DIR}/include
 )
 
@@ -37,7 +35,6 @@ add_library(pam_facial_auth MODULE
     src/pam_facial_auth.cpp
 )
 
-# PAM modules MUST NOT have the "lib" prefix
 set_target_properties(pam_facial_auth PROPERTIES
     PREFIX ""
     OUTPUT_NAME "pam_facial_auth"
@@ -46,53 +43,22 @@ set_target_properties(pam_facial_auth PROPERTIES
 target_link_libraries(pam_facial_auth
     facialauth
     ${OpenCV_LIBS}
-    ${PAM_LIBRARIES}
+    pam
 )
 
 # ============================================================
-# EXECUTABLES (CLI)
+# EXECUTABLES (CLI tools)
 # ============================================================
 
-add_executable(facial_capture
-    src/facial_capture.cpp
-)
+add_executable(facial_capture src/facial_capture.cpp)
+target_link_libraries(facial_capture facialauth ${OpenCV_LIBS})
 
-target_link_libraries(facial_capture
-    facialauth
-    ${OpenCV_LIBS}
-)
+add_executable(facial_training src/facial_training.cpp)
+target_link_libraries(facial_training facialauth ${OpenCV_LIBS})
 
-add_executable(facial_training
-    src/facial_training.cpp
-)
-
-target_link_libraries(facial_training
-    facialauth
-    ${OpenCV_LIBS}
-)
-
-add_executable(facial_test
-    src/facial_test.cpp
-)
-
-target_link_libraries(facial_test
-    facialauth
-    ${OpenCV_LIBS}
-)
+add_executable(facial_test src/facial_test.cpp)
+target_link_libraries(facial_test facialauth ${OpenCV_LIBS})
 
 # ============================================================
-# NO INSTALL SECTION
-# (Installazioni gestite da ebuild / spec / deb rules)
+# NO INSTALL (handled by ebuild / .spec / deb rules)
 # ============================================================
-
-# intentionally empty
-
-# ============================================================
-#  NO INSTALL RULES — installation handled by packaging tools
-# ============================================================
-
-message(STATUS "No installation from CMake.")
-message(STATUS "Installation must be done using:")
-message(STATUS "  * Gentoo:     ebuild")
-message(STATUS "  * RPM:        .spec file")
-message(STATUS "  * Debian:     debian/rules")
