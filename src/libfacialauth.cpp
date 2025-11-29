@@ -528,23 +528,35 @@ static bool sface_feature_from_roi(cv::dnn::Net &net,
     if (face.empty())
         return false;
 
+    // Resize corretto
     cv::Mat resized;
     cv::resize(face, resized, cv::Size(112, 112));
 
     try {
+        // ⭐ PREPROCESSING CORRETTO PER SFace ⭐
         cv::Mat blob = cv::dnn::blobFromImage(
-            resized, 1.0 / 255.0, cv::Size(112, 112),
-                                              cv::Scalar(0, 0, 0), true, false
+            resized,
+            1.0 / 128.0,                          // scale
+            cv::Size(112, 112),                   // size
+                                              cv::Scalar(127.5, 127.5, 127.5),      // mean
+                                              true,                                 // swapRB
+                                              false                                 // crop
         );
 
         net.setInput(blob);
         cv::Mat out = net.forward();
-        out = out.reshape(1, 1);
-        feature = out.clone();
-        if (feature.empty()) return false;
 
+        out = out.reshape(1, 1);
+        if (out.empty())
+            return false;
+
+        feature = out.clone();
+
+        // Normalizzazione L2
         cv::normalize(feature, feature);
+
         return true;
+
     } catch (...) {
         return false;
     }
