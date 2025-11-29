@@ -47,6 +47,7 @@ int facial_capture_main(int argc, char *argv[])
 
     std::string user;
     std::string cfg_path;
+    std::string format;
 
     bool opt_force  = false;
     bool opt_clean  = false;
