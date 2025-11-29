@@ -1077,7 +1077,15 @@ bool fa_test_user(const std::string &user,
 
     bool use_sface = (rp == "sface" || rp == "sface_int8");
 
-    if (use_sface) {
+    // =============================================================
+    // =====================  S F A C E  ===========================
+    // =============================================================
+    if (use_sface)
+    {
+        std::string model_file =
+        modelPath.empty() ? fa_user_model_path(cfg, user) : modelPath;
+
+        // Carica modello ONNX
         cv::dnn::Net sface;
         std::string err;
         if (!load_sface_model_dnn(cfg, rp, sface, err)) {
@@ -1085,102 +1093,26 @@ bool fa_test_user(const std::string &user,
             return false;
         }
 
-        DetectorWrapper det;
-        if (!init_detector(cfg, det)) {
-            logbuf += "Cannot init detector (YuNet/HAAR) for SFace test\n";
+        // Carica embeddings dal modello XML
+        std::vector<cv::Mat> gallery;
+        if (!fa_load_sface_embeddings(model_file, gallery)) {
+            logbuf += "No SFace gallery features for user\n";
             return false;
         }
 
-        std::vector<cv::Mat> gallery_feats;
-
-        std::string model_file = modelPath;
-        if (!model_file.empty() && file_exists(model_file)) {
-            if (fa_load_sface_embeddings(model_file, gallery_feats)) {
-                log_info(cfg, "Loaded %zu SFace embeddings from model",
-                         gallery_feats.size());
-            }
+        if (gallery.empty()) {
+            logbuf += "Model contains zero SFace embeddings\n";
+            return false;
         }
 
-        if (gallery_feats.empty()) {
-            std::string img_dir = fa_user_image_dir(cfg, user);
-            if (!fs::exists(img_dir)) {
-                logbuf += "No image directory for user: " + img_dir + "\n";
-                return false;
-            }
-
-            for (auto &entry : fs::directory_iterator(img_dir)) {
-                if (!entry.is_regular_file()) continue;
-                std::string path = entry.path().string();
-
-                std::string lower = path;
-                for (char &c : lower) c = (char)std::tolower((unsigned char)c);
-                if (!(str_ends_with(lower, ".jpg")
-                    || str_ends_with(lower, ".jpeg")
-                    || str_ends_with(lower, ".png")))
-                    continue;
-
-                cv::Mat img = cv::imread(path);
-                if (img.empty()) continue;
-
-                cv::Rect roi;
-                bool have_face = false;
-
-                if (det.kind == DetectorWrapper::HAAR) {
-                    cv::Mat gray;
-                    cv::cvtColor(img, gray, cv::COLOR_BGR2GRAY);
-                    cv::equalizeHist(gray, gray);
-                    std::vector<cv::Rect> faces;
-                    det.haar.detectMultiScale(
-                        gray, faces, 1.08, 3, 0, cv::Size(60, 60)
-                    );
-                    if (!faces.empty()) {
-                        roi = faces[0];
-                        have_face = true;
-                    }
-                } else if (det.kind == DetectorWrapper::YUNET) {
-                    cv::Mat resized;
-                    if (img.size() != cv::Size(cfg.width, cfg.height))
-                        cv::resize(img, resized, cv::Size(cfg.width, cfg.height));
-                    else
-                        resized = img;
-
-                    cv::Mat dets;
-                    det.yunet->detect(resized, dets);
-                    int best_i = -1;
-                    float best_score = 0.0f;
-                    for (int j = 0; j < dets.rows; ++j) {
-                        float score = dets.at<float>(j, 4);
-                        if (score > 0.9f && score > best_score) {
-                            best_score = score;
-                            best_i = j;
-                        }
-                    }
-                    if (best_i >= 0) {
-                        float x = dets.at<float>(best_i, 0);
-                        float y = dets.at<float>(best_i, 1);
-                        float w = dets.at<float>(best_i, 2);
-                        float h = dets.at<float>(best_i, 3);
-                        roi = cv::Rect(cv::Point2f(x, y),
-                                       cv::Size2f(w, h));
-                        have_face = true;
-                    }
-                }
-
-                if (!have_face) continue;
-
-                cv::Mat feat;
-                if (!sface_feature_from_roi(sface, img, roi, feat))
-                    continue;
-
-                gallery_feats.push_back(feat.clone());
-            }
-
-            if (gallery_feats.empty()) {
-                logbuf += "No SFace gallery features for user\n";
-                return false;
-            }
+        // Init detector
+        DetectorWrapper det;
+        if (!init_detector(cfg, det)) {
+            logbuf += "Cannot init detector (YuNet/HAAR)\n";
+            return false;
         }
 
+        // Apri camera
         cv::VideoCapture cap;
         std::string dev;
         if (!open_camera(cfg, cap, dev)) {
@@ -1188,41 +1120,48 @@ bool fa_test_user(const std::string &user,
             return false;
         }
 
-        log_info(cfg, "Testing user %s (SFace) on device %s",
+        log_info(cfg, "Testing SFace model for user %s on %s",
                  user.c_str(), dev.c_str());
-
-        best_conf  = -1.0;
-        best_label = 0;
 
         double threshold = cfg.sface_threshold;
         if (threshold_override > 0.0)
             threshold = threshold_override;
 
+        best_conf  = -1.0;
+        best_label = 0;
+
         cv::Mat frame;
 
-        for (int i = 0; i < cfg.frames; ++i) {
+        for (int i = 0; i < cfg.frames; i++) {
             cap >> frame;
             if (frame.empty()) {
                 sleep_ms_int(cfg.sleep_ms);
                 continue;
             }
 
+            // ================== DETECTION ==================
             cv::Rect roi;
             bool have_face = false;
 
+            // Haar
             if (det.kind == DetectorWrapper::HAAR) {
                 cv::Mat gray;
                 cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
                 cv::equalizeHist(gray, gray);
+
                 std::vector<cv::Rect> faces;
                 det.haar.detectMultiScale(
-                    gray, faces, 1.08, 3, 0, cv::Size(60, 60)
+                    gray, faces, 1.08, 3, 0, cv::Size(60,60)
                 );
+
                 if (!faces.empty()) {
                     roi = faces[0];
                     have_face = true;
                 }
-            } else if (det.kind == DetectorWrapper::YUNET) {
+            }
+
+            // YuNet
+            else if (det.kind == DetectorWrapper::YUNET) {
                 cv::Mat resized;
                 if (frame.size() != cv::Size(cfg.width, cfg.height))
                     cv::resize(frame, resized, cv::Size(cfg.width, cfg.height));
@@ -1231,20 +1170,24 @@ bool fa_test_user(const std::string &user,
 
                 cv::Mat dets;
                 det.yunet->detect(resized, dets);
+
                 int best_i = -1;
-                float best_score = 0.0f;
-                for (int j = 0; j < dets.rows; ++j) {
+                float best_score = 0.f;
+
+                for (int j = 0; j < dets.rows; j++) {
                     float score = dets.at<float>(j, 4);
-                    if (score > 0.9f && score > best_score) {
+                    if (score > 0.90f && score > best_score) {
                         best_score = score;
                         best_i = j;
                     }
                 }
+
                 if (best_i >= 0) {
                     float x = dets.at<float>(best_i, 0);
                     float y = dets.at<float>(best_i, 1);
                     float w = dets.at<float>(best_i, 2);
                     float h = dets.at<float>(best_i, 3);
+
                     roi = cv::Rect(cv::Point2f(x, y), cv::Size2f(w, h));
                     have_face = true;
                 }
@@ -1255,43 +1198,43 @@ bool fa_test_user(const std::string &user,
                 continue;
             }
 
+            // ================== EMBEDDING LIVE ==================
             cv::Mat feat;
-            if (!sface_feature_from_roi(sface, frame, roi, feat)) {
-                sleep_ms_int(cfg.sleep_ms);
+            if (!sface_feature_from_roi(sface, frame, roi, feat))
                 continue;
+
+            // ================== SIMILITUDINE ==================
+            double best_sim = -1.0;
+
+            for (const auto &g : gallery) {
+                if (!g.empty() && feat.size() == g.size()) {
+                    double sim = feat.dot(g);
+                    if (sim > best_sim)
+                        best_sim = sim;
+                }
             }
 
-            double best_sim_frame = -1.0;
-            for (const auto &g : gallery_feats) {
-                if (g.empty() || feat.size() != g.size())
-                    continue;
-                double sim = feat.dot(g);
-                if (sim > best_sim_frame)
-                    best_sim_frame = sim;
-            }
+            best_conf = best_sim;
 
-            if (best_sim_frame > best_conf)
-                best_conf = best_sim_frame;
-
-            if (best_sim_frame >= threshold) {
+            if (cfg.debug)
                 log_info(cfg,
-                         "Auth success (SFace): sim=%.3f >= %.3f",
-                         best_sim_frame, threshold);
-                return true;
-            }
+                         "SFace similarity = %.3f (threshold %.3f)",
+                         best_sim, threshold);
+
+                if (best_sim >= threshold)
+                    return true;
 
             sleep_ms_int(cfg.sleep_ms);
         }
 
-        log_info(cfg,
-                 "Auth failed (SFace): best_sim=%.3f threshold=%.3f",
-                 best_conf, threshold);
+        // fallito
         return false;
     }
 
-    // -------------------------------
-    // Modalità classica LBPH/EIGEN/FISHER
-    // -------------------------------
+    // =============================================================
+    // =============  M O D A L I T À   C L A S S I C A  ============
+    // =============================================================
+
     std::string model_file =
     modelPath.empty() ? fa_user_model_path(cfg, user) : modelPath;
 
@@ -1395,6 +1338,7 @@ bool fa_test_user(const std::string &user,
 
     return false;
 }
+
 
 // ==========================================================
 // fa_check_root
