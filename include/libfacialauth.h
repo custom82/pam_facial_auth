@@ -26,6 +26,8 @@ struct FacialAuthConfig {
     int  height   = 480;
     int  frames   = 10;       // numero di frame da catturare/testare
     int  sleep_ms = 100;      // pausa tra frame (ms)
+    // Formato immagine: "jpg", "png", ecc.
+    std::string image_format = "jpg";
 
     // Debug / GUI
     bool debug = false;

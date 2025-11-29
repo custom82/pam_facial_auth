@@ -31,7 +31,7 @@ static void print_help()
     "      --reset            Remove user images + model\n"
     "  -v, --debug            Enable debug\n"
     "  -c, --config FILE      Config file path\n"
-    "      --format EXT       Reserved (jpg/png)\n"
+    "      --format EXT       Image format (jpg, png)\n"
     "\n";
 }
 
@@ -47,7 +47,7 @@ int facial_capture_main(int argc, char *argv[])
 
     std::string user;
     std::string cfg_path;
-    std::string format;
+    std::string opt_format;     // <- formato richiesto da CLI
 
     bool opt_force  = false;
     bool opt_clean  = false;
@@ -63,8 +63,9 @@ int facial_capture_main(int argc, char *argv[])
     int opt_frames = -1;
     int opt_sleep  = -1;
 
-    std::string opt_format;
-
+    // -----------------------------
+    // Parse CLI
+    // -----------------------------
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
 
@@ -95,11 +96,11 @@ int facial_capture_main(int argc, char *argv[])
         else if (a == "--reset")
             opt_reset = true;
         else if (a == "--format" && i + 1 < argc)
-            opt_format = argv[++i];
-        else if (a == "--help") {
-            print_help();
-            return 0;
-        }
+            opt_format = argv[++i];     // <-- salva formato
+            else if (a == "--help") {
+                print_help();
+                return 0;
+            }
     }
 
     if (user.empty()) {
@@ -107,7 +108,9 @@ int facial_capture_main(int argc, char *argv[])
         return 1;
     }
 
-    // load config
+    // -----------------------------
+    // Load config
+    // -----------------------------
     FacialAuthConfig cfg;
     std::string logbuf;
 
@@ -118,7 +121,9 @@ int facial_capture_main(int argc, char *argv[])
         std::cerr << logbuf;
     logbuf.clear();
 
-    // apply CLI overrides
+    // -----------------------------
+    // CLI override
+    // -----------------------------
     if (!opt_device.empty())   cfg.device           = opt_device;
     if (!opt_detector.empty()) cfg.detector_profile = opt_detector;
     if (opt_width  > 0)        cfg.width            = opt_width;
@@ -128,6 +133,13 @@ int facial_capture_main(int argc, char *argv[])
     if (opt_debug)             cfg.debug            = true;
     if (opt_nogui)             cfg.nogui            = true;
 
+    // override formato immagine
+    if (!opt_format.empty())
+        cfg.image_format = opt_format;
+
+    // -----------------------------
+    // Clean / Reset
+    // -----------------------------
     std::string user_img_dir = fa_user_image_dir(cfg, user);
     std::string user_model   = fa_user_model_path(cfg, user);
 
@@ -146,7 +158,10 @@ int facial_capture_main(int argc, char *argv[])
     if (opt_force)
         fs::remove_all(user_img_dir);
 
-    bool ok = fa_capture_images(user, cfg, format, logbuf);
+    // -----------------------------
+    // CHIAMATA ALLA LIBRERIA — CORRETTA
+    // -----------------------------
+    bool ok = fa_capture_images(user, cfg, cfg.image_format, logbuf);
 
     if (!logbuf.empty())
         std::cerr << logbuf;
