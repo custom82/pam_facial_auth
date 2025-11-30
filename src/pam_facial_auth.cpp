@@ -1,129 +1,82 @@
-#include "../include/libfacialauth.h"
-
 #include <security/pam_appl.h>
 #include <security/pam_modules.h>
 #include <security/pam_ext.h>
 
+#include <iostream>
+#include <fstream>
 #include <string>
-#include <string.h>
-#include <syslog.h>
+#include <vector>
 
-// ---------------------------------------------------------------------
-// HELPERS
-// ---------------------------------------------------------------------
+#include <opencv2/opencv.hpp>
+#include <opencv2/dnn.hpp>
 
-static void log_pam(pam_handle_t *pamh, int level, const char *fmt, ...)
-{
-    char buf[1024];
+#include "libfacialauth.h"
+#include "facial_config.h"
 
-    va_list ap;
-    va_start(ap, fmt);
-    vsnprintf(buf, sizeof(buf), fmt, ap);
-    va_end(ap);
+extern "C" {
 
-    pam_syslog(pamh, level, "%s", buf);
-}
+    /* ---------------------------------------------------------
+     * PAM_SM_AUTHENTICATE
+     * --------------------------------------------------------- */
+    PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh, int flags,
+                                       int argc, const char **argv)
+    {
+        const char *user = nullptr;
+        pam_get_user(pamh, &user, nullptr);
+        if (!user)
+            return PAM_AUTH_ERR;
 
-// ---------------------------------------------------------------------
-// pam_sm_authenticate — REQUIRED
-// ---------------------------------------------------------------------
+        /* Load configuration */
+        FacialAuthConfig cfg;
+        std::string cfg_err;
+        if (!fa_load_config(cfg, cfg_err)) {
+            pam_syslog(pamh, LOG_ERR, "pam_facial_auth: config load error: %s",
+                       cfg_err.c_str());
+            return PAM_AUTH_ERR;
+        }
 
-PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh, int flags,
-                                   int argc, const char **argv)
-{
-    const char *user = nullptr;
+        /* Parse arguments: only 'debug' supported */
+        bool force_debug = false;
+        for (int i = 0; i < argc; i++) {
+            if (std::string(argv[i]) == "debug") {
+                force_debug = true;
+            }
+        }
+        if (force_debug)
+            cfg.debug = true;
 
-    // -------------------------------------------------------------
-    // Recupera username
-    // -------------------------------------------------------------
-    if (pam_get_user(pamh, &user, "Username: ") != PAM_SUCCESS || !user) {
-        log_pam(pamh, LOG_ERR, "pam_facial_auth: cannot obtain username");
-        return PAM_AUTH_ERR;
-    }
+        /* Debug info */
+        if (cfg.debug) {
+            pam_syslog(pamh, LOG_DEBUG, "pam_facial_auth: user=%s", user);
+            pam_syslog(pamh, LOG_DEBUG, "pam_facial_auth: device=%s", cfg.device.c_str());
+            pam_syslog(pamh, LOG_DEBUG, "pam_facial_auth: backend=%s target=%s",
+                       cfg.dnn_backend.c_str(),
+                       cfg.dnn_target.c_str());
+        }
 
-    // -------------------------------------------------------------
-    // Carica configurazione
-    // -------------------------------------------------------------
-    FacialAuthConfig cfg;
-    std::string logbuf;
+        /* Run authentication */
+        std::string err;
+        bool result = fa_authenticate_user(cfg, user, err);
 
-    if (!fa_load_config(cfg, logbuf, FACIALAUTH_CONFIG_DEFAULT)) {
-        log_pam(pamh, LOG_ERR,
-                "pam_facial_auth: cannot load config '%s'",
-                FACIALAUTH_CONFIG_DEFAULT);
-        return PAM_AUTH_ERR;
-    }
+        if (!result) {
+            if (cfg.debug)
+                pam_syslog(pamh, LOG_DEBUG, "pam_facial_auth: FAIL: %s", err.c_str());
+            return PAM_AUTH_ERR;
+        }
 
-    if (!logbuf.empty())
-        log_pam(pamh, LOG_INFO, "%s", logbuf.c_str());
-    logbuf.clear();
+        if (cfg.debug)
+            pam_syslog(pamh, LOG_DEBUG, "pam_facial_auth: SUCCESS for user=%s", user);
 
-    // -------------------------------------------------------------
-    // Esegui test facciale (SFace o Classic)
-    // -------------------------------------------------------------
-    double best_conf  = 0.0;
-    int    best_label = -1;
-
-    bool ok = fa_test_user(
-        user,
-        cfg,
-        cfg.model_path,     // modello automatico (basato su basedir)
-    best_conf,
-    best_label,
-    logbuf,
-    -1.0                // soglia override disabilitata
-    );
-
-    if (!logbuf.empty())
-        log_pam(pamh, LOG_INFO, "%s", logbuf.c_str());
-
-    // -------------------------------------------------------------
-    // Risultato
-    // -------------------------------------------------------------
-    if (ok) {
-        log_pam(pamh, LOG_INFO,
-                "pam_facial_auth: AUTH SUCCESS for user '%s' (conf=%.3f)",
-                user, best_conf);
         return PAM_SUCCESS;
     }
 
-    log_pam(pamh, LOG_ERR,
-            "pam_facial_auth: AUTH FAILED for user '%s'",
-            user);
+    /* ---------------------------------------------------------
+     * PAM_SM_SETCRED
+     * --------------------------------------------------------- */
+    PAM_EXTERN int pam_sm_setcred(pam_handle_t *pamh, int flags,
+                                  int argc, const char **argv)
+    {
+        return PAM_SUCCESS;
+    }
 
-    return PAM_AUTH_ERR;
-}
-
-
-// ---------------------------------------------------------------------
-// pam_sm_setcred — generalmente noop
-// ---------------------------------------------------------------------
-PAM_EXTERN int pam_sm_setcred(pam_handle_t *pamh, int flags,
-                              int argc, const char **argv)
-{
-    (void)pamh; (void)flags; (void)argc; (void)argv;
-    return PAM_SUCCESS;
-}
-
-
-// ---------------------------------------------------------------------
-// pam_sm_open_session — opzionale (noop)
-// ---------------------------------------------------------------------
-PAM_EXTERN int pam_sm_open_session(pam_handle_t *pamh, int flags,
-                                   int argc, const char **argv)
-{
-    (void)pamh; (void)flags; (void)argc; (void)argv;
-    return PAM_SUCCESS;
-}
-
-
-// ---------------------------------------------------------------------
-// pam_sm_close_session — opzionale (noop)
-// ---------------------------------------------------------------------
-PAM_EXTERN int pam_sm_close_session(pam_handle_t *pamh, int flags,
-                                    int argc, const char **argv)
-{
-    (void)pamh; (void)flags; (void)argc; (void)argv;
-    return PAM_SUCCESS;
-}
-
+} // extern "C"
