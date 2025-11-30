@@ -135,14 +135,18 @@ static inline void log_error(const FacialAuthConfig &cfg, const char *fmt, ...)
 
 static inline void log_debug(const FacialAuthConfig &cfg, const char *fmt, ...)
 {
-    if (!cfg.debug) return;
+    // Verifica che debug sia attivo prima di scrivere il messaggio
+    if (!cfg.debug) return;  // Non eseguire il log se il debug è disabilitato
+
     char buf[1024];
     va_list ap;
     va_start(ap, fmt);
     vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
-    log_tool(cfg, "DEBUG", "%s", buf);
+
+    log_tool(cfg, "DEBUG", "%s", buf);  // Scrive il messaggio di debug
 }
+
 
 // ==========================================================
 // Path helpers
