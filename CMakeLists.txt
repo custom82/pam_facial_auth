@@ -5,6 +5,7 @@ option(ENABLE_CUDA "Enable CUDA DNN backend support" OFF)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+SET(CMAKE_SKIP_INSTALL_RPATH YES CACHE BOOL "Remove RUNPATH from ELF dynamic sections" FORCE)
 
 #====================================================================
 # OpenCV
