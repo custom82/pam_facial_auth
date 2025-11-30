@@ -29,11 +29,11 @@ struct FacialAuthConfig {
     // Camera parameters
     // =============================================================================
     std::string device;          // main /dev/videoX device
-    bool fallback_device = true; // try /dev/video0..2 if main fails
+    bool        fallback_device = true; // unused in new open_camera, kept for ABI
 
-    int width  = 640;            // capture width
-    int height = 480;            // capture height
-    int frames = 15;             // number of frames to capture/test
+    int width    = 640;          // capture width
+    int height   = 480;          // capture height
+    int frames   = 15;           // number of frames to capture/test
     int sleep_ms = 50;           // delay between frames
 
     // =============================================================================
@@ -45,7 +45,7 @@ struct FacialAuthConfig {
     std::string model_path;      // optional override for model file
     std::string haar_cascade_path;
     std::string training_method = "lbph";
-    std::string log_file;        // unused now (legacy, no syslog)
+    std::string log_file;        // legacy, not used now (no file logging)
 
     bool force_overwrite = false;
     bool ignore_failure  = false;
@@ -64,14 +64,13 @@ struct FacialAuthConfig {
     // Detector (Haar / YuNet)
     //
     // detector_profile accepted values:
-    //   "auto", "haar", "yunet_fp32", "yunet_int8"
+    //   auto, haar, yunet_fp32, yunet_int8
     //
-    // Yunet backend is internal logic; OpenCV DNN backend is controlled by
-    // dnn_backend and dnn_target.
+    // YuNet backend is derived from the DNN backend/target configuration.
     // =============================================================================
     std::string detector_profile;
 
-    // YuNet backend name (historical; kept for compatibility)
+    // Historical field, kept for compatibility (may be unused)
     std::string yunet_backend;
 
     // DNN execution backend/target:
@@ -92,6 +91,9 @@ struct FacialAuthConfig {
     // recognizer_profile accepted values:
     //   sface_fp32, sface_int8,
     //   lbph, eigen, fisher
+    //
+    // Internally "sface_fp32" and "sface" are treated similarly
+    // (FP32 model preferred, INT8 as fallback).
     // =============================================================================
     std::string recognizer_profile = "sface";
 
@@ -155,10 +157,14 @@ bool fa_test_user(
     double threshold_override
 );
 
-// Utility: ensures the tool is executed as root
+// Utility
 bool fa_check_root(const char *tool_name);
 
-// CLI entrypoints (legacy wrappers)
+// Optional: enable or disable syslog logging (for the PAM module).
+// CLI tools should usually *not* call this or pass false.
+void fa_enable_syslog(bool enable);
+
+// Entrypoint CLI (legacy simple wrappers – optional if you use separate tools)
 int facial_capture_main(int argc, char *argv[]);
 int facial_training_cli_main(int argc, char *argv[]);
 int facial_test_cli_main(int argc, char *argv[]);
