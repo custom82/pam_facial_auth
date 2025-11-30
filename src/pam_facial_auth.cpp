@@ -6,7 +6,7 @@
 #include <vector>
 #include <cstring>
 
-// Struttura che contiene la configurazione (ad esempio, il flag 'debug')
+// Funzione per caricare la configurazione dal file usando la funzione esistente
 extern "C" {
     PAM_EXTERN int pam_sm_authenticate(
         pam_handle_t *pamh,
@@ -16,6 +16,7 @@ extern "C" {
     {
         const char *user = nullptr;
         bool debug_enabled = false;  // Flag per il debug dalla linea di comando
+        std::string cfg_err;
 
         // Verifica se il parametro debug è stato passato dalla linea di comando PAM
         for (int i = 0; i < argc; ++i) {
@@ -25,10 +26,9 @@ extern "C" {
             }
         }
 
-        // Carga la configurazione dal file (presumibilmente fa_load_config)
+        // Carga la configurazione dal file usando la funzione fa_read_config
         FacialAuthConfig cfg;
-        std::string cfg_err;
-        if (!fa_load_config(cfg, cfg_err, FACIALAUTH_CONFIG_DEFAULT)) {
+        if (!fa_read_config(cfg, cfg_err, "/etc/security/pam_facial.conf")) {
             pam_syslog(pamh, LOG_ERR, "Config load failed: %s", cfg_err.c_str());
             return PAM_AUTH_ERR;
         }
