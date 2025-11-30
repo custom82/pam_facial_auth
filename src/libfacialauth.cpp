@@ -116,8 +116,16 @@ static void log_tool(const FacialAuthConfig &cfg,
 
 
 // Funzione per il log (ora si basa su `cfg.debug`)
+#include "../include/libfacialauth.h"
+#include <syslog.h>  // Assicurati che syslog.h sia incluso per utilizzare LOG_* e vsyslog
+#include <stdarg.h>  // Necessario per il supporto dei variabili argomenti
+
+// Funzione per il log (ora si basa su `cfg.debug`)
 void log_debug(const FacialAuthConfig &cfg, const char *fmt, ...) {
     if (!cfg.debug) return;
+
+    // Inizializza il syslog con la facility 'auth' e livello 'debug'
+    openlog("pam_facial_auth", LOG_PID | LOG_CONS, LOG_AUTH);
 
     va_list args;
     va_start(args, fmt);
@@ -129,6 +137,9 @@ void log_debug(const FacialAuthConfig &cfg, const char *fmt, ...) {
 }
 
 void log_info(const FacialAuthConfig &cfg, const char *fmt, ...) {
+    // Inizializza il syslog con la facility 'auth' e livello 'info'
+    openlog("pam_facial_auth", LOG_PID | LOG_CONS, LOG_AUTH);
+
     va_list args;
     va_start(args, fmt);
 
@@ -139,6 +150,9 @@ void log_info(const FacialAuthConfig &cfg, const char *fmt, ...) {
 }
 
 void log_error(const FacialAuthConfig &cfg, const char *fmt, ...) {
+    // Inizializza il syslog con la facility 'auth' e livello 'err'
+    openlog("pam_facial_auth", LOG_PID | LOG_CONS, LOG_AUTH);
+
     va_list args;
     va_start(args, fmt);
 
@@ -147,6 +161,7 @@ void log_error(const FacialAuthConfig &cfg, const char *fmt, ...) {
 
     va_end(args);
 }
+
 
 
 
