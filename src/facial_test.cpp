@@ -162,3 +162,8 @@ int facial_test_cli_main(int argc, char *argv[])
 
     return ok ? 0 : 1;
 }
+
+int main(int argc, char *argv[])
+{
+    return facial_test_cli_main(argc, argv);
+}
