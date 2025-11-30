@@ -114,55 +114,38 @@ static void log_tool(const FacialAuthConfig &cfg,
     }
 }
 
+void log_debug(const FacialAuthConfig &cfg, const char *fmt, ...)
+{
+    if (!cfg.debug)
+        return;
 
-// Funzione per il log (ora si basa su `cfg.debug`)
-#include "../include/libfacialauth.h"
-#include <syslog.h>  // Assicurati che syslog.h sia incluso per utilizzare LOG_* e vsyslog
-#include <stdarg.h>  // Necessario per il supporto dei variabili argomenti
-
-// Funzione per il log (ora si basa su `cfg.debug`)
-void log_debug(const FacialAuthConfig &cfg, const char *fmt, ...) {
-    if (!cfg.debug) return;
-
-    // Inizializza il syslog con la facility 'auth' e livello 'debug'
-    openlog("pam_facial_auth", LOG_PID | LOG_CONS, LOG_AUTH);
-
-    va_list args;
-    va_start(args, fmt);
-
-    // Scrittura su syslog con livello DEBUG
-    vsyslog(LOG_DEBUG, fmt, args);
-
-    va_end(args);
+    va_list ap;
+    va_start(ap, fmt);
+    fprintf(stderr, "[DEBUG] ");
+    vfprintf(stderr, fmt, ap);
+    fprintf(stderr, "\n");
+    va_end(ap);
 }
 
-void log_info(const FacialAuthConfig &cfg, const char *fmt, ...) {
-    // Inizializza il syslog con la facility 'auth' e livello 'info'
-    openlog("pam_facial_auth", LOG_PID | LOG_CONS, LOG_AUTH);
-
-    va_list args;
-    va_start(args, fmt);
-
-    // Scrittura su syslog con livello INFO
-    vsyslog(LOG_INFO, fmt, args);
-
-    va_end(args);
+void log_info(const FacialAuthConfig &cfg, const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    fprintf(stderr, "[INFO] ");
+    vfprintf(stderr, fmt, ap);
+    fprintf(stderr, "\n");
+    va_end(ap);
 }
 
-void log_error(const FacialAuthConfig &cfg, const char *fmt, ...) {
-    // Inizializza il syslog con la facility 'auth' e livello 'err'
-    openlog("pam_facial_auth", LOG_PID | LOG_CONS, LOG_AUTH);
-
-    va_list args;
-    va_start(args, fmt);
-
-    // Scrittura su syslog con livello ERR
-    vsyslog(LOG_ERR, fmt, args);
-
-    va_end(args);
+void log_error(const FacialAuthConfig &cfg, const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    fprintf(stderr, "[ERROR] ");
+    vfprintf(stderr, fmt, ap);
+    fprintf(stderr, "\n");
+    va_end(ap);
 }
-
-
 
 
 // ==========================================================
