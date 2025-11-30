@@ -1241,7 +1241,10 @@ bool fa_test_user(const std::string &user,
         }
 
 
-        log_info(cfg, "Testing SFace model for user %s on %s", user.c_str(), dev.c_str());
+        if (cfg.debug) {
+            log_info(cfg, "Testing SFace model for user %s on %s", user.c_str(), dev.c_str());
+        }
+
 
         double threshold = cfg.sface_threshold;
         if (threshold_override > 0.0)
