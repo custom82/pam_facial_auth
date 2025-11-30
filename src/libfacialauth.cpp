@@ -778,33 +778,30 @@ static bool init_detector(const FacialAuthConfig &cfg,
 }
 
 // ==========================================================
-// Camera helper (open and configure VideoCapture)
+// Camera helper
 // ==========================================================
-
 static bool open_camera(const FacialAuthConfig &cfg,
                         cv::VideoCapture &cap,
                         std::string &dev_used)
 {
-    std::vector<std::string> devs;
-    devs.push_back(cfg.device);
-    if (cfg.fallback_device) {
-        devs.push_back("/dev/video0");
-        devs.push_back("/dev/video1");
-        devs.push_back("/dev/video2");
-    }
+    if (cfg.device.empty())
+        return false;
 
-    for (const auto &d : devs) {
-        if (d.empty()) continue;
-        cap.open(d);
-        if (cap.isOpened()) {
-            dev_used = d;
-            cap.set(cv::CAP_PROP_FRAME_WIDTH,  cfg.width);
-            cap.set(cv::CAP_PROP_FRAME_HEIGHT, cfg.height);
-            return true;
-        }
-    }
-    return false;
+    // Always open via OpenCV (backend auto-selected)
+    cap.open(cfg.device, cv::CAP_ANY);
+
+    if (!cap.isOpened())
+        return false;
+
+    dev_used = cfg.device;
+
+    cap.set(cv::CAP_PROP_FRAME_WIDTH,  cfg.width);
+    cap.set(cv::CAP_PROP_FRAME_HEIGHT, cfg.height);
+
+    return true;
 }
+
+
 
 // ==========================================================
 // Classic training pipeline (LBPH/Eigen/Fisher)
