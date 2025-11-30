@@ -52,7 +52,7 @@ extern "C" {
         );
 
         if (!test_log.empty()) {
-            // Aggiunto controllo per il debug
+            // Controllo per il debug: logga solo se cfg.debug è true
             if (cfg.debug) {
                 pam_syslog(pamh,
                            ok ? LOG_INFO : LOG_ERR,
@@ -61,7 +61,7 @@ extern "C" {
         }
 
         return ok ? PAM_SUCCESS : PAM_AUTH_ERR;
-    }  // <-- Chiusura della funzione pam_sm_authenticate
+    }
 
     PAM_EXTERN int pam_sm_setcred(
         pam_handle_t * /*pamh*/,
