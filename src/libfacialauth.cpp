@@ -21,14 +21,13 @@
 #include <cfloat>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <syslog.h>
 
 namespace fs = std::filesystem;
 
 using std::string;
 using std::vector;
 
-// piccolo helper per compatibilità pre-C++20
+// Small helper for compatibility with pre-C++20
 static bool str_ends_with(const std::string &s, const std::string &suffix)
 {
     if (s.size() < suffix.size())
@@ -37,7 +36,7 @@ static bool str_ends_with(const std::string &s, const std::string &suffix)
 }
 
 // ==========================================================
-// Utility varie
+// Utility helpers
 // ==========================================================
 
 static string trim(const string &s)
@@ -84,6 +83,9 @@ static void sleep_ms_int(int ms)
 // ==========================================================
 // Logging
 // ==========================================================
+//
+// Logging helpers for debug/info/error messages.
+// All logs are written only to stderr. No syslog is used.
 
 static void log_tool(const FacialAuthConfig &cfg,
                      const char *level,
@@ -96,24 +98,15 @@ static void log_tool(const FacialAuthConfig &cfg,
     vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
 
-    string msg = "[";
+    std::string msg = "[";
     msg += (level ? level : "");
     msg += "] ";
     msg += buf;
 
     std::cerr << msg << std::endl;
-
-    if (!cfg.log_file.empty()) {
-        try {
-            ensure_dirs(fs::path(cfg.log_file).parent_path().string());
-            std::ofstream out(cfg.log_file, std::ios::app);
-            if (out)
-                out << msg << std::endl;
-        } catch (...) {
-        }
-    }
 }
 
+// Debug log: printed only if cfg.debug == true
 void log_debug(const FacialAuthConfig &cfg, const char *fmt, ...)
 {
     if (!cfg.debug)
@@ -127,6 +120,7 @@ void log_debug(const FacialAuthConfig &cfg, const char *fmt, ...)
     va_end(ap);
 }
 
+// Info log: always printed
 void log_info(const FacialAuthConfig &cfg, const char *fmt, ...)
 {
     va_list ap;
@@ -137,6 +131,7 @@ void log_info(const FacialAuthConfig &cfg, const char *fmt, ...)
     va_end(ap);
 }
 
+// Error log: always printed
 void log_error(const FacialAuthConfig &cfg, const char *fmt, ...)
 {
     va_list ap;
@@ -147,16 +142,15 @@ void log_error(const FacialAuthConfig &cfg, const char *fmt, ...)
     va_end(ap);
 }
 
-
 // ==========================================================
-// Path helpers
+// Path helpers (build paths for images and models)
 // ==========================================================
 
 std::string fa_user_image_dir(const FacialAuthConfig &cfg,
                               const std::string &user)
 {
     fs::path base = cfg.basedir.empty()
-    ? fs::path("/etc/pam_facial_auth")
+    ? fs::path("/var/lib/pam_facial_auth")
     : fs::path(cfg.basedir);
     fs::path dir  = base / "images" / user;
     return dir.string();
@@ -166,7 +160,7 @@ std::string fa_user_model_path(const FacialAuthConfig &cfg,
                                const std::string &user)
 {
     fs::path base = cfg.basedir.empty()
-    ? fs::path("/etc/pam_facial_auth")
+    ? fs::path("/var/lib/pam_facial_auth")
     : fs::path(cfg.basedir);
     fs::path dir  = base / "models";
     fs::path file = dir / (user + ".xml");
@@ -174,7 +168,7 @@ std::string fa_user_model_path(const FacialAuthConfig &cfg,
 }
 
 // ==========================================================
-// Config loader
+// Configuration loader (parses pam_facial.conf)
 // ==========================================================
 
 static void apply_dnn_alias(FacialAuthConfig &cfg)
@@ -230,7 +224,9 @@ bool fa_load_config(FacialAuthConfig &cfg,
 
             else if (key == "model_path")       cfg.model_path         = val;
             else if (key == "haar_cascade_path" ||
-                key == "haar_model")       cfg.haar_cascade_path  = val;
+                key == "haar_model" ||
+                key == "detect_haar_model")
+                cfg.haar_cascade_path    = val;
 
             else if (key == "training_method")  cfg.training_method    = val;
             else if (key == "log_file")         cfg.log_file           = val;
@@ -247,23 +243,33 @@ bool fa_load_config(FacialAuthConfig &cfg,
 
             else if (key == "detector_profile") cfg.detector_profile   = val;
 
-            // ------- YuNet + DNN -------
-            else if (key == "yunet_backend")    cfg.yunet_backend      = val;
-            else if (key == "dnn_backend")      cfg.dnn_backend        = val;
-            else if (key == "dnn_target")       cfg.dnn_target         = val;       // <── AGGIUNTO
-            else if (key == "yunet_model")      cfg.yunet_model        = val;
-            else if (key == "yunet_model_int8") cfg.yunet_model_int8   = val;
+            // ------- YuNet + DNN (detector models + backend) -------
+            else if (key == "yunet_backend")           cfg.yunet_backend    = val;
+            else if (key == "dnn_backend")             cfg.dnn_backend      = val;
+            else if (key == "dnn_target")              cfg.dnn_target       = val;
+            else if (key == "yunet_model" ||
+                key == "yunet_model_fp32" ||
+                key == "detect_yunet_model_fp32")
+                cfg.yunet_model        = val;
+            else if (key == "yunet_model_int8" ||
+                key == "detect_yunet_model_int8")
+                cfg.yunet_model_int8   = val;
 
-            // ------- SFace -------
-            else if (key == "recognizer_profile") cfg.recognizer_profile = val;
-            else if (key == "sface_model")        cfg.sface_model        = val;
-            else if (key == "sface_model_int8")   cfg.sface_model_int8   = val;
-            else if (key == "sface_threshold")    cfg.sface_threshold    = std::stod(val);
+            // ------- SFace (recognizer models) -------
+            else if (key == "recognizer_profile")      cfg.recognizer_profile = val;
+            else if (key == "sface_model" ||
+                key == "sface_model_fp32" ||
+                key == "recognize_sface_model_fp32")
+                cfg.sface_model        = val;
+            else if (key == "sface_model_int8" ||
+                key == "recognize_sface_model_int8")
+                cfg.sface_model_int8   = val;
+            else if (key == "sface_threshold")        cfg.sface_threshold   = std::stod(val);
 
-            else if (key == "save_failed_images") cfg.save_failed_images = str_to_bool(val, cfg.save_failed_images);
+            else if (key == "save_failed_images")     cfg.save_failed_images = str_to_bool(val, cfg.save_failed_images);
 
             // ------- image format -------
-            else if (key == "image_format")       cfg.image_format       = val;     // <── AGGIUNTO
+            else if (key == "image_format")           cfg.image_format      = val;
 
             else {
                 logbuf += "Unknown key at line " + std::to_string(lineno)
@@ -281,7 +287,7 @@ bool fa_load_config(FacialAuthConfig &cfg,
 }
 
 // ==========================================================
-// FaceRecWrapper: LBPH / Eigen / Fisher
+// FaceRecWrapper: LBPH / Eigen / Fisher classical recognizers
 // ==========================================================
 
 class FaceRecWrapper {
@@ -425,7 +431,7 @@ struct DetectorWrapper {
 };
 
 // ==========================================================
-// SFace helpers (via DNN ONNX)
+// SFace helpers (via DNN ONNX models)
 // ==========================================================
 
 static bool fa_save_sface_model(const std::string &file,
@@ -683,7 +689,7 @@ static bool sface_feature_from_roi(cv::dnn::Net &net,
 }
 
 // ==========================================================
-// Detector init (Haar / YuNet) + debug
+// Detector initialization (Haar / YuNet) with debug logs
 // ==========================================================
 
 static bool init_detector(const FacialAuthConfig &cfg,
@@ -772,7 +778,7 @@ static bool init_detector(const FacialAuthConfig &cfg,
 }
 
 // ==========================================================
-// Camera helper
+// Camera helper (open and configure VideoCapture)
 // ==========================================================
 
 static bool open_camera(const FacialAuthConfig &cfg,
@@ -801,7 +807,7 @@ static bool open_camera(const FacialAuthConfig &cfg,
 }
 
 // ==========================================================
-// Training classico
+// Classic training pipeline (LBPH/Eigen/Fisher)
 // ==========================================================
 
 static bool train_classic(const std::string &user,
@@ -895,7 +901,7 @@ static bool train_classic(const std::string &user,
 }
 
 // ==========================================================
-// fa_capture_images
+// fa_capture_images: capture face images for a given user
 // ==========================================================
 
 bool fa_capture_images(const std::string &user,
@@ -1081,7 +1087,7 @@ bool fa_capture_images(const std::string &user,
 
 
 // ==========================================================
-// fa_train_user
+// fa_train_user: train a model for a given user
 // ==========================================================
 
 bool fa_train_user(const std::string &user,
@@ -1179,7 +1185,7 @@ bool fa_train_user(const std::string &user,
 }
 
 // ==========================================================
-// fa_test_user
+// fa_test_user: run authentication for a given user
 // ==========================================================
 
 bool fa_test_user(const std::string &user,
@@ -1464,7 +1470,7 @@ bool fa_test_user(const std::string &user,
 
 
 // ==========================================================
-// fa_check_root
+// fa_check_root: ensure tool is run as root
 // ==========================================================
 
 bool fa_check_root(const char *tool_name)
@@ -1477,7 +1483,7 @@ bool fa_check_root(const char *tool_name)
 }
 
 // ==========================================================
-// CLI WRAPPERS
+// CLI wrappers (legacy, may be unused)
 // ==========================================================
 
 static void print_common_usage(const char *prog)
