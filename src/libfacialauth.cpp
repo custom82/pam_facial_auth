@@ -6,7 +6,10 @@
 #include <opencv2/objdetect.hpp>
 #include <opencv2/dnn.hpp>
 #include <opencv2/face.hpp>
+
+#ifdef ENABLE_CUDA
 #include <opencv2/core/cuda.hpp>
+#endif
 
 #include <iostream>
 #include <fstream>
@@ -542,22 +545,35 @@ static bool load_sface_model_dnn(
     // --------------------------
 
     if (backend == "auto") {
-        // Preferisci CUDA → CPU
+        #ifdef ENABLE_CUDA
+        // Prefer CUDA if a device is available, otherwise fallback to CPU
         if (cv::cuda::getCudaEnabledDeviceCount() > 0) {
             be = cv::dnn::DNN_BACKEND_CUDA;
             tg = cv::dnn::DNN_TARGET_CUDA;
-        } else {
+        } else
+            #endif
+        {
             be = cv::dnn::DNN_BACKEND_OPENCV;
             tg = cv::dnn::DNN_TARGET_CPU;
         }
     }
     else if (backend == "cuda") {
+        #ifdef ENABLE_CUDA
         be = cv::dnn::DNN_BACKEND_CUDA;
         tg = cv::dnn::DNN_TARGET_CUDA;
+        #else
+        err = "OpenCV built without CUDA support, but dnn_backend=cuda was requested";
+        return false;
+        #endif
     }
     else if (backend == "cuda_fp16") {
+        #ifdef ENABLE_CUDA
         be = cv::dnn::DNN_BACKEND_CUDA;
         tg = cv::dnn::DNN_TARGET_CUDA_FP16;
+        #else
+        err = "OpenCV built without CUDA support, but dnn_backend=cuda_fp16 was requested";
+        return false;
+        #endif
     }
     else if (backend == "opencl") {
         be = cv::dnn::DNN_BACKEND_DEFAULT;

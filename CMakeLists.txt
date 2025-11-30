@@ -1,65 +1,69 @@
-cmake_minimum_required(VERSION 3.10)
-project(pam_facial_auth CXX)
+cmake_minimum_required(VERSION 3.18)
+project(pam_facial_auth LANGUAGES C CXX)
+
+option(ENABLE_CUDA "Enable CUDA DNN backend support" OFF)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-cmake_policy(SET CMP0074 NEW)
 
-# ============================================================
-# FIND PACKAGES
-# ============================================================
+#====================================================================
+# OpenCV
+#====================================================================
+find_package(OpenCV 4.0 REQUIRED
+    COMPONENTS
+        core
+        imgproc
+        imgcodecs
+        videoio
+        objdetect
+        dnn
+        highgui
+        face
+)
 
-find_package(OpenCV REQUIRED)
+if(ENABLE_CUDA)
+    message(STATUS "CUDA support ENABLED at build-time")
+    add_definitions(-DENABLE_CUDA)
+else()
+    message(STATUS "CUDA support DISABLED at build-time")
+endif()
 
 include_directories(
     ${OpenCV_INCLUDE_DIRS}
-    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-# ============================================================
-# LIBRARY: libfacialauth.so
-# ============================================================
-
+#====================================================================
+# Libreria condivisa libfacialauth
+#====================================================================
 add_library(facialauth SHARED
     src/libfacialauth.cpp
+    include/libfacialauth.h
 )
 
 target_link_libraries(facialauth
     ${OpenCV_LIBS}
 )
 
-# ============================================================
-# PAM MODULE: pam_facial_auth.so
-# ============================================================
-
-add_library(pam_facial_auth MODULE
+#====================================================================
+# Modulo PAM
+#====================================================================
+add_library(pam_facial_auth SHARED
     src/pam_facial_auth.cpp
-)
-
-set_target_properties(pam_facial_auth PROPERTIES
-    PREFIX ""
-    OUTPUT_NAME "pam_facial_auth"
 )
 
 target_link_libraries(pam_facial_auth
     facialauth
     ${OpenCV_LIBS}
-    pam
 )
 
-# ============================================================
-# EXECUTABLES (CLI tools)
-# ============================================================
-
-add_executable(facial_capture src/facial_capture.cpp)
-target_link_libraries(facial_capture facialauth ${OpenCV_LIBS})
-
+#====================================================================
+# Eseguibili CLI reali del progetto
+#====================================================================
+add_executable(facial_capture  src/facial_capture.cpp)
 add_executable(facial_training src/facial_training.cpp)
+add_executable(facial_test     src/facial_test.cpp)
+
+target_link_libraries(facial_capture  facialauth ${OpenCV_LIBS})
 target_link_libraries(facial_training facialauth ${OpenCV_LIBS})
-
-add_executable(facial_test src/facial_test.cpp)
-target_link_libraries(facial_test facialauth ${OpenCV_LIBS})
-
-# ============================================================
-# NO INSTALL (handled by ebuild / .spec / deb rules)
-# ============================================================
+target_link_libraries(facial_test     facialauth ${OpenCV_LIBS})
