@@ -61,7 +61,7 @@ extern "C" {
         }
 
         return ok ? PAM_SUCCESS : PAM_AUTH_ERR;
-
+    }  // <-- Chiusura della funzione pam_sm_authenticate
 
     PAM_EXTERN int pam_sm_setcred(
         pam_handle_t * /*pamh*/,
