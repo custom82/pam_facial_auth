@@ -21,6 +21,8 @@ static void print_help()
     "  -o, --output <file>         Where to save the trained model (XML)\n"
     "  -f, --force                 Overwrite existing model file\n"
     "  -v, --verbose               Enable verbose output\n"
+    "      --debug                 Enable debug (CLI override)\n"
+    "      --no-debug              Disable debug (CLI override)\n"
     "  -c, --config <file>         Alternative config file\n"
     "  -h, --help                  Show help\n"
     "\nIf -i or -o are not specified, defaults from configuration are used.\n";
@@ -40,6 +42,10 @@ int facial_training_main(int argc, char *argv[])
     bool opt_force   = false;
     bool opt_verbose = false;
 
+    // Debug override handling
+    bool cli_debug_set = false;
+    bool cli_debug_val = false;
+
     // -------------------------------------
     // Parse arguments
     // -------------------------------------
@@ -48,18 +54,35 @@ int facial_training_main(int argc, char *argv[])
 
         if ((a == "-u" || a == "--user") && i + 1 < argc)
             user = argv[++i];
+
         else if ((a == "-m" || a == "--method") && i + 1 < argc)
             method = argv[++i];
+
         else if ((a == "-i" || a == "--input") && i + 1 < argc)
             input_dir = argv[++i];
+
         else if ((a == "-o" || a == "--output") && i + 1 < argc)
             output_model = argv[++i];
+
         else if (a == "-f" || a == "--force")
             opt_force = true;
+
         else if (a == "-v" || a == "--verbose")
             opt_verbose = true;
-        else if (a == "-c" || a == "--config")
+
+        else if (a == "--debug") {
+            cli_debug_set = true;
+            cli_debug_val = true;
+        }
+
+        else if (a == "--no-debug") {
+            cli_debug_set = true;
+            cli_debug_val = false;
+        }
+
+        else if ((a == "-c" || a == "--config") && i + 1 < argc)
             cfg_path = argv[++i];
+
         else if (a == "-h" || a == "--help") {
             print_help();
             return 0;
@@ -88,7 +111,15 @@ int facial_training_main(int argc, char *argv[])
         std::cerr << logbuf;
     logbuf.clear();
 
+    // -------------------------------------
+    // Apply CLI Debug Override
+    // -------------------------------------
+    if (cli_debug_set)
+        cfg.debug = cli_debug_val;
+
+    // -------------------------------------
     // Override recognizer profile
+    // -------------------------------------
     cfg.recognizer_profile = method;
 
     // -------------------------------------

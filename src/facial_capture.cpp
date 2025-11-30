@@ -21,7 +21,7 @@ static void print_help()
     "  -u, --user USER        Username\n"
     "  -d, --device DEV       Override device\n"
     "  -w, --width N          Override width\n"
-    "  -h, --height N         Override height\n"
+    "      --height N         Override height\n"
     "  -n, --frames N         Override number of frames\n"
     "  -s, --sleep MS         Delay between frames\n"
     "  -f, --force            Overwrite existing images\n"
@@ -30,7 +30,8 @@ static void print_help()
     "      --clean            Remove user images\n"
     "      --reset            Remove user model + images\n"
     "      --format EXT       jpg|png\n"
-    "  -v, --debug            Enable debug\n"
+    "  -v, --debug            Enable debug (CLI override)\n"
+    "      --no-debug         Disable debug (CLI override)\n"
     "  -c, --config FILE      Config file path\n"
     "\n";
 }
@@ -52,7 +53,10 @@ int facial_capture_main(int argc, char *argv[])
     bool opt_force  = false;
     bool opt_clean  = false;
     bool opt_reset  = false;
-    bool opt_debug  = false;
+    bool opt_debug  = false;       // CLI override ON
+    bool cli_debug_set = false;    // indica se la CLI ha toccato il debug
+    bool cli_debug_val = false;    // valore della CLI (ON/OFF)
+
     bool opt_nogui  = false;
 
     std::string opt_device;
@@ -63,37 +67,59 @@ int facial_capture_main(int argc, char *argv[])
     int opt_frames = -1;
     int opt_sleep  = -1;
 
+    // --- PARSING CLI ---
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
 
         if ((a == "-u" || a == "--user") && i + 1 < argc)
             user = argv[++i];
+
         else if ((a == "-c" || a == "--config") && i + 1 < argc)
             cfg_path = argv[++i];
+
         else if ((a == "-d" || a == "--device") && i + 1 < argc)
             opt_device = argv[++i];
+
         else if ((a == "-w" || a == "--width") && i + 1 < argc)
             opt_width = atoi(argv[++i]);
-        else if ((a == "-h" || a == "--height") && i + 1 < argc)
+
+        else if (a == "--height" && i + 1 < argc)
             opt_height = atoi(argv[++i]);
+
         else if ((a == "-n" || a == "--frames") && i + 1 < argc)
             opt_frames = atoi(argv[++i]);
+
         else if ((a == "-s" || a == "--sleep") && i + 1 < argc)
             opt_sleep = atoi(argv[++i]);
+
         else if (a == "-f" || a == "--force")
             opt_force = true;
+
         else if (a == "-g" || a == "--nogui")
             opt_nogui = true;
-        else if (a == "-v" || a == "--debug")
-            opt_debug = true;
+
+        else if (a == "-v" || a == "--debug") {
+            cli_debug_set = true;
+            cli_debug_val = true;
+        }
+
+        else if (a == "--no-debug") {
+            cli_debug_set = true;
+            cli_debug_val = false;
+        }
+
         else if (a == "--detector" && i + 1 < argc)
             opt_detector = argv[++i];
+
         else if (a == "--clean")
             opt_clean = true;
+
         else if (a == "--reset")
             opt_reset = true;
+
         else if (a == "--format" && i + 1 < argc)
             opt_format = argv[++i];
+
         else if (a == "--help") {
             print_help();
             return 0;
@@ -105,7 +131,10 @@ int facial_capture_main(int argc, char *argv[])
         return 1;
     }
 
-    // load config
+    // ------------------------------------------------------------
+    // LOAD CONFIG
+    // ------------------------------------------------------------
+
     FacialAuthConfig cfg;
     std::string logbuf;
 
@@ -116,21 +145,28 @@ int facial_capture_main(int argc, char *argv[])
         std::cerr << logbuf;
     logbuf.clear();
 
-    // apply CLI overrides
-    if (!opt_device.empty())     cfg.device           = opt_device;
-    if (!opt_detector.empty())   cfg.detector_profile = opt_detector;
-    if (opt_width  > 0)          cfg.width            = opt_width;
-    if (opt_height > 0)          cfg.height           = opt_height;
-    if (opt_frames > 0)          cfg.frames           = opt_frames;
-    if (opt_sleep >= 0)          cfg.sleep_ms         = opt_sleep;
-    if (opt_debug)               cfg.debug            = true;
-    if (opt_nogui)               cfg.nogui            = true;
-    if (!opt_format.empty())     cfg.image_format     = opt_format;
+    // ------------------------------------------------------------
+    // APPLY CLI OVERRIDES
+    // ------------------------------------------------------------
+
+    if (cli_debug_set)         cfg.debug            = cli_debug_val;
+    if (!opt_device.empty())   cfg.device           = opt_device;
+    if (!opt_detector.empty()) cfg.detector_profile = opt_detector;
+    if (opt_width  > 0)        cfg.width            = opt_width;
+    if (opt_height > 0)        cfg.height           = opt_height;
+    if (opt_frames > 0)        cfg.frames           = opt_frames;
+    if (opt_sleep >= 0)        cfg.sleep_ms         = opt_sleep;
+    if (opt_nogui)             cfg.nogui            = true;
+    if (!opt_format.empty())   cfg.image_format     = opt_format;
+
+    // ------------------------------------------------------------
+    // RESET / CLEAN / FORCE
+    // ------------------------------------------------------------
 
     std::string user_img_dir = fa_user_image_dir(cfg, user);
     std::string user_model   = fa_user_model_path(cfg, user);
 
-    // --reset: remove images + model
+    // --reset
     if (opt_reset) {
         bool removed = false;
 
@@ -152,7 +188,7 @@ int facial_capture_main(int argc, char *argv[])
         return 0;
     }
 
-    // --clean: remove only images
+    // --clean
     if (opt_clean) {
         if (fs::exists(user_img_dir)) {
             fs::remove_all(user_img_dir);
@@ -163,7 +199,7 @@ int facial_capture_main(int argc, char *argv[])
         return 0;
     }
 
-    // --force: remove existing images before capture
+    // --force
     if (opt_force) {
         if (fs::exists(user_img_dir)) {
             fs::remove_all(user_img_dir);
@@ -171,7 +207,10 @@ int facial_capture_main(int argc, char *argv[])
         }
     }
 
-    // perform capture
+    // ------------------------------------------------------------
+    // RUN CAPTURE
+    // ------------------------------------------------------------
+
     bool ok = fa_capture_images(user, cfg, cfg.image_format, logbuf);
 
     if (!logbuf.empty())

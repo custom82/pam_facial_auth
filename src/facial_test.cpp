@@ -19,6 +19,7 @@ struct TestOptions {
     string detector;           // auto / haar / yunet (vuoto = usa config)
     double threshold = -1.0;   // <0 = usa soglia da config
     bool debug = false;
+    bool debug_override = false;  // nuovo: indica che la CLI ha forzato debug
 };
 
 static void print_usage(const char *progname) {
@@ -32,7 +33,8 @@ static void print_usage(const char *progname) {
     << "      --target T          Target DNN: cpu | cuda (CLI > config)\n"
     << "      --detector P        Profilo detector: auto | haar | yunet (CLI > config)\n"
     << "      --threshold X       Soglia di similarità per SFace (CLI > config)\n"
-    << "      --debug             Abilita debug verboso\n"
+    << "      --debug             Abilita debug verboso (CLI > config)\n"
+    << "      --no-debug          Disabilita debug (CLI > config)\n"
     << "  -h, --help              Mostra questo aiuto\n";
 }
 
@@ -56,21 +58,27 @@ static bool parse_args(int argc, char *argv[], TestOptions &opt) {
         if (arg == "-u" || arg == "--user") {
             if (!need_value(arg.c_str())) return false;
             opt.user = argv[++i];
+
         } else if (arg == "-d" || arg == "--device") {
             if (!need_value(arg.c_str())) return false;
             opt.device = argv[++i];
+
         } else if (arg == "--config") {
             if (!need_value(arg.c_str())) return false;
             opt.config_path = argv[++i];
+
         } else if (arg == "--backend") {
             if (!need_value(arg.c_str())) return false;
             opt.backend = argv[++i];
+
         } else if (arg == "--target") {
             if (!need_value(arg.c_str())) return false;
             opt.target = argv[++i];
+
         } else if (arg == "--detector") {
             if (!need_value(arg.c_str())) return false;
             opt.detector = argv[++i];
+
         } else if (arg == "--threshold") {
             if (!need_value(arg.c_str())) return false;
             try {
@@ -79,11 +87,19 @@ static bool parse_args(int argc, char *argv[], TestOptions &opt) {
                 cerr << "Valore non valido per --threshold\n";
                 return false;
             }
+
         } else if (arg == "--debug") {
             opt.debug = true;
+            opt.debug_override = true;
+
+        } else if (arg == "--no-debug") {
+            opt.debug = false;
+            opt.debug_override = true;
+
         } else if (arg == "-h" || arg == "--help") {
             print_usage(argv[0]);
             std::exit(0);
+
         } else {
             cerr << "Opzione sconosciuta: " << arg << "\n";
             print_usage(argv[0]);
@@ -118,45 +134,40 @@ int facial_test_main(int argc, char *argv[]) {
         return 1;
     }
 
-    // Debug da CLI ha la precedenza
-    if (opt.debug) {
-        cfg.debug = true;
-    }
+    // Debug override
+    if (opt.debug_override)
+        cfg.debug = opt.debug;
 
     if (cfg.debug && !logbuf.empty()) {
         cerr << "[DEBUG] Config caricata da " << opt.config_path << ":\n"
         << logbuf << "\n";
     }
 
-    // CLI deve avere precedenza sul file di configurazione
-    // ---------------------------------------------------
-    // Dispositivo video
-    if (!opt.device.empty()) {
+    // CLI > config
+    // ---------------------------------------------
+
+    if (!opt.device.empty())
         cfg.device = opt.device;
-    }
 
-    // Backend/target DNN (SFace) + backend per YUNet
     if (!opt.backend.empty()) {
-        cfg.dnn_backend   = opt.backend;   // per SFace
-        cfg.yunet_backend = opt.backend;   // per YUNet
+        cfg.dnn_backend   = opt.backend;
+        cfg.yunet_backend = opt.backend;
     }
-    if (!opt.target.empty()) {
+
+    if (!opt.target.empty())
         cfg.dnn_target = opt.target;
-    }
 
-    // Profilo detector (auto/haar/yunet)
-    if (!opt.detector.empty()) {
+    if (!opt.detector.empty())
         cfg.detector_profile = opt.detector;
-    }
 
-    // Soglia override (se fornita)
     double threshold_override = -1.0;
+
     if (opt.threshold >= 0.0) {
         threshold_override = opt.threshold;
-        cfg.sface_threshold = opt.threshold;  // tiene allineato anche il cfg
+        cfg.sface_threshold = opt.threshold;
     }
 
-    // Calcola path del modello SFace dell'utente
+    // Model path
     string modelPath = fa_user_model_path(cfg, opt.user);
 
     if (cfg.debug) {
@@ -170,6 +181,7 @@ int facial_test_main(int argc, char *argv[]) {
         << (threshold_override >= 0.0 ? " (override CLI)" : "") << "\n";
     }
 
+    // Esecuzione test
     double best_conf = 0.0;
     int best_label   = -1;
     std::string logbuf_test;
