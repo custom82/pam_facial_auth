@@ -2,7 +2,14 @@
 
 #include <opencv2/imgproc.hpp>
 #include <opencv2/imgcodecs.hpp>
+#include <opencv2/videoio.hpp>
 #include <opencv2/objdetect.hpp>
+#include <opencv2/dnn.hpp>
+#include <opencv2/face.hpp>
+
+#ifdef ENABLE_CUDA
+#include <opencv2/core/cuda.hpp>
+#endif
 
 #include <iostream>
 #include <fstream>
@@ -12,178 +19,129 @@
 #include <cctype>
 #include <cstring>
 #include <cfloat>
-#include <getopt.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 namespace fs = std::filesystem;
 
-// ==========================================================
-// Utility
-// ==========================================================
+using std::string;
+using std::vector;
 
-std::string trim(const std::string &s) {
-	size_t b = s.find_first_not_of(" \t\r\n");
-	if (b == std::string::npos)
-		return "";
-
-	size_t e = s.find_last_not_of(" \t\r\n");   // <-- FIX QUI
-
-	return s.substr(b, e - b + 1);
-}
-
-
-bool str_to_bool(const std::string &s, bool defval) {
-	std::string t = trim(s);
-	for (char &c : t)
-		c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-
-	if (t == "1" || t == "true"  || t == "yes" || t == "on")  return true;
-	if (t == "0" || t == "false" || t == "no"  || t == "off") return false;
-	return defval;
-}
-
-std::string join_path(const std::string &a, const std::string &b) {
-	if (a.empty()) return b;
-	if (b.empty()) return a;
-	if (a.back() == '/') return a + b;
-	return a + "/" + b;
-}
-
-bool file_exists(const std::string &path) {
-	struct stat st {};
-	return (::stat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode));
-}
-
-void ensure_dirs(const std::string &path) {
-	if (path.empty()) return;
-	try {
-		fs::create_directories(path);
-	} catch (...) {}
-}
-
-static void sleep_ms(int ms) {
-	if (ms > 0)
-		usleep(static_cast<useconds_t>(ms) * 1000);
+// piccolo helper per compatibilità pre-C++20
+static bool str_ends_with(const std::string &s, const std::string &suffix)
+{
+    if (s.size() < suffix.size())
+        return false;
+    return std::equal(suffix.rbegin(), suffix.rend(), s.rbegin());
 }
 
 // ==========================================================
-// Logging utility
+// Utility varie
+// ==========================================================
+
+static string trim(const string &s)
+{
+    size_t b = 0, e = s.size();
+    while (b < e && std::isspace((unsigned char)s[b])) b++;
+    while (e > b && std::isspace((unsigned char)s[e - 1])) e--;
+    return s.substr(b, e - b);
+}
+
+static bool str_to_bool(const string &s, bool defval)
+{
+    if (s.empty()) return defval;
+    string v;
+    for (char c : s) v.push_back(std::tolower((unsigned char)c));
+    if (v == "1" || v == "true" || v == "yes" || v == "on")
+        return true;
+    if (v == "0" || v == "false" || v == "no" || v == "off")
+        return false;
+    return defval;
+}
+
+static bool file_exists(const string &path)
+{
+    struct stat st {};
+    return (::stat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode));
+}
+
+static void ensure_dirs(const string &path)
+{
+    if (path.empty()) return;
+    try {
+        fs::create_directories(path);
+    } catch (...) {
+    }
+}
+
+static void sleep_ms_int(int ms)
+{
+    if (ms <= 0) return;
+    usleep((useconds_t)ms * 1000);
+}
+
+// ==========================================================
+// Logging
 // ==========================================================
 
 static void log_tool(const FacialAuthConfig &cfg,
-					 const char *level,
-					 const char *fmt, ...)
+                     const char *level,
+                     const char *fmt, ...)
 {
-	char buf[1024];
+    char buf[1024];
 
-	va_list ap;
-	va_start(ap, fmt);
-	vsnprintf(buf, sizeof(buf), fmt, ap);
-	va_end(ap);
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
 
-	const char *lev = level ? level : "";
-	std::string msg = "[" + std::string(lev) + "] " + buf + "\n";
-	bool is_err = (std::strcmp(lev, "ERROR") == 0);
+    string msg = "[";
+    msg += (level ? level : "");
+    msg += "] ";
+    msg += buf;
 
-	if (cfg.debug || is_err)
-		std::fwrite(msg.c_str(), 1, msg.size(), stderr);
+    std::cerr << msg << std::endl;
 
-	if (!cfg.log_file.empty()) {
-		std::ofstream logf(cfg.log_file, std::ios::app);
-		if (logf.is_open())
-			logf << msg;
-	}
+    if (!cfg.log_file.empty()) {
+        try {
+            ensure_dirs(fs::path(cfg.log_file).parent_path().string());
+            std::ofstream out(cfg.log_file, std::ios::app);
+            if (out)
+                out << msg << std::endl;
+        } catch (...) {
+        }
+    }
 }
 
-// ==========================================================
-// Config file parser
-// ==========================================================
-
-bool read_kv_config(const std::string &path,
-					FacialAuthConfig &cfg,
-					std::string *logbuf)
+static inline void log_info (const FacialAuthConfig &cfg, const char *fmt, ...)
 {
-	std::ifstream in(path);
-	if (!in.is_open()) {
-		if (logbuf) *logbuf += "Could not open config: " + path + "\n";
-		return false;
-	}
-
-	std::string line;
-	while (std::getline(in, line)) {
-		line = trim(line);
-		if (line.empty() || line[0] == '#')
-			continue;
-
-		std::string key, val;
-		size_t eq = line.find('=');
-
-		if (eq != std::string::npos) {
-			key = trim(line.substr(0, eq));
-			val = trim(line.substr(eq + 1));
-		} else {
-			std::istringstream iss(line);
-			if (!(iss >> key))
-				continue;
-			std::getline(iss, val);
-			val = trim(val);
-		}
-
-		try {
-			if (key == "basedir") {
-				// Solo il file di configurazione ha il permesso di cambiare basedir
-				cfg.basedir = val;
-			}
-			else if (key == "device") cfg.device = val;
-			else if (key == "width")  cfg.width  = std::max(64, std::stoi(val));
-			else if (key == "height") cfg.height = std::max(64, std::stoi(val));
-			else if (key == "frames") cfg.frames = std::max(1,  std::stoi(val));
-			else if (key == "sleep_ms") cfg.sleep_ms = std::max(0, std::stoi(val));
-			else if (key == "debug") cfg.debug = str_to_bool(val, cfg.debug);
-			else if (key == "nogui") cfg.nogui = str_to_bool(val, cfg.nogui);
-			else if (key == "fallback_device") cfg.fallback_device = str_to_bool(val, cfg.fallback_device);
-			else if (key == "model_path") cfg.model_path = val;
-			else if (key == "haar_cascade_path") cfg.haar_cascade_path = val;
-			else if (key == "training_method")  cfg.training_method  = val;
-			else if (key == "log_file")         cfg.log_file        = val;
-			else if (key == "force_overwrite")  cfg.force_overwrite = str_to_bool(val, cfg.force_overwrite);
-			else if (key == "ignore_failure")   cfg.ignore_failure  = str_to_bool(val, cfg.ignore_failure);
-
-			// vecchio parametro "threshold" -> usa LBPH
-			else if (key == "threshold")        cfg.lbph_threshold = std::stod(val);
-			else if (key == "lbph_threshold")   cfg.lbph_threshold = std::stod(val);
-			else if (key == "eigen_threshold")  cfg.eigen_threshold = std::stod(val);
-			else if (key == "fisher_threshold") cfg.fisher_threshold = std::stod(val);
-			else if (key == "eigen_components") cfg.eigen_components = std::stoi(val);
-			else if (key == "fisher_components")cfg.fisher_components = std::stoi(val);
-		}
-		catch (const std::exception &e) {
-			if (logbuf)
-				*logbuf += "Invalid line: " + line + " (" + e.what() + ")\n";
-		}
-	}
-
-	return true;
+    char buf[1024];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    log_tool(cfg, "INFO", "%s", buf);
 }
 
-// ==========================================================
-// Model type detection from XML
-// ==========================================================
-
-std::string fa_detect_model_type(const std::string &xmlPath)
+static inline void log_error(const FacialAuthConfig &cfg, const char *fmt, ...)
 {
-	std::ifstream in(xmlPath);
-	if (!in.is_open())
-		return "lbph";
+    char buf[1024];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    log_tool(cfg, "ERROR", "%s", buf);
+}
 
-	std::string line;
-	while (std::getline(in, line)) {
-		if (line.find("opencv_lbphfaces")   != std::string::npos) return "lbph";
-		if (line.find("opencv_eigenfaces")  != std::string::npos) return "eigen";
-		if (line.find("opencv_fisherfaces") != std::string::npos) return "fisher";
-	}
-	return "lbph";
+static inline void log_debug(const FacialAuthConfig &cfg, const char *fmt, ...)
+{
+    if (!cfg.debug) return;
+    char buf[1024];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    log_tool(cfg, "DEBUG", "%s", buf);
 }
 
 // ==========================================================
@@ -191,952 +149,1645 @@ std::string fa_detect_model_type(const std::string &xmlPath)
 // ==========================================================
 
 std::string fa_user_image_dir(const FacialAuthConfig &cfg,
-							  const std::string &user)
+                              const std::string &user)
 {
-	return join_path(join_path(cfg.basedir, "images"), user);
+    fs::path base = cfg.basedir.empty()
+    ? fs::path("/etc/pam_facial_auth")
+    : fs::path(cfg.basedir);
+    fs::path dir  = base / "images" / user;
+    return dir.string();
 }
 
 std::string fa_user_model_path(const FacialAuthConfig &cfg,
-							   const std::string &user)
+                               const std::string &user)
 {
-	return join_path(join_path(cfg.basedir, "models"), user + ".xml");
+    fs::path base = cfg.basedir.empty()
+    ? fs::path("/etc/pam_facial_auth")
+    : fs::path(cfg.basedir);
+    fs::path dir  = base / "models";
+    fs::path file = dir / (user + ".xml");
+    return file.string();
 }
 
 // ==========================================================
-// FaceRecWrapper IMPLEMENTATION
+// Config loader
 // ==========================================================
 
-FaceRecWrapper::FaceRecWrapper(const std::string &modelType_)
-: modelType(modelType_)
+static void apply_dnn_alias(FacialAuthConfig &cfg)
 {
-	CreateRecognizer();
+    if (!cfg.dnn_backend.empty() && cfg.yunet_backend.empty())
+        cfg.yunet_backend = cfg.dnn_backend;
 }
 
-bool FaceRecWrapper::CreateRecognizer()
+bool fa_load_config(FacialAuthConfig &cfg,
+                    std::string &logbuf,
+                    const std::string &path)
 {
-	try {
-		if (modelType == "eigen") {
-			recognizer = cv::face::EigenFaceRecognizer::create();
-		} else if (modelType == "fisher") {
-			recognizer = cv::face::FisherFaceRecognizer::create();
-		} else {
-			// default/fallback LBPH
-			recognizer = cv::face::LBPHFaceRecognizer::create();
-			modelType  = "lbph";
-		}
-		return !recognizer.empty();
-	} catch (...) {
-		recognizer.release();
-		return false;
-	}
+    string cfg_path = path.empty() ? string(FACIALAUTH_CONFIG_DEFAULT) : path;
+
+    std::ifstream in(cfg_path);
+    if (!in) {
+        logbuf += "Cannot open config file: " + cfg_path + "\n";
+        return false;
+    }
+
+    string line;
+    int lineno = 0;
+
+    while (std::getline(in, line)) {
+        lineno++;
+        string orig = line;
+        line = trim(line);
+
+        if (line.empty() || line[0] == '#')
+            continue;
+
+        size_t eq = line.find('=');
+        if (eq == string::npos) {
+            logbuf += "Invalid line " + std::to_string(lineno) + "\n";
+            continue;
+        }
+
+        string key = trim(line.substr(0, eq));
+        string val = trim(line.substr(eq + 1));
+
+        try {
+            if (key == "basedir")               cfg.basedir            = val;
+            else if (key == "device")           cfg.device             = val;
+            else if (key == "fallback_device")  cfg.fallback_device    = str_to_bool(val, cfg.fallback_device);
+
+            else if (key == "width")            cfg.width              = std::max(64,  std::stoi(val));
+            else if (key == "height")           cfg.height             = std::max(64,  std::stoi(val));
+            else if (key == "frames")           cfg.frames             = std::max(1,   std::stoi(val));
+            else if (key == "sleep_ms")         cfg.sleep_ms           = std::max(0,   std::stoi(val));
+
+            else if (key == "debug")            cfg.debug              = str_to_bool(val, cfg.debug);
+            else if (key == "nogui")            cfg.nogui              = str_to_bool(val, cfg.nogui);
+
+            else if (key == "model_path")       cfg.model_path         = val;
+            else if (key == "haar_cascade_path" ||
+                key == "haar_model")       cfg.haar_cascade_path  = val;
+
+            else if (key == "training_method")  cfg.training_method    = val;
+            else if (key == "log_file")         cfg.log_file           = val;
+
+            else if (key == "force_overwrite")  cfg.force_overwrite    = str_to_bool(val, cfg.force_overwrite);
+            else if (key == "ignore_failure")   cfg.ignore_failure     = str_to_bool(val, cfg.ignore_failure);
+
+            else if (key == "lbph_threshold")   cfg.lbph_threshold     = std::stod(val);
+            else if (key == "eigen_threshold")  cfg.eigen_threshold    = std::stod(val);
+            else if (key == "fisher_threshold") cfg.fisher_threshold   = std::stod(val);
+
+            else if (key == "eigen_components") cfg.eigen_components   = std::stoi(val);
+            else if (key == "fisher_components")cfg.fisher_components  = std::stoi(val);
+
+            else if (key == "detector_profile") cfg.detector_profile   = val;
+
+            // ------- YuNet + DNN -------
+            else if (key == "yunet_backend")    cfg.yunet_backend      = val;
+            else if (key == "dnn_backend")      cfg.dnn_backend        = val;
+            else if (key == "dnn_target")       cfg.dnn_target         = val;       // <── AGGIUNTO
+            else if (key == "yunet_model")      cfg.yunet_model        = val;
+            else if (key == "yunet_model_int8") cfg.yunet_model_int8   = val;
+
+            // ------- SFace -------
+            else if (key == "recognizer_profile") cfg.recognizer_profile = val;
+            else if (key == "sface_model")        cfg.sface_model        = val;
+            else if (key == "sface_model_int8")   cfg.sface_model_int8   = val;
+            else if (key == "sface_threshold")    cfg.sface_threshold    = std::stod(val);
+
+            else if (key == "save_failed_images") cfg.save_failed_images = str_to_bool(val, cfg.save_failed_images);
+
+            // ------- image format -------
+            else if (key == "image_format")       cfg.image_format       = val;     // <── AGGIUNTO
+
+            else {
+                logbuf += "Unknown key at line " + std::to_string(lineno)
+                + ": " + key + "\n";
+            }
+
+        } catch (const std::exception &e) {
+            logbuf += "Error parsing line " + std::to_string(lineno)
+            + ": " + orig + " (" + e.what() + ")\n";
+        }
+    }
+
+    apply_dnn_alias(cfg);
+    return true;
 }
 
-bool FaceRecWrapper::InitCascade(const std::string &cascadePath)
-{
-	if (cascadePath.empty())
-		return false;
-	if (!file_exists(cascadePath))
-		return false;
+// ==========================================================
+// FaceRecWrapper: LBPH / Eigen / Fisher
+// ==========================================================
 
-	try {
-		return faceCascade.load(cascadePath);
-	} catch (...) {
-		return false;
-	}
+class FaceRecWrapper {
+public:
+    explicit FaceRecWrapper(const std::string &modelType = "lbph")
+    : modelType_(modelType)
+    {}
+
+    bool CreateRecognizer()
+    {
+        try {
+            std::string mt = modelType_;
+            for (char &c : mt) c = (char)std::tolower((unsigned char)c);
+
+            if (mt == "eigen") {
+                recognizer_ = cv::face::EigenFaceRecognizer::create();
+                modelType_  = "eigen";
+            } else if (mt == "fisher") {
+                recognizer_ = cv::face::FisherFaceRecognizer::create();
+                modelType_  = "fisher";
+            } else {
+                recognizer_ = cv::face::LBPHFaceRecognizer::create();
+                modelType_  = "lbph";
+            }
+            return !recognizer_.empty();
+        } catch (...) {
+            recognizer_.release();
+            return false;
+        }
+    }
+
+    bool Load(const std::string &file)
+    {
+        try {
+            if (recognizer_.empty() && !CreateRecognizer())
+                return false;
+
+            recognizer_->read(file);
+            return true;
+        } catch (...) {
+            return false;
+        }
+    }
+
+    bool Save(const std::string &file) const
+    {
+        try {
+            ensure_dirs(fs::path(file).parent_path().string());
+            recognizer_->write(file);
+            return true;
+        } catch (...) {
+            return false;
+        }
+    }
+
+    bool Train(const std::vector<cv::Mat> &images,
+               const std::vector<int>    &labels)
+    {
+        if (images.empty() || labels.empty() || images.size() != labels.size())
+            return false;
+
+        try {
+            if (recognizer_.empty() && !const_cast<FaceRecWrapper*>(this)->CreateRecognizer())
+                return false;
+            recognizer_->train(images, labels);
+            return true;
+        } catch (...) {
+            return false;
+        }
+    }
+
+    bool Predict(const cv::Mat &face,
+                 int &pred,
+                 double &conf) const
+                 {
+                     if (face.empty()) return false;
+                     try {
+                         recognizer_->predict(face, pred, conf);
+                         return true;
+                     } catch (...) {
+                         return false;
+                     }
+                 }
+
+                 bool InitCascade(const std::string &cascadePath)
+                 {
+                     if (cascadePath.empty())
+                         return false;
+                     if (!file_exists(cascadePath))
+                         return false;
+
+                     try {
+                         return faceCascade_.load(cascadePath);
+                     } catch (...) {
+                         return false;
+                     }
+                 }
+
+                 bool DetectFace(const cv::Mat &frame, cv::Rect &faceROI)
+                 {
+                     if (frame.empty()) return false;
+                     if (faceCascade_.empty()) return false;
+
+                     cv::Mat gray;
+                     cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
+                     cv::equalizeHist(gray, gray);
+
+                     std::vector<cv::Rect> faces;
+                     faceCascade_.detectMultiScale(
+                         gray, faces,
+                         1.08, 3,
+                         0, cv::Size(60, 60)
+                     );
+
+                     if (faces.empty())
+                         return false;
+
+                     faceROI = faces[0];
+                     return true;
+                 }
+
+private:
+    std::string modelType_;
+    cv::Ptr<cv::face::FaceRecognizer> recognizer_;
+    cv::CascadeClassifier             faceCascade_;
+};
+
+// ==========================================================
+// Detector wrapper: HAAR + YuNet
+// ==========================================================
+
+struct DetectorWrapper {
+    enum Kind {
+        NONE,
+        HAAR,
+        YUNET
+    } kind = NONE;
+
+    cv::CascadeClassifier haar;
+    cv::Ptr<cv::FaceDetectorYN> yunet;
+};
+
+// ==========================================================
+// SFace helpers (via DNN ONNX)
+// ==========================================================
+
+static bool fa_save_sface_model(const std::string &file,
+                                const std::vector<cv::Mat> &embeds)
+{
+    try {
+        ensure_dirs(fs::path(file).parent_path().string());
+        cv::FileStorage fs(file, cv::FileStorage::WRITE);
+        if (!fs.isOpened()) return false;
+
+        fs << "type" << "sface";
+        fs << "version" << 1;
+
+        fs << "embeddings" << "[";
+        for (const auto &e : embeds)
+            fs << e;
+        fs << "]";
+
+        fs.release();
+        return true;
+    } catch (...) {
+        return false;
+    }
 }
 
-bool FaceRecWrapper::Load(const std::string &file)
+static bool fa_load_sface_embeddings(const std::string &file,
+                                     std::vector<cv::Mat> &embeds)
 {
-	try {
-		// auto-detect type dal file XML
-		std::string detected = fa_detect_model_type(file);
+    embeds.clear();
 
-		if (detected != modelType) {
-			modelType = detected;
-			if (!CreateRecognizer())
-				return false;
-		} else if (recognizer.empty()) {
-			if (!CreateRecognizer())
-				return false;
-		}
+    try {
+        cv::FileStorage fs(file, cv::FileStorage::READ);
+        if (!fs.isOpened()) return false;
 
-		recognizer->read(file);
-		return true;
-	} catch (...) {
-		return false;
-	}
+        std::string type;
+        fs["type"] >> type;
+        if (type != "sface") {
+            fs.release();
+            return false;
+        }
+
+        cv::FileNode embNode = fs["embeddings"];
+        for (auto it = embNode.begin(); it != embNode.end(); ++it) {
+            cv::Mat v;
+            (*it) >> v;
+            if (!v.empty())
+                embeds.push_back(v.clone());
+        }
+
+        fs.release();
+        return !embeds.empty();
+
+    } catch (...) {
+        return false;
+    }
 }
 
-bool FaceRecWrapper::Save(const std::string &file) const
+static bool load_sface_model_dnn(
+    const FacialAuthConfig &cfg,
+    const std::string &profile,
+    cv::dnn::Net &sface_net,
+    std::string &err)
 {
-	try {
-		ensure_dirs(fs::path(file).parent_path().string());
-		recognizer->write(file);
-		return true;
-	} catch (...) {
-		return false;
-	}
+    std::string model_path;
+
+    // Normalizza profilo
+    std::string prof = profile;
+    for (char &c : prof) c = (char)std::tolower((unsigned char)c);
+
+    // INT8 → usa model_int8 se disponibile
+    if (prof == "sface_int8") {
+        if (!cfg.sface_model_int8.empty() && file_exists(cfg.sface_model_int8))
+            model_path = cfg.sface_model_int8;
+        else if (!cfg.sface_model.empty() && file_exists(cfg.sface_model))
+            model_path = cfg.sface_model;
+    } else {
+        if (!cfg.sface_model.empty() && file_exists(cfg.sface_model))
+            model_path = cfg.sface_model;
+        else if (!cfg.sface_model_int8.empty() && file_exists(cfg.sface_model_int8))
+            model_path = cfg.sface_model_int8;
+    }
+
+    if (model_path.empty()) {
+        err = "No SFace model found (check sface_model / sface_model_int8)";
+        return false;
+    }
+
+    // ============================================================
+    // Carica modello
+    // ============================================================
+    try {
+        sface_net = cv::dnn::readNetFromONNX(model_path);
+    } catch (const std::exception &e) {
+        err = std::string("Failed to load SFace ONNX model: ") + e.what();
+        return false;
+    } catch (...) {
+        err = "Failed to load SFace ONNX model (unknown error)";
+        return false;
+    }
+
+    if (sface_net.empty()) {
+        err = "SFace DNN net is empty after creation";
+        return false;
+    }
+
+    // ============================================================
+    // BACKEND → CPU, CUDA, FP16, OpenCL, Auto
+    // ============================================================
+
+    std::string backend = cfg.dnn_backend;
+    std::string target  = cfg.dnn_target;
+
+    for (char &c : backend) c = (char)std::tolower((unsigned char)c);
+    for (char &c : target)  c = (char)std::tolower((unsigned char)c);
+
+    int be = cv::dnn::DNN_BACKEND_OPENCV;
+    int tg = cv::dnn::DNN_TARGET_CPU;
+
+    // --------------------------
+    // BACKEND SELECTION
+    // --------------------------
+
+    if (backend == "auto") {
+        #ifdef ENABLE_CUDA
+        // Prefer CUDA if a device is available, otherwise fallback to CPU
+        if (cv::cuda::getCudaEnabledDeviceCount() > 0) {
+            be = cv::dnn::DNN_BACKEND_CUDA;
+            tg = cv::dnn::DNN_TARGET_CUDA;
+        } else
+            #endif
+        {
+            be = cv::dnn::DNN_BACKEND_OPENCV;
+            tg = cv::dnn::DNN_TARGET_CPU;
+        }
+    }
+    else if (backend == "cuda") {
+        #ifdef ENABLE_CUDA
+        be = cv::dnn::DNN_BACKEND_CUDA;
+        tg = cv::dnn::DNN_TARGET_CUDA;
+        #else
+        err = "OpenCV built without CUDA support, but dnn_backend=cuda was requested";
+        return false;
+        #endif
+    }
+    else if (backend == "cuda_fp16") {
+        #ifdef ENABLE_CUDA
+        be = cv::dnn::DNN_BACKEND_CUDA;
+        tg = cv::dnn::DNN_TARGET_CUDA_FP16;
+        #else
+        err = "OpenCV built without CUDA support, but dnn_backend=cuda_fp16 was requested";
+        return false;
+        #endif
+    }
+    else if (backend == "opencl") {
+        be = cv::dnn::DNN_BACKEND_DEFAULT;
+        tg = cv::dnn::DNN_TARGET_OPENCL;
+    }
+    else if (backend == "cpu") {
+        be = cv::dnn::DNN_BACKEND_OPENCV;
+        tg = cv::dnn::DNN_TARGET_CPU;
+    }
+    else {
+        err = "Unknown dnn_backend: " + backend;
+        return false;
+    }
+
+    // --------------------------
+    // TARGET OVERRIDE
+    // --------------------------
+    if (target == "cpu")
+        tg = cv::dnn::DNN_TARGET_CPU;
+    else if (target == "cuda")
+        tg = cv::dnn::DNN_TARGET_CUDA;
+    else if (target == "cuda_fp16")
+        tg = cv::dnn::DNN_TARGET_CUDA_FP16;
+    else if (target == "opencl")
+        tg = cv::dnn::DNN_TARGET_OPENCL;
+    else if (target != "auto") {
+        err = "Unknown dnn_target: " + target;
+        return false;
+    }
+
+    // ============================================================
+    // APPLICA BACKEND E TARGET
+    // ============================================================
+    try {
+        sface_net.setPreferableBackend(be);
+        sface_net.setPreferableTarget(tg);
+    } catch (...) {
+        err = "Failed to set backend/target for SFace";
+        return false;
+    }
+
+    // Log debug
+    log_debug(cfg,
+              "Loaded SFace model '%s' backend=%s target=%s",
+              model_path.c_str(),
+              backend.c_str(),
+              target.c_str());
+
+    return true;
 }
 
-bool FaceRecWrapper::Train(const std::vector<cv::Mat> &images,
-						   const std::vector<int>    &labels)
+static bool sface_feature_from_roi(cv::dnn::Net &net,
+                                   const cv::Mat &frame,
+                                   const cv::Rect &roi,
+                                   cv::Mat &feature)
 {
-	if (images.empty() || labels.empty() || images.size() != labels.size())
-		return false;
+    if (net.empty())
+        return false;
 
-	try {
-		if (recognizer.empty() && !const_cast<FaceRecWrapper*>(this)->CreateRecognizer())
-			return false;
+    if (frame.empty() || roi.width <= 0 || roi.height <= 0)
+        return false;
 
-		recognizer->train(images, labels);
-		return true;
-	} catch (...) {
-		return false;
-	}
+    cv::Rect r = roi & cv::Rect(0, 0, frame.cols, frame.rows);
+    if (r.width <= 0 || r.height <= 0)
+        return false;
+
+    cv::Mat face = frame(r).clone();
+    if (face.empty())
+        return false;
+
+    // Resize corretto
+    cv::Mat resized;
+    cv::resize(face, resized, cv::Size(112, 112));
+
+    try {
+        // ⭐ PREPROCESSING CORRETTO PER SFace ⭐
+        cv::Mat blob = cv::dnn::blobFromImage(
+            resized,
+            1.0 / 128.0,                          // scale
+            cv::Size(112, 112),                   // size
+                                              cv::Scalar(127.5, 127.5, 127.5),      // mean
+                                              true,                                 // swapRB
+                                              false                                 // crop
+        );
+
+        net.setInput(blob);
+        cv::Mat out = net.forward();
+
+        out = out.reshape(1, 1);
+        if (out.empty())
+            return false;
+
+        feature = out.clone();
+
+        // Normalizzazione L2
+        cv::normalize(feature, feature);
+
+        return true;
+
+    } catch (...) {
+        return false;
+    }
 }
 
-bool FaceRecWrapper::Predict(const cv::Mat &face,
-							 int &pred,
-							 double &conf) const
-							 {
-								 if (face.empty())
-									 return false;
+// ==========================================================
+// Detector init (Haar / YuNet) + debug
+// ==========================================================
 
-								 try {
-									 recognizer->predict(face, pred, conf);
-									 return true;
-								 } catch (...) {
-									 return false;
-								 }
-							 }
+static bool init_detector(const FacialAuthConfig &cfg,
+                          DetectorWrapper &det)
+{
+    det.kind = DetectorWrapper::NONE;
 
-							 bool FaceRecWrapper::DetectFace(const cv::Mat &frame, cv::Rect &faceROI)
-							 {
-								 if (frame.empty())
-									 return false;
+    std::string detector = cfg.detector_profile;
+    for (char &c : detector) c = (char)std::tolower((unsigned char)c);
 
-								 if (faceCascade.empty())
-									 return false; // InitCascade DEVE essere chiamato prima
+    log_debug(cfg, "Detector requested profile: '%s'",
+              detector.empty() ? "auto" : detector.c_str());
 
-									 cv::Mat gray;
-								 cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
-								 cv::equalizeHist(gray, gray);
+    if (detector.empty() || detector == "auto") {
+        if (!cfg.yunet_model.empty() && file_exists(cfg.yunet_model)) {
+            detector = "yunet";
+            log_debug(cfg, "Detector auto → YUNet (FP32)");
+        } else if (!cfg.yunet_model_int8.empty() && file_exists(cfg.yunet_model_int8)) {
+            detector = "yunet_int8";
+            log_debug(cfg, "Detector auto → YUNet (INT8)");
+        } else {
+            detector = "haar";
+            log_debug(cfg, "Detector auto → Haar Cascade");
+        }
+    }
 
-								 std::vector<cv::Rect> faces;
-								 faceCascade.detectMultiScale(gray, faces,
-															  1.08, 3,
-									  0, cv::Size(60, 60));
+    if (detector == "yunet" || detector == "yunet_int8") {
+        std::string model_path;
 
-								 if (faces.empty())
-									 return false;
+        bool use_int8 = (detector == "yunet_int8"
+        || cfg.yunet_backend == "cpu_int8");
 
-								 faceROI = faces[0];
-								 return true;
-							 }
+        if (use_int8 && !cfg.yunet_model_int8.empty()
+            && file_exists(cfg.yunet_model_int8)) {
 
-							 // ==========================================================
-							 // Camera helper
-							 // ==========================================================
+            model_path = cfg.yunet_model_int8;
+        log_debug(cfg,
+                  "Detector using YUNet INT8 model: '%s'",
+                  model_path.c_str());
+            } else if (!cfg.yunet_model.empty() && file_exists(cfg.yunet_model)) {
+                model_path = cfg.yunet_model;
+                log_debug(cfg,
+                          "Detector using YUNet FP32 model: '%s'",
+                          model_path.c_str());
+            }
 
-							 static bool open_camera(const FacialAuthConfig &cfg,
-													 cv::VideoCapture &cap,
-								std::string &dev_used)
-							 {
-								 dev_used = cfg.device;
-								 cap.open(cfg.device);
+            if (!model_path.empty()) {
+                try {
+                    det.yunet = cv::FaceDetectorYN::create(
+                        model_path, "",
+                        cv::Size(cfg.width, cfg.height),
+                                                           0.9f,
+                                                           0.3f,
+                                                           5000
+                    );
+                } catch (...) {
+                    det.yunet.release();
+                }
 
-								 if (!cap.isOpened() && cfg.fallback_device) {
-									 cap.open("/dev/video1");
-									 if (cap.isOpened())
-										 dev_used = "/dev/video1";
-								 }
+                if (!det.yunet.empty()) {
+                    det.kind = DetectorWrapper::YUNET;
+                    log_debug(cfg, "Detector selected: YUNet");
+                    return true;
+                }
+            }
 
-								 if (!cap.isOpened())
-									 return false;
+            log_debug(cfg, "Failed to init YUNet, trying Haar (fallback)");
+    }
 
-								 cap.set(cv::CAP_PROP_FRAME_WIDTH,  cfg.width);
-								 cap.set(cv::CAP_PROP_FRAME_HEIGHT, cfg.height);
-								 return true;
-							 }
+    if (!cfg.haar_cascade_path.empty() && file_exists(cfg.haar_cascade_path)) {
+        try {
+            if (det.haar.load(cfg.haar_cascade_path)) {
+                det.kind = DetectorWrapper::HAAR;
+                log_debug(cfg,
+                          "Detector selected: Haar Cascade ('%s')",
+                          cfg.haar_cascade_path.c_str());
+                return true;
+            }
+        } catch (...) {
+        }
+    }
 
-							 // ==========================================================
-							 // CAPTURE IMAGES
-							 // ==========================================================
+    det.kind = DetectorWrapper::NONE;
+    log_error(cfg, "No detector available (YuNet/Haar)");
+    return false;
+}
 
-							 bool fa_capture_images(const std::string &user,
-													const FacialAuthConfig &cfg,
-							   bool force,
-							   std::string &logbuf,
-							   const std::string &img_format)
-							 {
-								 std::string dev_used;
-								 cv::VideoCapture cap;
+// ==========================================================
+// Camera helper
+// ==========================================================
 
-								 if (!open_camera(cfg, cap, dev_used)) {
-									 log_tool(cfg, "ERROR", "Cannot open camera %s", cfg.device.c_str());
-		return false;
-								 }
+static bool open_camera(const FacialAuthConfig &cfg,
+                        cv::VideoCapture &cap,
+                        std::string &dev_used)
+{
+    std::vector<std::string> devs;
+    devs.push_back(cfg.device);
+    if (cfg.fallback_device) {
+        devs.push_back("/dev/video0");
+        devs.push_back("/dev/video1");
+        devs.push_back("/dev/video2");
+    }
 
-	log_tool(cfg, "INFO", "Camera opened on %s", dev_used.c_str());
+    for (const auto &d : devs) {
+        if (d.empty()) continue;
+        cap.open(d);
+        if (cap.isOpened()) {
+            dev_used = d;
+            cap.set(cv::CAP_PROP_FRAME_WIDTH,  cfg.width);
+            cap.set(cv::CAP_PROP_FRAME_HEIGHT, cfg.height);
+            return true;
+        }
+    }
+    return false;
+}
 
-	if (cfg.haar_cascade_path.empty() || !file_exists(cfg.haar_cascade_path)) {
-		log_tool(cfg, "ERROR", "haar_cascade_path is missing or invalid in config");
-		return false;
-	}
+// ==========================================================
+// Training classico
+// ==========================================================
 
-	FaceRecWrapper rec("lbph");
-	if (!rec.InitCascade(cfg.haar_cascade_path)) {
-		log_tool(cfg, "ERROR", "Cannot load HAAR cascade from %s",
-				 cfg.haar_cascade_path.c_str());
-		return false;
-	}
+static bool train_classic(const std::string &user,
+                          const FacialAuthConfig &cfg,
+                          const std::string &img_dir,
+                          const std::string &model_path,
+                          const std::string &method,
+                          bool overwrite,
+                          std::string &logbuf)
+{
+    if (!overwrite && file_exists(model_path)) {
+        logbuf += "Model already exists: " + model_path + "\n";
+        return false;
+    }
 
-	std::string img_dir = fa_user_image_dir(cfg, user);
-	ensure_dirs(img_dir);
+    if (cfg.haar_cascade_path.empty() || !file_exists(cfg.haar_cascade_path)) {
+        logbuf += "HAAR cascade not configured or missing\n";
+        return false;
+    }
 
-	// Determine start index based on existing files
-	int start_idx = 0;
+    std::vector<cv::Mat> images;
+    std::vector<int> labels;
 
-	if (!force && !cfg.force_overwrite) {
-		for (auto &entry : fs::directory_iterator(img_dir)) {
-			if (!entry.is_regular_file()) continue;
+    int label = 0;
 
-			std::string name = entry.path().filename().string();
-			if (name.size() >= 8 && name.rfind("img_", 0) == 0) {
-				try {
-					int idx = std::stoi(name.substr(4, 3));
-					if (idx > start_idx) start_idx = idx;
-				} catch (...) {}
-			}
-		}
-	}
+    if (!fs::exists(img_dir)) {
+        logbuf += "Training directory not found: " + img_dir + "\n";
+        return false;
+    }
 
-	cv::Mat frame;
-	int captured = 0;
+    for (auto &entry : fs::directory_iterator(img_dir)) {
+        if (!entry.is_regular_file()) continue;
+        std::string path = entry.path().string();
 
-	std::string fmt = img_format.empty() ? "jpg" : img_format;
-	for (char &c : fmt)
-		c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        std::string lower = path;
+        for (char &c : lower) c = (char)std::tolower((unsigned char)c);
+        if (!(str_ends_with(lower, ".jpg")
+            || str_ends_with(lower, ".jpeg")
+            || str_ends_with(lower, ".png")))
+            continue;
 
-								 while (captured < cfg.frames) {
-									 cap >> frame;
-									 if (frame.empty())
-										 break;
+        cv::Mat img = cv::imread(path);
+        if (img.empty()) continue;
 
-									 cv::Rect roi;
-									 if (!rec.DetectFace(frame, roi)) {
-										 log_tool(cfg, "DEBUG", "No face detected");
-										 continue;
-									 }
+        cv::CascadeClassifier haar;
+        if (!haar.load(cfg.haar_cascade_path))
+            continue;
 
-									 cv::Mat face = frame(roi).clone();
+        cv::Mat gray;
+        cv::cvtColor(img, gray, cv::COLOR_BGR2GRAY);
+        cv::equalizeHist(gray, gray);
 
-									 cv::Mat gray;
-									 cv::cvtColor(face, gray, cv::COLOR_BGR2GRAY);
-									 cv::equalizeHist(gray, gray);
+        std::vector<cv::Rect> faces;
+        haar.detectMultiScale(gray, faces, 1.08, 3, 0, cv::Size(60, 60));
+        if (faces.empty()) continue;
 
-									 // normalizziamo anche qui a 200x200 per coerenza
-									 if (gray.cols < 60 || gray.rows < 60)
-										 continue;
-									 cv::resize(gray, gray, cv::Size(200, 200));
+        cv::Mat roi = gray(faces[0]).clone();
+        if (roi.empty()) continue;
 
-									 char buf[64];
-									 std::snprintf(buf, sizeof(buf), "img_%03d.%s",
-												   start_idx + captured + 1, fmt.c_str());
+        images.push_back(roi);
+        labels.push_back(label);
+    }
 
-									 std::string out = join_path(img_dir, buf);
+    if (images.empty()) {
+        logbuf += "No valid training images for classic model\n";
+        return false;
+    }
 
-									 cv::imwrite(out, gray);
-									 log_tool(cfg, "INFO", "Saved %s", out.c_str());
+    std::string mt = method;
+    for (char &c : mt) c = (char)std::tolower((unsigned char)c);
+    if (mt.empty() || mt == "auto")
+        mt = "lbph";
 
-									 captured++;
-									 sleep_ms(cfg.sleep_ms);
-								 }
+    FaceRecWrapper rec(mt);
+    if (!rec.CreateRecognizer()) {
+        logbuf += "Cannot create classic recognizer\n";
+        return false;
+    }
 
-								 return captured > 0;
-							 }
+    if (!rec.Train(images, labels)) {
+        logbuf += "Training failed (classic)\n";
+        return false;
+    }
 
-							 // ==========================================================
-							 // TRAIN MODEL
-							 // ==========================================================
+    if (!rec.Save(model_path)) {
+        logbuf += "Cannot save model to " + model_path + "\n";
+        return false;
+    }
 
-							 bool fa_train_user(const std::string &user,
-												const FacialAuthConfig &cfg,
-						   const std::string &method,
-						   const std::string &inputDir,
-						   const std::string &outputModel,
-						   bool /*force*/,
-						   std::string &logbuf)
-							 {
-								 // Directory immagini
-								 std::string train_dir =
-								 inputDir.empty() ? fa_user_image_dir(cfg, user) : inputDir;
+    return true;
+}
 
-								 if (!fs::exists(train_dir)) {
-									 log_tool(cfg, "ERROR", "Training directory missing: %s",
-											  train_dir.c_str());
-									 return false;
-								 }
+// ==========================================================
+// fa_capture_images
+// ==========================================================
 
-								 std::vector<cv::Mat> images;
-								 std::vector<int> labels;
+bool fa_capture_images(const std::string &user,
+                       const FacialAuthConfig &cfg,
+                       const std::string &format,
+                       std::string &log)
+{
+    // -----------------------------------------
+    // Open camera
+    // -----------------------------------------
+    cv::VideoCapture cap(cfg.device, cv::CAP_V4L2);
+    if (!cap.isOpened()) {
+        log_error(cfg, "Cannot open device: %s", cfg.device.c_str());
+        log += "Cannot open device: " + cfg.device + "\n";
+        return false;
+    }
 
-								 auto has_suffix = [](const std::string &s, const char *suf){
-									 size_t ls = s.size(), lf = strlen(suf);
-									 return (ls >= lf && s.compare(ls - lf, lf, suf) == 0);
-								 };
+    cap.set(cv::CAP_PROP_FRAME_WIDTH,  cfg.width);
+    cap.set(cv::CAP_PROP_FRAME_HEIGHT, cfg.height);
 
-								 // ---------------------
-								 // CARICAMENTO IMMAGINI
-								 // ---------------------
-								 for (auto &entry : fs::directory_iterator(train_dir)) {
-									 if (!entry.is_regular_file()) continue;
+    // -----------------------------------------
+    // Prepare directory
+    // -----------------------------------------
+    std::string userdir = fa_user_image_dir(cfg, user);
+    try {
+        fs::create_directories(userdir);
+    } catch (...) {
+        log_error(cfg, "Cannot create directory: %s", userdir.c_str());
+        log += "Cannot create directory: " + userdir + "\n";
+        return false;
+    }
 
-									 std::string path = entry.path().string();
-									 std::string lower = path;
-									 for (char &c: lower) c = (char)tolower((unsigned char)c);
+    // -----------------------------------------
+    // Init face detector
+    // -----------------------------------------
+    DetectorWrapper det;
+    if (!init_detector(cfg, det)) {
+        log_error(cfg, "Cannot initialize face detector");
+        log += "Cannot initialize face detector\n";
+        return false;
+    }
 
-									 if (!(has_suffix(lower, ".jpg") ||
-										 has_suffix(lower, ".jpeg") ||
-										 has_suffix(lower, ".png")))
-										 continue;
+    if (cfg.debug) {
+        const char *dk = (det.kind == DetectorWrapper::YUNET)
+        ? "YUNet"
+        : (det.kind == DetectorWrapper::HAAR ? "Haar" : "NONE");
+        log_debug(cfg, "Detector active: %s", dk);
+    }
 
-									 cv::Mat img = cv::imread(path, cv::IMREAD_GRAYSCALE);
-									 if (img.empty()) continue;
+    // -----------------------------------------
+    // Capture loop
+    // -----------------------------------------
+    int saved    = 0;
+    int frame_id = 0;
 
-									 if (img.cols < 60 || img.rows < 60)
-										 continue;
+    while (saved < cfg.frames)
+    {
+        cv::Mat frame;
+        if (!cap.read(frame) || frame.empty()) {
+            log_error(cfg, "Failed to capture frame");
+            continue;
+        }
 
-									 cv::equalizeHist(img, img);
-									 cv::resize(img, img, cv::Size(200, 200)); // uniforme
+        // -----------------------------------------
+        // Detect faces
+        // -----------------------------------------
+        std::vector<cv::Rect> faces;
 
-									 if (method == "fisher") {
-										 // Classe reale (0)
-										 images.push_back(img);
-										 labels.push_back(0);
+        // ------ HAAR ------
+        if (det.kind == DetectorWrapper::HAAR)
+        {
+            cv::Mat gray;
+            cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
+            cv::equalizeHist(gray, gray);
 
-										 // Classe sintetica (1)
-										 cv::Mat blur, gamma;
-										 cv::GaussianBlur(img, blur, cv::Size(5,5), 0);
+            det.haar.detectMultiScale(
+                gray,
+                faces,
+                1.08, 3,
+                0,
+                cv::Size(60, 60)
+            );
+        }
 
-										 // Gamma correction
-										 img.convertTo(gamma, -1, 1.15, 2); // leggero aumento contrasto
+        // ------ YUNET ------
+        else if (det.kind == DetectorWrapper::YUNET)
+        {
+            cv::Size inSize = det.yunet->getInputSize();
+            cv::Mat resized;
 
-										 images.push_back(blur);
-										 labels.push_back(1);
+            if (frame.size() != inSize)
+                cv::resize(frame, resized, inSize);
+            else
+                resized = frame;
 
-										 images.push_back(gamma);
-										 labels.push_back(1);
+            cv::Mat dets;
+            det.yunet->detect(resized, dets);
 
-									 } else {
-										 // LBPH ed Eigen → mono-classe
-										 images.push_back(img);
-										 labels.push_back(0);
-									 }
-								 }
+            float xscale = (float)frame.cols / (float)inSize.width;
+            float yscale = (float)frame.rows / (float)inSize.height;
 
-								 if (images.empty()) {
-									 log_tool(cfg, "ERROR", "No valid training images found");
-									 return false;
-								 }
+            for (int i = 0; i < dets.rows; i++)
+            {
+                float score = dets.at<float>(i, 4);
+                if (score < 0.6f) continue;
 
-								 // ---------------------
-								 // CREAZIONE MODELLO
-								 // ---------------------
-								 FaceRecWrapper rec(method);
+                float x = dets.at<float>(i, 0) * xscale;
+                float y = dets.at<float>(i, 1) * yscale;
+                float w = dets.at<float>(i, 2) * xscale;
+                float h = dets.at<float>(i, 3) * yscale;
 
-								 if (!rec.CreateRecognizer()) {
-									 log_tool(cfg, "ERROR", "Recognizer creation failed");
-									 return false;
-								 }
+                faces.emplace_back((int)x, (int)y, (int)w, (int)h);
+            }
+        }
 
-								 if (!rec.Train(images, labels)) {
-									 log_tool(cfg, "ERROR", "Training failed");
-									 return false;
-								 }
+        log_debug(cfg, "Frame %d: detected %zu faces",
+                  frame_id, faces.size());
+        frame_id++;
 
-								 std::string model_out =
-								 outputModel.empty() ? fa_user_model_path(cfg, user) : outputModel;
+        if (faces.empty())
+            continue;
 
-								 if (!rec.Save(model_out)) {
-									 log_tool(cfg, "ERROR", "Cannot save model: %s", model_out.c_str());
-		return false;
-								 }
+        // -----------------------------------------
+        // Take biggest face
+        // -----------------------------------------
+        cv::Rect roi = faces[0];
+        for (const auto &f : faces)
+            if (f.area() > roi.area())
+                roi = f;
 
-	log_tool(cfg, "INFO", "Model saved to %s", model_out.c_str());
-	return true;
-							 }
+        roi = roi & cv::Rect(0, 0, frame.cols, frame.rows);
+
+        log_debug(cfg, "ROI: x=%d y=%d w=%d h=%d",
+                  roi.x, roi.y, roi.width, roi.height);
+
+        cv::Mat face = frame(roi).clone();
+        if (face.empty()) {
+            log_debug(cfg, "Empty ROI after crop");
+            continue;
+        }
+
+        log_debug(cfg, "Crop size: %dx%d", face.cols, face.rows);
+
+        // -----------------------------------------
+        // Save image
+        // -----------------------------------------
+        char name[256];
+        std::string ext = format;
+        if (ext.empty())
+            ext = "jpg";
+
+        // rimuovi eventuale punto
+        if (!ext.empty() && ext[0] == '.')
+            ext = ext.substr(1);
+
+        snprintf(name, sizeof(name),
+                 "%s/img_%04d.%s",
+                 userdir.c_str(), saved, ext.c_str());
+
+        log_debug(cfg, "Saving face crop to: %s", name);
+
+        if (!cv::imwrite(name, face)) {
+            log_error(cfg, "Cannot save image: %s", name);
+            continue;
+        }
+
+        log_info(cfg, "Saved face: %s", name);
+
+        saved++;
+
+        if (cfg.sleep_ms > 0)
+            usleep(cfg.sleep_ms * 1000);
+    }
+
+    log_info(cfg, "Capture finished, saved %d images for user '%s'",
+             saved, user.c_str());
+
+    // se vuoi, puoi anche riempire un riassunto in log:
+    // log += "Capture finished, saved " + std::to_string(saved) + " images\n";
+
+    return (saved > 0);
+}
 
 
 // ==========================================================
-// TEST USER
+// fa_train_user
+// ==========================================================
+
+bool fa_train_user(const std::string &user,
+                   const FacialAuthConfig &cfg,
+                   std::string &logbuf)
+{
+    std::string img_dir    = fa_user_image_dir(cfg, user);
+    std::string model_path = cfg.model_path.empty()
+    ? fa_user_model_path(cfg, user)
+    : cfg.model_path;
+
+    if (!fs::exists(img_dir)) {
+        logbuf += "Image directory not found: " + img_dir + "\n";
+        return false;
+    }
+
+    std::string rp = cfg.recognizer_profile;
+    for (char &c : rp) c = (char)std::tolower((unsigned char)c);
+    if (rp.empty())
+        rp = "sface";
+
+    bool use_sface = (rp == "sface" || rp == "sface_int8");
+
+    // ------------------------------------------------------------
+    // 1) CLASSIC TRAINING (LBPH/EIGEN/FISHER)
+    // ------------------------------------------------------------
+    if (!use_sface) {
+        return train_classic(user, cfg, img_dir, model_path,
+                             cfg.training_method,
+                             cfg.force_overwrite,
+                             logbuf);
+    }
+
+    // ------------------------------------------------------------
+    // 2) SFACE TRAINING (DNN)
+    // ------------------------------------------------------------
+    cv::dnn::Net sface;
+    std::string err;
+    if (!load_sface_model_dnn(cfg, rp, sface, err)) {
+        logbuf += err + "\n";
+        return false;
+    }
+
+    std::vector<cv::Mat> embeddings;
+
+    // Niente detector qui: le immagini sono già facce croppate!
+
+    for (auto &entry : fs::directory_iterator(img_dir)) {
+        if (!entry.is_regular_file())
+            continue;
+
+        std::string path = entry.path().string();
+        std::string lower = path;
+        for (char &c : lower) c = std::tolower((unsigned char)c);
+
+        if (!(str_ends_with(lower, ".jpg")
+            || str_ends_with(lower, ".jpeg")
+            || str_ends_with(lower, ".png")))
+            continue;
+
+        cv::Mat img = cv::imread(path);
+        if (img.empty())
+            continue;
+
+        // Usiamo tutta l’immagine come ROI
+        cv::Rect roi(0, 0, img.cols, img.rows);
+
+        cv::Mat feat;
+        if (!sface_feature_from_roi(sface, img, roi, feat)) {
+            log_debug(cfg, "SFace: feature extraction FAILED for %s",
+                      path.c_str());
+            continue;
+        }
+
+        log_debug(cfg, "SFace: extracted embedding from %s",
+                  path.c_str());
+
+        embeddings.push_back(feat.clone());
+    }
+
+    if (embeddings.empty()) {
+        logbuf += "No embeddings extracted for SFace model\n";
+        return false;
+    }
+
+    if (!fa_save_sface_model(model_path, embeddings)) {
+        logbuf += "Cannot save SFace model: " + model_path + "\n";
+        return false;
+    }
+
+    log_info(cfg, "Saved SFace model (%zu embeddings) to %s",
+             embeddings.size(), model_path.c_str());
+
+    return true;
+}
+
+// ==========================================================
+// fa_test_user
 // ==========================================================
 
 bool fa_test_user(const std::string &user,
-				  const FacialAuthConfig &cfg,
-				  const std::string &modelPath,
-				  double &best_conf,
-				  int &best_label,
-				  std::string &logbuf,
-				  double threshold_override)
+                  const FacialAuthConfig &cfg,
+                  const std::string &modelPath,
+                  double &best_conf,
+                  int &best_label,
+                  std::string &logbuf,
+                  double threshold_override)
 {
-	std::string model_file =
-		modelPath.empty() ? fa_user_model_path(cfg, user) : modelPath;
+    std::string rp = cfg.recognizer_profile;
+    for (char &c : rp) c = (char)std::tolower((unsigned char)c);
+    if (rp.empty())
+        rp = "sface";
 
-	if (!file_exists(model_file)) {
-		log_tool(cfg, "ERROR", "Model file missing: %s", model_file.c_str());
-		return false;
-	}
+    bool use_sface = (rp == "sface" || rp == "sface_int8");
 
-	// Determina il tipo modello dal file
-	std::string model_type = fa_detect_model_type(model_file);
+    // =============================================================
+    // =====================  S F A C E  ===========================
+    // =============================================================
+    if (use_sface)
+    {
+        std::string model_file =
+        modelPath.empty() ? fa_user_model_path(cfg, user) : modelPath;
 
-	FaceRecWrapper rec(model_type);
+        // Carica modello ONNX
+        cv::dnn::Net sface;
+        std::string err;
+        if (!load_sface_model_dnn(cfg, rp, sface, err)) {
+            logbuf += err + "\n";
+            return false;
+        }
 
-	if (!rec.CreateRecognizer()) {
-		log_tool(cfg, "ERROR", "Recognizer creation failed (%s)",
-				 model_type.c_str());
-		return false;
-	}
+        // Carica embeddings dal modello XML
+        std::vector<cv::Mat> gallery;
+        if (!fa_load_sface_embeddings(model_file, gallery)) {
+            logbuf += "No SFace gallery features for user\n";
+            return false;
+        }
 
-	if (!rec.Load(model_file)) {
-		log_tool(cfg, "ERROR", "Cannot load model: %s", model_file.c_str());
-		return false;
-	}
+        if (gallery.empty()) {
+            logbuf += "Model contains zero SFace embeddings\n";
+            return false;
+        }
 
-	// Carichiamo la HAAR cascade come in capture()
-	if (cfg.haar_cascade_path.empty() || !file_exists(cfg.haar_cascade_path)) {
-		log_tool(cfg, "ERROR",
-				 "haar_cascade_path is missing or invalid in config");
-		return false;
-	}
+        // Init detector
+        DetectorWrapper det;
+        if (!init_detector(cfg, det)) {
+            logbuf += "Cannot init detector (YuNet/HAAR)\n";
+            return false;
+        }
 
-	if (!rec.InitCascade(cfg.haar_cascade_path)) {
-		log_tool(cfg, "ERROR", "Cannot load HAAR cascade from %s",
-				 cfg.haar_cascade_path.c_str());
-		return false;
-	}
+        // Apri camera
+        cv::VideoCapture cap;
+        std::string dev;
+        if (!open_camera(cfg, cap, dev)) {
+            logbuf += "Cannot open camera for SFace test\n";
+            return false;
+        }
 
-	cv::VideoCapture cap;
-	std::string dev_used;
+        log_info(cfg, "Testing SFace model for user %s on %s",
+                 user.c_str(), dev.c_str());
 
-	if (!open_camera(cfg, cap, dev_used)) {
-		log_tool(cfg, "ERROR", "Cannot open camera: %s",
-				 cfg.device.c_str());
-		return false;
-	}
+        double threshold = cfg.sface_threshold;
+        if (threshold_override > 0.0)
+            threshold = threshold_override;
 
-	log_tool(cfg, "INFO", "Testing user %s on device %s",
-			 user.c_str(), dev_used.c_str());
+        best_conf  = -1.0;
+        best_label = 0;
 
-	best_conf  = 1e9;
-	best_label = -1;
+        cv::Mat frame;
 
-	// Soglia per metodo
-	double threshold = cfg.lbph_threshold;
-	if (model_type == "eigen")  threshold = cfg.eigen_threshold;
-	if (model_type == "fisher") threshold = cfg.fisher_threshold;
+        for (int i = 0; i < cfg.frames; i++) {
+            cap >> frame;
+            if (frame.empty()) {
+                sleep_ms_int(cfg.sleep_ms);
+                continue;
+            }
 
-	if (threshold_override > 0.0)
-		threshold = threshold_override;
+            // ================== DETECTION ==================
+            cv::Rect roi;
+            bool have_face = false;
 
-	cv::Mat frame;
+            // Haar
+            if (det.kind == DetectorWrapper::HAAR) {
+                cv::Mat gray;
+                cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
+                cv::equalizeHist(gray, gray);
 
-	for (int i = 0; i < cfg.frames; i++) {
+                std::vector<cv::Rect> faces;
+                det.haar.detectMultiScale(
+                    gray, faces, 1.08, 3, 0, cv::Size(60,60)
+                );
 
-		cap >> frame;
-		if (frame.empty()) continue;
+                if (!faces.empty()) {
+                    roi = faces[0];
+                    have_face = true;
+                }
+            }
 
-		cv::Rect roi;
-		if (!rec.DetectFace(frame, roi))
-			continue;
+            // YuNet
+            else if (det.kind == DetectorWrapper::YUNET) {
+                cv::Mat resized;
+                if (frame.size() != cv::Size(cfg.width, cfg.height))
+                    cv::resize(frame, resized, cv::Size(cfg.width, cfg.height));
+                else
+                    resized = frame;
 
-		cv::Mat face = frame(roi).clone();
+                cv::Mat dets;
+                det.yunet->detect(resized, dets);
 
-		cv::Mat gray;
-		cv::cvtColor(face, gray, cv::COLOR_BGR2GRAY);
-		cv::equalizeHist(gray, gray);
+                int best_i = -1;
+                float best_score = 0.f;
 
-		if (gray.cols < 60 || gray.rows < 60)
-			continue;
+                for (int j = 0; j < dets.rows; j++) {
+                    float score = dets.at<float>(j, 4);
+                    if (score > 0.90f && score > best_score) {
+                        best_score = score;
+                        best_i = j;
+                    }
+                }
 
-		// *** Resize uniforme per tutti i metodi ***
-		cv::resize(gray, gray, cv::Size(200, 200));
+                if (best_i >= 0) {
+                    float x = dets.at<float>(best_i, 0);
+                    float y = dets.at<float>(best_i, 1);
+                    float w = dets.at<float>(best_i, 2);
+                    float h = dets.at<float>(best_i, 3);
 
-		int    label = -1;
-		double conf  = 1e9;
+                    roi = cv::Rect(cv::Point2f(x, y), cv::Size2f(w, h));
+                    have_face = true;
+                }
+            }
 
-		if (!rec.Predict(gray, label, conf))
-			continue;
+            if (!have_face) {
+                sleep_ms_int(cfg.sleep_ms);
+                continue;
+            }
 
-		if (conf < best_conf) {
-			best_conf  = conf;
-			best_label = label;
-		}
+            // ================== EMBEDDING LIVE ==================
+            cv::Mat feat;
+            if (!sface_feature_from_roi(sface, frame, roi, feat))
+                continue;
 
-		if (conf <= threshold) {
-			log_tool(cfg, "INFO",
-					 "Auth success (model=%s): conf=%.2f <= %.2f",
-					 model_type.c_str(), conf, threshold);
-			return true;
-		}
+            // ================== SIMILITUDINE ==================
+            double best_sim = -1.0;
 
-		sleep_ms(cfg.sleep_ms);
-	}
+            for (const auto &g : gallery) {
+                if (!g.empty() && feat.size() == g.size()) {
+                    double sim = feat.dot(g);
+                    if (sim > best_sim)
+                        best_sim = sim;
+                }
+            }
 
-	log_tool(cfg, "WARN",
-			 "Auth failed (model=%s): best_conf=%.2f threshold=%.2f",
-			 model_type.c_str(), best_conf, threshold);
+            best_conf = best_sim;
 
-	return false;
+            if (cfg.debug)
+                log_info(cfg,
+                         "SFace similarity = %.3f (threshold %.3f)",
+                         best_sim, threshold);
+
+                if (best_sim >= threshold)
+                    return true;
+
+            sleep_ms_int(cfg.sleep_ms);
+        }
+
+        // fallito
+        return false;
+    }
+
+    // =============================================================
+    // =============  M O D A L I T À   C L A S S I C A  ============
+    // =============================================================
+
+    std::string model_file =
+    modelPath.empty() ? fa_user_model_path(cfg, user) : modelPath;
+
+    if (!file_exists(model_file)) {
+        logbuf += "Model file missing: " + model_file + "\n";
+        return false;
+    }
+
+    std::string mt = cfg.training_method;
+    for (char &c : mt) c = (char)std::tolower((unsigned char)c);
+    if (mt.empty() || mt == "auto")
+        mt = "lbph";
+
+    FaceRecWrapper rec(mt);
+
+    if (!rec.CreateRecognizer()) {
+        logbuf += "Recognizer creation failed (" + mt + ")\n";
+        return false;
+    }
+
+    if (!rec.Load(model_file)) {
+        logbuf += "Cannot load model: " + model_file + "\n";
+        return false;
+    }
+
+    if (!rec.InitCascade(cfg.haar_cascade_path)) {
+        logbuf += "Cannot load HAAR cascade for testing\n";
+        return false;
+    }
+
+    cv::VideoCapture cap;
+    std::string dev;
+    if (!open_camera(cfg, cap, dev)) {
+        logbuf += "Cannot open camera for classic test\n";
+        return false;
+    }
+
+    log_info(cfg, "Testing user %s (model=%s) on device %s",
+             user.c_str(), mt.c_str(), dev.c_str());
+
+    best_conf  = 1e9;
+    best_label = -1;
+
+    double threshold = cfg.lbph_threshold;
+    if (mt == "eigen")  threshold = cfg.eigen_threshold;
+    if (mt == "fisher") threshold = cfg.fisher_threshold;
+
+    if (threshold_override > 0.0)
+        threshold = threshold_override;
+
+    cv::Mat frame;
+
+    for (int i = 0; i < cfg.frames; ++i) {
+        cap >> frame;
+        if (frame.empty()) {
+            sleep_ms_int(cfg.sleep_ms);
+            continue;
+        }
+
+        cv::Rect roi;
+        if (!rec.DetectFace(frame, roi)) {
+            sleep_ms_int(cfg.sleep_ms);
+            continue;
+        }
+
+        cv::Mat face = frame(roi).clone();
+        if (face.empty()) {
+            sleep_ms_int(cfg.sleep_ms);
+            continue;
+        }
+
+        cv::Mat gray;
+        cv::cvtColor(face, gray, cv::COLOR_BGR2GRAY);
+        cv::equalizeHist(gray, gray);
+
+        int    label = -1;
+        double conf  = 0.0;
+        if (!rec.Predict(gray, label, conf)) {
+            sleep_ms_int(cfg.sleep_ms);
+            continue;
+        }
+
+        if (conf < best_conf) {
+            best_conf  = conf;
+            best_label = label;
+        }
+
+        if (conf <= threshold) {
+            log_info(cfg,
+                     "Auth success (model=%s): conf=%.2f <= %.2f",
+                     mt.c_str(), conf, threshold);
+            return true;
+        }
+
+        sleep_ms_int(cfg.sleep_ms);
+    }
+
+    log_info(cfg,
+             "Auth failed (model=%s): best_conf=%.2f threshold=%.2f",
+             mt.c_str(), best_conf, threshold);
+
+    return false;
 }
+
 
 // ==========================================================
-// Maintenance
-// ==========================================================
-
-bool fa_clean_images(const FacialAuthConfig &cfg, const std::string &user)
-{
-	std::string dir = fa_user_image_dir(cfg, user);
-	if (!fs::exists(dir))
-		return true;
-
-	try {
-		for (auto &entry : fs::directory_iterator(dir)) {
-			if (entry.is_regular_file())
-				fs::remove(entry.path());
-		}
-		return true;
-	} catch (...) {
-		return false;
-	}
-}
-
-bool fa_clean_model(const FacialAuthConfig &cfg, const std::string &user)
-{
-	std::string model = fa_user_model_path(cfg, user);
-	if (!fs::exists(model))
-		return true;
-
-	try {
-		fs::remove(model);
-		return true;
-	} catch (...) {
-		return false;
-	}
-}
-
-void fa_list_images(const FacialAuthConfig &cfg, const std::string &user)
-{
-	std::string dir = fa_user_image_dir(cfg, user);
-
-	if (!fs::exists(dir)) {
-		std::cout << "[INFO] No images for user " << user << "\n";
-		return;
-	}
-
-	std::cout << "[INFO] Images for user " << user << ":\n";
-	for (auto &entry : fs::directory_iterator(dir)) {
-		if (entry.is_regular_file())
-			std::cout << "  " << entry.path().filename().string() << "\n";
-	}
-}
-
-// ==========================================================
-// Root check
+// fa_check_root
 // ==========================================================
 
 bool fa_check_root(const char *tool_name)
 {
-	if (geteuid() != 0) {
-		std::cerr << "Error: " << (tool_name ? tool_name : "this program")
-		<< " must be run as root.\n";
-		return false;
-	}
-	return true;
+    if (::geteuid() != 0) {
+        std::cerr << tool_name << ": must be run as root\n";
+        return false;
+    }
+    return true;
 }
 
-// ----------------------------------------------------------
-// facial_capture CLI
-// ----------------------------------------------------------
+// ==========================================================
+// CLI WRAPPERS
+// ==========================================================
 
-static void print_facial_capture_usage(const char *p)
+static void print_common_usage(const char *prog)
 {
-	std::cout
-	<< "Usage: " << p << " -u USER [options]\n"
-	<< "  -u, --user USER\n"
-	<< "  -d, --device DEV\n"
-	<< "  -w, --width N\n"
-	<< "  -h, --height N\n"
-	<< "  -n, --frames N\n"
-	<< "  -s, --sleep MS\n"
-	<< "  -f, --force\n"
-	<< "  -g, --nogui\n"
-	<< "      --clean            Remove all user images\n"
-	<< "      --reset            Remove user model + images\n"
-	<< "  -v, --debug\n"
-	<< "  -c, --config FILE\n"
-	<< "      --format EXT\n";
+    std::cout << "Usage: " << prog << " -u USER [options]\n";
 }
 
-int facial_capture_cli_main(int argc, char *argv[])
+int facial_capture_main (int argc, char *argv[])
 {
-	FacialAuthConfig cfg;
+    const char *prog = "facial_capture";
 
-	std::string config_path = FACIALAUTH_CONFIG_DEFAULT;
-	std::string user;
-	std::string device_opt;
-	std::string img_format = "jpg";
+    if (!fa_check_root(prog))
+        return 1;
 
-	int  width_opt   = 0;
-	int  height_opt  = 0;
-	int  frames_opt  = 0;
-	int  sleep_opt   = -1;
-	bool force       = false;
-	bool debug_opt   = false;
-	bool nogui_opt   = false;
+    std::string user;
+    std::string cfg_path;
+    std::string format;
 
-	bool opt_clean   = false;
-	bool opt_reset   = false;
+    bool clean  = false;
+    bool reset  = false;
+    bool force  = false;
 
-	enum {
-		OPT_FORMAT = 1000,
-		OPT_CLEAN  = 1002,
-		OPT_RESET  = 1003,
-		OPT_HELP   = 1001
-	};
+    std::string opt_device;
+    std::string opt_detector;
+    bool opt_debug = false;
+    bool opt_nogui = false;
+    int  opt_width = -1;
+    int  opt_height = -1;
+    int  opt_frames = -1;
+    int  opt_sleep = -1;
 
-	static struct option long_opts[] = {
-		{"user",    required_argument, nullptr, 'u'},
-		{"device",  required_argument, nullptr, 'd'},
-		{"width",   required_argument, nullptr, 'w'},
-		{"height",  required_argument, nullptr, 'h'},
-		{"frames",  required_argument, nullptr, 'n'},
-		{"sleep",   required_argument, nullptr, 's'},
-		{"force",   no_argument,       nullptr, 'f'},
-		{"nogui",   no_argument,       nullptr, 'g'},
-		{"debug",   no_argument,       nullptr, 'v'},
-		{"config",  required_argument, nullptr, 'c'},
-		{"format",  required_argument, nullptr, OPT_FORMAT},
-		{"clean",   no_argument,       nullptr, OPT_CLEAN},
-		{"reset",   no_argument,       nullptr, OPT_RESET},
-		{"help",    no_argument,       nullptr, OPT_HELP},
-		{nullptr,   0,                 nullptr, 0}
-	};
+    for (int i = 1; i < argc; ++i) {
+        std::string a = argv[i];
 
-	int opt;
-	int long_index = 0;
+        if ((a == "-u" || a == "--user") && i + 1 < argc)
+            user = argv[++i];
+        else if ((a == "-c" || a == "--config") && i + 1 < argc)
+            cfg_path = argv[++i];
+        else if ((a == "-d" || a == "--device") && i + 1 < argc)
+            opt_device = argv[++i];
+        else if ((a == "-w" || a == "--width") && i + 1 < argc)
+            opt_width = atoi(argv[++i]);
+        else if ((a == "-h" || a == "--height") && i + 1 < argc)
+            opt_height = atoi(argv[++i]);
+        else if ((a == "-n" || a == "--frames") && i + 1 < argc)
+            opt_frames = atoi(argv[++i]);
+        else if ((a == "-s" || a == "--sleep") && i + 1 < argc)
+            opt_sleep = atoi(argv[++i]);
+        else if (a == "-f" || a == "--force")
+            force = true;
+        else if (a == "-g" || a == "--nogui")
+            opt_nogui = true;
+        else if (a == "-v" || a == "--debug")
+            opt_debug = true;
+        else if (a == "--detector" && i + 1 < argc)
+            opt_detector = argv[++i];
+        else if (a == "--clean")
+            clean = true;
+        else if (a == "--reset")
+            reset = true;
+        else if (a == "--format" && i + 1 < argc)
+            format = argv[++i];
+        else if (a == "--help") {
+            print_common_usage(prog);
+            return 0;
+        }
+    }
 
-	while ((opt = getopt_long(argc, argv, "u:d:w:h:n:s:fgvc:", long_opts, &long_index)) != -1) {
-		switch (opt) {
-			case 'u': user = optarg ? optarg : ""; break;
-			case 'd': device_opt = optarg ? optarg : ""; break;
-			case 'w': width_opt  = std::atoi(optarg); break;
-			case 'h': height_opt = std::atoi(optarg); break;
-			case 'n': frames_opt = std::atoi(optarg); break;
-			case 's': sleep_opt  = std::atoi(optarg); break;
-			case 'f': force      = true; break;
-			case 'g': nogui_opt  = true; break;
-			case 'v': debug_opt  = true; break;
-			case 'c': if (optarg) config_path = optarg; break;
-			case OPT_FORMAT: if (optarg) img_format = optarg; break;
-			case OPT_CLEAN:  opt_clean = true; break;
-			case OPT_RESET:  opt_reset = true; break;
-			case OPT_HELP:
-				print_facial_capture_usage(argv[0]);
-				return 0;
-			default:
-				print_facial_capture_usage(argv[0]);
-				return 1;
-		}
-	}
+    if (user.empty()) {
+        print_common_usage(prog);
+        return 1;
+    }
 
-	if (user.empty()) {
-		std::cerr << "[ERROR] --user is required\n";
-		print_facial_capture_usage(argv[0]);
-		return 1;
-	}
+    FacialAuthConfig cfg;
+    std::string logbuf;
 
-	std::string logbuf;
+    fa_load_config(cfg, logbuf,
+                   cfg_path.empty() ? FACIALAUTH_CONFIG_DEFAULT : cfg_path);
 
-	if (!read_kv_config(config_path, cfg, &logbuf)) {
-		std::cerr << "[ERROR] Cannot read config file: " << config_path << "\n";
-		if (!logbuf.empty()) std::cerr << logbuf;
-		return 1;
-	}
+    if (!logbuf.empty())
+        std::cerr << logbuf;
+    logbuf.clear();
 
-	if (debug_opt) cfg.debug = true;
-	if (nogui_opt) cfg.nogui = true;
-	if (!device_opt.empty()) cfg.device = device_opt;
-	if (width_opt  > 0) cfg.width  = width_opt;
-	if (height_opt > 0) cfg.height = height_opt;
-	if (frames_opt > 0) cfg.frames = frames_opt;
-	if (sleep_opt >= 0) cfg.sleep_ms = sleep_opt;
+    if (!opt_device.empty())   cfg.device           = opt_device;
+    if (!opt_detector.empty()) cfg.detector_profile = opt_detector;
+    if (opt_width  > 0)        cfg.width            = opt_width;
+    if (opt_height > 0)        cfg.height           = opt_height;
+    if (opt_frames > 0)        cfg.frames           = opt_frames;
+    if (opt_sleep >= 0)        cfg.sleep_ms         = opt_sleep;
+    if (opt_debug)             cfg.debug            = true;
+    if (opt_nogui)             cfg.nogui            = true;
 
-	if (!fa_check_root("facial_capture"))
-		return 1;
+    std::string user_img_dir = fa_user_image_dir(cfg, user);
+    std::string user_model   = fa_user_model_path(cfg, user);
 
-	if (opt_clean) {
-		if (!fa_clean_images(cfg, user)) {
-			std::cerr << "[ERROR] Cannot clean images for user: " << user << "\n";
-			return 1;
-		}
-		std::cout << "[INFO] Images cleaned for user: " << user << "\n";
-		return 0;
-	}
+    if (reset) {
+        fs::remove_all(user_img_dir);
+        if (fs::exists(user_model))
+            fs::remove(user_model);
+        return 0;
+    }
 
-	if (opt_reset) {
-		bool ok1 = fa_clean_images(cfg, user);
-		bool ok2 = fa_clean_model(cfg, user);
+    if (clean) {
+        fs::remove_all(user_img_dir);
+        return 0;
+    }
 
-		if (!ok1 || !ok2) {
-			std::cerr << "[ERROR] Cannot reset data for user: " << user << "\n";
-			return 1;
-		}
+    if (force)
+        fs::remove_all(user_img_dir);
 
-		std::cout << "[INFO] Model and images reset for user: " << user << "\n";
-		return 0;
-	}
+    bool ok = fa_capture_images(user, cfg, cfg.image_format, logbuf);
 
-	std::cout << "[INFO] Starting capture for user: " << user << "\n";
+    if (!logbuf.empty())
+        std::cerr << logbuf;
 
-	if (!fa_capture_images(user, cfg, force, logbuf, img_format)) {
-		std::cerr << "[ERROR] Capture failed\n";
-		if (!logbuf.empty()) std::cerr << logbuf;
-		return 1;
-	}
-
-	std::cout << "[INFO] Capture completed\n";
-	return 0;
-}
-
-// ----------------------------------------------------------
-// facial_training CLI
-// ----------------------------------------------------------
-
-static void print_facial_training_usage(const char *p)
-{
-	std::cout <<
-	"Usage: facial_training -u <user> -m <method> [options]\n"
-	"\n"
-	"Options:\n"
-	"  -u, --user <name>           Specify the username to train the model for\n"
-	"  -m, --method <type>         Training method (lbph, eigen, fisher)\n"
-	"  -i, --input <basedir>       Override basedir for images/models\n"
-	"  -o, --output <file>         Path to save the trained model (XML)\n"
-	"  -f, --force                 Force overwrite (non usato internamente)\n"
-	"  -v, --verbose               Enable detailed output\n"
-	"  -h, --help                  Show this help message\n";
+    return ok ? 0 : 1;
 }
 
 int facial_training_cli_main(int argc, char *argv[])
 {
-	FacialAuthConfig cfg;
-	std::string config_path = FACIALAUTH_CONFIG_DEFAULT;
+    const char *prog = "facial_training";
 
-	std::string user;
-	std::string method;
-	std::string input_dir;      // override basedir
-	std::string output_file;    // override model path
-	std::string logbuf;
+    if (!fa_check_root(prog))
+        return 1;
 
-	bool force   = false;
-	bool verbose = false;
+    std::string user;
+    std::string cfg_path;
 
-	struct option long_opts[] = {
-		{"user",    required_argument, nullptr, 'u'},
-		{"method",  required_argument, nullptr, 'm'},
-		{"input",   required_argument, nullptr, 'i'},
-		{"output",  required_argument, nullptr, 'o'},
-		{"force",   no_argument,       nullptr, 'f'},
-		{"verbose", no_argument,       nullptr, 'v'},
-		{"help",    no_argument,       nullptr, 'h'},
-		{nullptr,0,nullptr,0}
-	};
+    bool opt_force  = false;
+    bool opt_clean  = false;
+    bool opt_reset  = false;
+    bool opt_debug  = false;
+    bool opt_nogui  = false;
 
-	int opt, idx = 0;
-	while ((opt = getopt_long(argc, argv, "u:m:i:o:fvh", long_opts, &idx)) != -1) {
-		switch (opt) {
-			case 'u': user   = optarg; break;
-			case 'm': method = optarg; break;
-			case 'i': input_dir   = optarg; break;
-			case 'o': output_file = optarg; break;
-			case 'f': force   = true; break;
-			case 'v': verbose = true; break;
+    std::string opt_device;
+    std::string opt_detector;
 
-			case 'h':
-				print_facial_training_usage(argv[0]);
-				return 0;
+    int opt_width  = -1;
+    int opt_height = -1;
+    int opt_frames = -1;
+    int opt_sleep  = -1;
 
-			default:
-				print_facial_training_usage(argv[0]);
-				return 1;
-		}
-	}
+    for (int i = 1; i < argc; ++i) {
+        std::string a = argv[i];
 
-	if (!read_kv_config(config_path, cfg, &logbuf)) {
-		std::cerr << "[ERROR] Cannot read config file: " << config_path << "\n";
-		if (!logbuf.empty()) std::cerr << logbuf;
-		return 1;
-	}
+        if ((a == "-u" || a == "--user") && i + 1 < argc)
+            user = argv[++i];
+        else if ((a == "-c" || a == "--config") && i + 1 < argc)
+            cfg_path = argv[++i];
+        else if ((a == "-d" || a == "--device") && i + 1 < argc)
+            opt_device = argv[++i];
+        else if ((a == "-w" || a == "--width") && i + 1 < argc)
+            opt_width = atoi(argv[++i]);
+        else if ((a == "-h" || a == "--height") && i + 1 < argc)
+            opt_height = atoi(argv[++i]);
+        else if ((a == "-n" || a == "--frames") && i + 1 < argc)
+            opt_frames = atoi(argv[++i]);
+        else if ((a == "-s" || a == "--sleep") && i + 1 < argc)
+            opt_sleep = atoi(argv[++i]);
+        else if (a == "-f" || a == "--force")
+            opt_force = true;
+        else if (a == "-g" || a == "--nogui")
+            opt_nogui = true;
+        else if (a == "-v" || a == "--debug")
+            opt_debug = true;
+        else if (a == "--detector" && i + 1 < argc)
+            opt_detector = argv[++i];
+        else if (a == "--clean")
+            opt_clean = true;
+        else if (a == "--reset")
+            opt_reset = true;
+        else if (a == "--help") {
+            print_common_usage(prog);
+            return 0;
+        }
+    }
 
-	if (verbose) cfg.debug = true;
+    if (user.empty()) {
+        print_common_usage(prog);
+        return 1;
+    }
 
-	if (user.empty()) {
-		std::cerr << "ERROR: --user is required\n";
-		return 1;
-	}
+    FacialAuthConfig cfg;
+    std::string logbuf;
 
-	if (method.empty()) {
-		std::cerr << "ERROR: --method is required\n";
-		return 1;
-	}
+    fa_load_config(cfg, logbuf,
+                   cfg_path.empty() ? FACIALAUTH_CONFIG_DEFAULT : cfg_path);
 
-	std::string method_l = method;
-	for (char &c : method_l)
-		c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    if (!logbuf.empty())
+        std::cerr << logbuf;
+    logbuf.clear();
 
-	if (method_l != "lbph" && method_l != "eigen" && method_l != "fisher") {
-		std::cerr << "ERROR: Invalid method '" << method << "'\n";
-		return 1;
-	}
+    if (!opt_device.empty())   cfg.device           = opt_device;
+    if (!opt_detector.empty()) cfg.detector_profile = opt_detector;
+    if (opt_width  > 0)        cfg.width            = opt_width;
+    if (opt_height > 0)        cfg.height           = opt_height;
+    if (opt_frames > 0)        cfg.frames           = opt_frames;
+    if (opt_sleep >= 0)        cfg.sleep_ms         = opt_sleep;
+    if (opt_debug)             cfg.debug            = true;
+    if (opt_nogui)             cfg.nogui            = true;
+    if (opt_force)             cfg.force_overwrite  = true;
 
-	if (!fa_check_root("facial_training"))
-		return 1;
+    std::string img_dir  = fa_user_image_dir(cfg, user);
+    std::string mdl_path = fa_user_model_path(cfg, user);
 
-	if (!input_dir.empty())
-		cfg.basedir = input_dir;
+    if (opt_reset) {
+        fs::remove_all(img_dir);
+        if (fs::exists(mdl_path))
+            fs::remove(mdl_path);
+        return 0;
+    }
 
-	if (output_file.empty())
-		output_file = fa_user_model_path(cfg, user);
+    if (opt_clean) {
+        fs::remove_all(img_dir);
+        return 0;
+    }
 
-	std::string train_dir = fa_user_image_dir(cfg, user);
+    bool ok = fa_train_user(user, cfg, logbuf);
 
-	if (!fa_train_user(user, cfg, method_l, train_dir, output_file, force, logbuf)) {
-		std::cerr << "Training failed\n";
-		if (!logbuf.empty()) std::cerr << logbuf;
-		return 1;
-	}
+    if (!logbuf.empty())
+        std::cerr << logbuf;
 
-	std::cout << "[OK] Model trained: " << output_file << "\n";
-	return 0;
-}
-
-// ----------------------------------------------------------
-// facial_test CLI
-// ----------------------------------------------------------
-
-static void print_facial_test_usage(const char *p)
-{
-	std::cout <<
-	"Usage: facial_test -u <user> -m <model_path> [options]\n"
-	"\n"
-	"Options:\n"
-	"  -u, --user <user>        Utente da verificare (obbligatorio)\n"
-	"  -m, --model <path>       File modello XML (opzionale; default: basedir/models/<user>.xml)\n"
-	"  -c, --config <file>      File di configurazione\n"
-	"                           (default: /etc/security/pam_facial.conf)\n"
-	"  -d, --device <device>    Dispositivo webcam (es. /dev/video0)\n"
-	"      --threshold <value>  Soglia di confidenza (override globale)\n"
-	"  -v, --verbose            Modalità verbosa\n"
-	"      --nogui              Disabilita la GUI\n"
-	"  -h, --help               Mostra questo messaggio\n";
+    return ok ? 0 : 1;
 }
 
 int facial_test_cli_main(int argc, char *argv[])
 {
-	FacialAuthConfig cfg;
-	std::string config_path = FACIALAUTH_CONFIG_DEFAULT;
+    const char *prog = "facial_test";
 
-	std::string user;
-	std::string device_opt;
-	std::string model_path;
-	std::string logbuf;
+    if (!fa_check_root(prog))
+        return 1;
 
-	bool debug_opt = false;
-	bool nogui_opt = false;
+    std::string user;
+    std::string cfg_path;
 
-	enum {
-		OPT_THRESHOLD = 2000
-	};
+    std::string opt_device;
+    std::string opt_detector;
+    bool opt_debug = false;
+    bool opt_nogui = false;
 
-	double threshold_override = -1.0;
+    int opt_width  = -1;
+    int opt_height = -1;
+    int opt_frames = -1;
+    int opt_sleep  = -1;
 
-	struct option long_opts[] = {
-		{"user",      required_argument, nullptr, 'u'},
-		{"model",     required_argument, nullptr, 'm'},
-		{"config",    required_argument, nullptr, 'c'},
-		{"device",    required_argument, nullptr, 'd'},
-		{"threshold", required_argument, nullptr, OPT_THRESHOLD},
-		{"verbose",   no_argument,       nullptr, 'v'},
-		{"nogui",     no_argument,       nullptr, 1},
-		{"help",      no_argument,       nullptr, 'h'},
-		{nullptr,0,nullptr,0}
-	};
+    double opt_threshold = -1.0;
 
-	int opt, idx = 0;
+    for (int i = 1; i < argc; ++i) {
+        std::string a = argv[i];
 
-	while ((opt = getopt_long(argc, argv, "u:m:c:d:vh", long_opts, &idx)) != -1) {
-		switch (opt) {
-			case 'u': user       = optarg; break;
-			case 'm': model_path = optarg; break;
-			case 'c': config_path = optarg; break;
-			case 'd': device_opt = optarg; break;
-			case 'v': debug_opt  = true; break;
-			case 'h':
-				print_facial_test_usage(argv[0]);
-				return 0;
+        if ((a == "-u" || a == "--user") && i + 1 < argc)
+            user = argv[++i];
+        else if ((a == "-c" || a == "--config") && i + 1 < argc)
+            cfg_path = argv[++i];
+        else if ((a == "-d" || a == "--device") && i + 1 < argc)
+            opt_device = argv[++i];
+        else if ((a == "-w" || a == "--width") && i + 1 < argc)
+            opt_width = atoi(argv[++i]);
+        else if ((a == "-h" || a == "--height") && i + 1 < argc)
+            opt_height = atoi(argv[++i]);
+        else if ((a == "-n" || a == "--frames") && i + 1 < argc)
+            opt_frames = atoi(argv[++i]);
+        else if ((a == "-s" || a == "--sleep") && i + 1 < argc)
+            opt_sleep = atoi(argv[++i]);
+        else if (a == "-g" || a == "--nogui")
+            opt_nogui = true;
+        else if (a == "-v" || a == "--debug")
+            opt_debug = true;
+        else if (a == "--detector" && i + 1 < argc)
+            opt_detector = argv[++i];
+        else if ((a == "-t" || a == "--threshold") && i + 1 < argc)
+            opt_threshold = atof(argv[++i]);
+        else if (a == "--help") {
+            print_common_usage(prog);
+            return 0;
+        }
+    }
 
-			case OPT_THRESHOLD:
-				if (optarg)
-					threshold_override = std::atof(optarg);
-			break;
+    if (user.empty()) {
+        print_common_usage(prog);
+        return 1;
+    }
 
-			case 1: // --nogui
-				nogui_opt = true;
-				break;
+    FacialAuthConfig cfg;
+    std::string logbuf;
 
-			default:
-				print_facial_test_usage(argv[0]);
-				return 1;
-		}
-	}
+    fa_load_config(cfg, logbuf,
+                   cfg_path.empty() ? FACIALAUTH_CONFIG_DEFAULT : cfg_path);
 
-	// Config
-	if (!read_kv_config(config_path, cfg, &logbuf)) {
-		std::cerr << "[ERROR] Cannot read config file: " << config_path << "\n";
-		if (!logbuf.empty()) std::cerr << logbuf;
-		return 1;
-	}
+    if (!logbuf.empty())
+        std::cerr << logbuf;
+    logbuf.clear();
 
-	if (debug_opt) cfg.debug = true;
-	if (nogui_opt) cfg.nogui = true;
-	if (!device_opt.empty()) cfg.device = device_opt;
+    if (!opt_device.empty())   cfg.device           = opt_device;
+    if (!opt_detector.empty()) cfg.detector_profile = opt_detector;
+    if (opt_debug)             cfg.debug            = true;
+    if (opt_nogui)             cfg.nogui            = true;
+    if (opt_width  > 0)        cfg.width            = opt_width;
+    if (opt_height > 0)        cfg.height           = opt_height;
+    if (opt_frames > 0)        cfg.frames           = opt_frames;
+    if (opt_sleep >= 0)        cfg.sleep_ms         = opt_sleep;
 
-	if (user.empty()) {
-		std::cerr << "ERROR: --user required\n";
-		return 1;
-	}
+    double best_conf  = 0.0;
+    int    best_label = -1;
 
-	if (!fa_check_root("facial_test"))
-		return 1;
+    bool ok = fa_test_user(
+        user,
+        cfg,
+        cfg.model_path,
+        best_conf,
+        best_label,
+        logbuf,
+        opt_threshold
+    );
 
-	if (model_path.empty())
-		model_path = fa_user_model_path(cfg, user);
+    if (!logbuf.empty())
+        std::cerr << logbuf;
 
-	double best_conf = 0.0;
-	int    best_label = -1;
-
-	bool ok = fa_test_user(user, cfg, model_path,
-						   best_conf, best_label, logbuf,
-						threshold_override);
-
-	if (!ok) {
-		std::cerr << "Authentication FAILED (best_conf=" << best_conf << ")\n";
-		if (!logbuf.empty()) std::cerr << logbuf;
-		return 2;
-	}
-
-	std::cout << "[OK] Authentication SUCCESS (conf=" << best_conf << ")\n";
-	return 0;
+    return ok ? 0 : 1;
 }

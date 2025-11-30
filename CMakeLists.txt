@@ -1,115 +1,69 @@
-cmake_minimum_required(VERSION 3.10)
-project(pam_facial_auth CXX)
+cmake_minimum_required(VERSION 3.18)
+project(pam_facial_auth LANGUAGES C CXX)
 
-set(CMAKE_CXX_STANDARD 20)
+option(ENABLE_CUDA "Enable CUDA DNN backend support" OFF)
 
-# Output dirs
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+#====================================================================
 # OpenCV
-find_package(OpenCV REQUIRED)
-include_directories(${OpenCV_INCLUDE_DIRS})
+#====================================================================
+find_package(OpenCV 4.0 REQUIRED
+    COMPONENTS
+        core
+        imgproc
+        imgcodecs
+        videoio
+        objdetect
+        dnn
+        highgui
+        face
+)
 
-# PAM
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(PAM REQUIRED pam)
-include_directories(${PAM_INCLUDE_DIRS})
+if(ENABLE_CUDA)
+    message(STATUS "CUDA support ENABLED at build-time")
+    add_definitions(-DENABLE_CUDA)
+else()
+    message(STATUS "CUDA support DISABLED at build-time")
+endif()
 
-include_directories(include)
+include_directories(
+    ${OpenCV_INCLUDE_DIRS}
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
 
-#
-# === LIBRERIA PRINCIPALE ===
-#
+#====================================================================
+# Libreria condivisa libfacialauth
+#====================================================================
 add_library(facialauth SHARED
     src/libfacialauth.cpp
+    include/libfacialauth.h
 )
 
-target_link_libraries(facialauth ${OpenCV_LIBS})
-
-#
-# === MODULO PAM ===
-#
-add_library(pam_facial_auth MODULE
-    src/pam_facial_auth.cpp
+target_link_libraries(facialauth
+    ${OpenCV_LIBS}
 )
 
-# Rimuove il prefisso "lib" → pam_facial_auth.so
+#====================================================================
+# Modulo PAM
+#====================================================================
+add_library(pam_facial_auth SHARED src/pam_facial_auth.cpp)
+
+# Rimuove "lib" dal nome del modulo PAM
 set_target_properties(pam_facial_auth PROPERTIES PREFIX "")
 
-target_link_libraries(pam_facial_auth
-    facialauth
-    ${PAM_LIBRARIES}
-)
+# Assicurati che venga compilato come modulo PAM
+target_link_libraries(pam_facial_auth PRIVATE facialauth pam)
 
-#
-# === BINARI ===
-#
-add_executable(facial_capture src/facial_capture.cpp)
-target_link_libraries(facial_capture facialauth ${OpenCV_LIBS})
 
+#====================================================================
+# Eseguibili CLI reali del progetto
+#====================================================================
+add_executable(facial_capture  src/facial_capture.cpp)
 add_executable(facial_training src/facial_training.cpp)
+add_executable(facial_test     src/facial_test.cpp)
+
+target_link_libraries(facial_capture  facialauth ${OpenCV_LIBS})
 target_link_libraries(facial_training facialauth ${OpenCV_LIBS})
-
-add_executable(facial_test src/facial_test.cpp)
-target_link_libraries(facial_test facialauth ${OpenCV_LIBS})
-
-#
-# === INSTALLAZIONE ===
-#
-
-# PAM module
-install(TARGETS pam_facial_auth
-    LIBRARY DESTINATION /lib64/security
-)
-
-# Main library
-install(TARGETS facialauth
-    LIBRARY DESTINATION /usr/lib64
-)
-
-# CLI tools
-install(TARGETS facial_capture facial_training facial_test
-    RUNTIME DESTINATION /usr/sbin
-)
-
-# Headers
-install(DIRECTORY include/
-    DESTINATION /usr/include
-)
-
-# Install config file
-if(EXISTS "${CMAKE_SOURCE_DIR}/etc/pam_facial.conf")
-    install(FILES etc/pam_facial.conf
-        DESTINATION /etc/security
-        PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ
-    )
-else()
-    message(WARNING "pam_facial.conf non trovato, nessun file installato in /etc/security")
-endif()
-
-
-# ============================================================
-# Install man pages
-# ============================================================
-
-# Fix prefix for Gentoo (defaults to /usr/local otherwise)
-if (CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-    set(CMAKE_INSTALL_PREFIX "/usr" CACHE PATH "Install prefix" FORCE)
-endif()
-
-# Man1 files
-install(
-    FILES
-        ${CMAKE_SOURCE_DIR}/man/facial_capture.1
-        ${CMAKE_SOURCE_DIR}/man/facial_training.1
-        ${CMAKE_SOURCE_DIR}/man/facial_test.1
-    DESTINATION share/man/man1
-)
-
-# Man8 files
-install(
-    FILES
-        ${CMAKE_SOURCE_DIR}/man/pam_facial_auth.8
-    DESTINATION share/man/man8
-)
+target_link_libraries(facial_test     facialauth ${OpenCV_LIBS})
