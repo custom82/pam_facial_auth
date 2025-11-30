@@ -192,14 +192,14 @@ int facial_test_main(int argc, char *argv[]) {
     (threshold_override >= 0.0) ? threshold_override : cfg.sface_threshold;
 
     if (ok) {
-        cout << "[SUCCESS] Test FACIALE OK per utente '" << opt.user << "'\n"
-        << "          Similarita' = " << best_conf
-        << " (soglia = " << effective_threshold << ")\n";
+        cout << "[SUCCESS] Facial recognition passed for user '" << opt.user << "'\n"
+        << "          Similarity = " << best_conf
+        << " (threshold = " << effective_threshold << ")\n";
         return 0;
     } else {
-        cout << "[FAIL]    Test FACIALE FALLITO per utente '" << opt.user << "'\n"
-        << "          Miglior similarita' = " << best_conf
-        << " (soglia = " << effective_threshold << ")\n";
+        cout << "[FAIL]    Facial recognition failed for user '" << opt.user << "'\n"
+        << "          Best similarity = " << best_conf
+        << " (threshold = " << effective_threshold << ")\n";
         return 1;
     }
 }
