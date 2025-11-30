@@ -21,6 +21,7 @@
 #include <cfloat>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <syslog.h>
 
 namespace fs = std::filesystem;
 
