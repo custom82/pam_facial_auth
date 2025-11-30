@@ -113,39 +113,40 @@ static void log_tool(const FacialAuthConfig &cfg,
     }
 }
 
-static inline void log_info (const FacialAuthConfig &cfg, const char *fmt, ...)
-{
-    char buf[1024];
-    va_list ap;
-    va_start(ap, fmt);
-    vsnprintf(buf, sizeof(buf), fmt, ap);
-    va_end(ap);
-    log_tool(cfg, "INFO", "%s", buf);
+
+// Funzione per il log (ora si basa su `cfg.debug`)
+void log_debug(const FacialAuthConfig &cfg, const char *fmt, ...) {
+    if (!cfg.debug) return;
+
+    va_list args;
+    va_start(args, fmt);
+
+    // Scrittura su syslog con livello DEBUG
+    vsyslog(LOG_DEBUG, fmt, args);
+
+    va_end(args);
 }
 
-static inline void log_error(const FacialAuthConfig &cfg, const char *fmt, ...)
-{
-    char buf[1024];
-    va_list ap;
-    va_start(ap, fmt);
-    vsnprintf(buf, sizeof(buf), fmt, ap);
-    va_end(ap);
-    log_tool(cfg, "ERROR", "%s", buf);
+void log_info(const FacialAuthConfig &cfg, const char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+
+    // Scrittura su syslog con livello INFO
+    vsyslog(LOG_INFO, fmt, args);
+
+    va_end(args);
 }
 
-static inline void log_debug(const FacialAuthConfig &cfg, const char *fmt, ...)
-{
-    // Verifica che debug sia attivo prima di scrivere il messaggio
-    if (!cfg.debug) return;  // Non eseguire il log se il debug è disabilitato
+void log_error(const FacialAuthConfig &cfg, const char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
 
-    char buf[1024];
-    va_list ap;
-    va_start(ap, fmt);
-    vsnprintf(buf, sizeof(buf), fmt, ap);
-    va_end(ap);
+    // Scrittura su syslog con livello ERR
+    vsyslog(LOG_ERR, fmt, args);
 
-    log_tool(cfg, "DEBUG", "%s", buf);  // Scrive il messaggio di debug
+    va_end(args);
 }
+
 
 
 // ==========================================================
