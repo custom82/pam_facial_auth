@@ -21,6 +21,7 @@
 #include <cfloat>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <syslog.h>
 
 namespace fs = std::filesystem;
 
@@ -113,36 +114,56 @@ static void log_tool(const FacialAuthConfig &cfg,
     }
 }
 
-static inline void log_info (const FacialAuthConfig &cfg, const char *fmt, ...)
-{
-    char buf[1024];
-    va_list ap;
-    va_start(ap, fmt);
-    vsnprintf(buf, sizeof(buf), fmt, ap);
-    va_end(ap);
-    log_tool(cfg, "INFO", "%s", buf);
-}
 
-static inline void log_error(const FacialAuthConfig &cfg, const char *fmt, ...)
-{
-    char buf[1024];
-    va_list ap;
-    va_start(ap, fmt);
-    vsnprintf(buf, sizeof(buf), fmt, ap);
-    va_end(ap);
-    log_tool(cfg, "ERROR", "%s", buf);
-}
+// Funzione per il log (ora si basa su `cfg.debug`)
+#include "../include/libfacialauth.h"
+#include <syslog.h>  // Assicurati che syslog.h sia incluso per utilizzare LOG_* e vsyslog
+#include <stdarg.h>  // Necessario per il supporto dei variabili argomenti
 
-static inline void log_debug(const FacialAuthConfig &cfg, const char *fmt, ...)
-{
+// Funzione per il log (ora si basa su `cfg.debug`)
+void log_debug(const FacialAuthConfig &cfg, const char *fmt, ...) {
     if (!cfg.debug) return;
-    char buf[1024];
-    va_list ap;
-    va_start(ap, fmt);
-    vsnprintf(buf, sizeof(buf), fmt, ap);
-    va_end(ap);
-    log_tool(cfg, "DEBUG", "%s", buf);
+
+    // Inizializza il syslog con la facility 'auth' e livello 'debug'
+    openlog("pam_facial_auth", LOG_PID | LOG_CONS, LOG_AUTH);
+
+    va_list args;
+    va_start(args, fmt);
+
+    // Scrittura su syslog con livello DEBUG
+    vsyslog(LOG_DEBUG, fmt, args);
+
+    va_end(args);
 }
+
+void log_info(const FacialAuthConfig &cfg, const char *fmt, ...) {
+    // Inizializza il syslog con la facility 'auth' e livello 'info'
+    openlog("pam_facial_auth", LOG_PID | LOG_CONS, LOG_AUTH);
+
+    va_list args;
+    va_start(args, fmt);
+
+    // Scrittura su syslog con livello INFO
+    vsyslog(LOG_INFO, fmt, args);
+
+    va_end(args);
+}
+
+void log_error(const FacialAuthConfig &cfg, const char *fmt, ...) {
+    // Inizializza il syslog con la facility 'auth' e livello 'err'
+    openlog("pam_facial_auth", LOG_PID | LOG_CONS, LOG_AUTH);
+
+    va_list args;
+    va_start(args, fmt);
+
+    // Scrittura su syslog con livello ERR
+    vsyslog(LOG_ERR, fmt, args);
+
+    va_end(args);
+}
+
+
+
 
 // ==========================================================
 // Path helpers
@@ -1236,8 +1257,11 @@ bool fa_test_user(const std::string &user,
             return false;
         }
 
-        log_info(cfg, "Testing SFace model for user %s on %s",
-                 user.c_str(), dev.c_str());
+
+        if (cfg.debug) {
+            log_info(cfg, "Testing SFace model for user %s on %s", user.c_str(), dev.c_str());
+        }
+
 
         double threshold = cfg.sface_threshold;
         if (threshold_override > 0.0)
