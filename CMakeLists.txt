@@ -48,14 +48,14 @@ target_link_libraries(facialauth
 #====================================================================
 # Modulo PAM
 #====================================================================
-add_library(pam_facial_auth SHARED
-    src/pam_facial_auth.cpp
-)
+add_library(pam_facial_auth SHARED src/pam_facial_auth.cpp)
 
-target_link_libraries(pam_facial_auth
-    facialauth
-    ${OpenCV_LIBS}
-)
+# Rimuove "lib" dal nome del modulo PAM
+set_target_properties(pam_facial_auth PROPERTIES PREFIX "")
+
+# Assicurati che venga compilato come modulo PAM
+target_link_libraries(pam_facial_auth PRIVATE facialauth pam)
+
 
 #====================================================================
 # Eseguibili CLI reali del progetto
