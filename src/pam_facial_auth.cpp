@@ -52,13 +52,16 @@ extern "C" {
         );
 
         if (!test_log.empty()) {
-            pam_syslog(pamh,
-                       ok ? LOG_INFO : LOG_ERR,
-                       "%s", test_log.c_str());
+            // Aggiunto controllo per il debug
+            if (cfg.debug) {
+                pam_syslog(pamh,
+                           ok ? LOG_INFO : LOG_ERR,
+                           "%s", test_log.c_str());
+            }
         }
 
         return ok ? PAM_SUCCESS : PAM_AUTH_ERR;
-    }
+
 
     PAM_EXTERN int pam_sm_setcred(
         pam_handle_t * /*pamh*/,
