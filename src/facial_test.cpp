@@ -3,35 +3,44 @@
 #include <iostream>
 #include <string>
 #include <vector>
-#include <cstring>
-#include <cstdlib>
-#include <unistd.h>
+#include <filesystem>
 
-// ------------------------------------------------------------
-// HELP
-// ------------------------------------------------------------
-static void print_help()
+using namespace std;
+namespace fs = std::filesystem;
+
+static void print_facial_test_help(const char *prog)
 {
     std::cout <<
-    "Usage: facial_test -u <user> [options]\n\n"
+    "Usage: " << prog << " -u USER [options]\n"
+    "\n"
     "Options:\n"
-    "  -u, --user <user>        Utente da verificare (obbligatorio)\n"
-    "  -c, --config <file>      File di configurazione (default: /etc/security/pam_facial.conf)\n"
-    "  -d, --device <device>    Dispositivo webcam (es. /dev/video0)\n"
-    "  --threshold <value>      Soglia di confidenza (override)\n"
-    "  --detector <name>        Forza detector (auto|haar|yunet|yunet_int8)\n"
-    "  -v, --verbose            Modalità verbosa\n"
-    "  --nogui                  Disabilita GUI\n"
-    "  -h, --help               Mostra questo messaggio\n";
+    "  -u, --user USER          Utente da verificare (obbligatorio)\n"
+    "  -c, --config FILE        Percorso file di configurazione\n"
+    "  -d, --device DEV         Dispositivo video (es. /dev/video0)\n"
+    "  -w, --width N            Larghezza frame\n"
+    "  -h, --height N           Altezza frame\n"
+    "  -n, --frames N           Numero di frame da acquisire\n"
+    "  -s, --sleep MS           Delay tra frame (ms)\n"
+    "  --detector X             auto | haar | yunet | yunet_int8\n"
+    "  -t, --threshold VAL      Override soglia (SFace o LBPH/Eigen/Fisher)\n"
+    "  -v, --debug              Abilita debug\n"
+    "  -g, --nogui              Disabilita GUI\n"
+    "  --help                   Mostra questo messaggio\n"
+    "\n"
+    "Riconoscitori supportati:\n"
+    "  recognizer_profile = sface | sface_int8 | lbph | eigen | fisher\n"
+    "\n"
+    "Backend DNN (da file di configurazione):\n"
+    "  dnn_backend = cpu | cuda | cuda_fp16 | opencl | auto\n"
+    "  dnn_target  = cpu | cuda | cuda_fp16 | opencl | auto\n"
+    "\n";
 }
 
-// ------------------------------------------------------------
-// MAIN
-// ------------------------------------------------------------
 int facial_test_cli_main(int argc, char *argv[])
 {
     const char *prog = "facial_test";
 
+    // PAM e gli strumenti devono essere root
     if (!fa_check_root(prog))
         return 1;
 
@@ -40,6 +49,7 @@ int facial_test_cli_main(int argc, char *argv[])
 
     std::string opt_device;
     std::string opt_detector;
+
     bool opt_debug = false;
     bool opt_nogui = false;
 
@@ -51,58 +61,77 @@ int facial_test_cli_main(int argc, char *argv[])
     double opt_threshold = -1.0;
 
     // ---------------------------------------------------------
-    // Parse args
+    // PARSING PARAMETRI CLI
     // ---------------------------------------------------------
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
 
         if ((a == "-u" || a == "--user") && i + 1 < argc)
             user = argv[++i];
+
         else if ((a == "-c" || a == "--config") && i + 1 < argc)
             cfg_path = argv[++i];
+
         else if ((a == "-d" || a == "--device") && i + 1 < argc)
             opt_device = argv[++i];
+
         else if ((a == "-w" || a == "--width") && i + 1 < argc)
             opt_width = atoi(argv[++i]);
+
         else if ((a == "-h" || a == "--height") && i + 1 < argc)
             opt_height = atoi(argv[++i]);
+
         else if ((a == "-n" || a == "--frames") && i + 1 < argc)
             opt_frames = atoi(argv[++i]);
+
         else if ((a == "-s" || a == "--sleep") && i + 1 < argc)
             opt_sleep = atoi(argv[++i]);
+
         else if (a == "--detector" && i + 1 < argc)
             opt_detector = argv[++i];
+
         else if ((a == "-t" || a == "--threshold") && i + 1 < argc)
             opt_threshold = atof(argv[++i]);
+
         else if (a == "-v" || a == "--debug")
             opt_debug = true;
-        else if (a == "--nogui")
+
+        else if (a == "-g" || a == "--nogui")
             opt_nogui = true;
-        else if (a == "--help") {
-            std::cout << "Usage: facial_test -u <user> [options]\n";
+
+        else if (a == "--help" || a == "-h") {
+            print_facial_test_help(prog);
             return 0;
         }
     }
 
+    // ---------------------------------------------------------
+    // PARAMETRO OBBLIGATORIO: USER
+    // ---------------------------------------------------------
     if (user.empty()) {
-        std::cerr << "[ERROR] Missing required parameter -u\n";
-        std::cout << "Usage: facial_test -u <user> [options]\n";
+        print_facial_test_help(prog);
         return 1;
     }
 
     // ---------------------------------------------------------
-    // Load config
+    // CARICA CONFIG
     // ---------------------------------------------------------
     FacialAuthConfig cfg;
     std::string logbuf;
 
-    fa_load_config(cfg, logbuf,
-                   cfg_path.empty() ? FACIALAUTH_CONFIG_DEFAULT : cfg_path);
+    fa_load_config(
+        cfg,
+        logbuf,
+        cfg_path.empty() ? FACIALAUTH_CONFIG_DEFAULT : cfg_path
+    );
 
     if (!logbuf.empty())
         std::cerr << logbuf;
     logbuf.clear();
 
+    // ---------------------------------------------------------
+    // OVERRIDE PARAMETRI DA CLI
+    // ---------------------------------------------------------
     if (!opt_device.empty())   cfg.device           = opt_device;
     if (!opt_detector.empty()) cfg.detector_profile = opt_detector;
     if (opt_debug)             cfg.debug            = true;
@@ -112,22 +141,16 @@ int facial_test_cli_main(int argc, char *argv[])
     if (opt_frames > 0)        cfg.frames           = opt_frames;
     if (opt_sleep >= 0)        cfg.sleep_ms         = opt_sleep;
 
-    double best_conf  = -1.0;
+    // ---------------------------------------------------------
+    // ESECUZIONE TEST DI AUTENTICAZIONE
+    // ---------------------------------------------------------
+    double best_conf  = 0.0;
     int    best_label = -1;
 
-    // Determina percorso modello automaticamente
-    std::string model_path =
-    cfg.model_path.empty()
-    ? fa_user_model_path(cfg, user)
-    : cfg.model_path;
-
-    // ---------------------------------------------------------
-    // Esegui test
-    // ---------------------------------------------------------
     bool ok = fa_test_user(
         user,
         cfg,
-        model_path,
+        cfg.model_path,
         best_conf,
         best_label,
         logbuf,
@@ -137,23 +160,5 @@ int facial_test_cli_main(int argc, char *argv[])
     if (!logbuf.empty())
         std::cerr << logbuf;
 
-    // ---------------------------------------------------------
-    // RISULTATI FINALI
-    // ---------------------------------------------------------
-    if (ok) {
-        std::cout << "\n✔ AUTH SUCCESS for user '" << user << "'\n";
-        if (cfg.debug)
-            std::cout << "  Best similarity = " << best_conf << "\n";
-        return 0;
-    } else {
-        std::cout << "\n❌ AUTH FAILED for user '" << user << "'\n";
-        if (cfg.debug)
-            std::cout << "  Best similarity = " << best_conf << "\n";
-        return 1;
-    }
-}
-
-int main(int argc, char *argv[])
-{
-    return facial_test_cli_main(argc, argv);
+    return ok ? 0 : 1;
 }
