@@ -50,14 +50,31 @@ extern "C" {
             cfg.debug = true;
 
         // -------------------------------------------------------
-        // 4. Logging di debug (con facility AUTH)
+        // 4. Wrapper logging: auth.info / auth.debug
         // -------------------------------------------------------
-        if (cfg.debug) {
-            pam_syslog(pamh, LOG_DEBUG, "Debug mode enabled for user %s", user);
-        }
+        auto pam_log = [&](int level, const char *fmt, ...) {
+            int real_level = (cfg.debug ? LOG_AUTH | LOG_DEBUG
+            : LOG_AUTH | LOG_INFO);
+
+            va_list args;
+            va_start(args, fmt);
+            vsyslog(real_level, fmt, args);
+            va_end(args);
+
+            // Se vuoi anche farlo vedere nel journal con pam_syslog():
+            // pam_syslog(pamh, cfg.debug ? LOG_DEBUG : LOG_INFO, fmt, ...);
+        };
 
         // -------------------------------------------------------
-        // 5. Esegue il test del volto
+        // 5. Log iniziale
+        // -------------------------------------------------------
+        pam_log(LOG_INFO, "FacialAuth: starting authentication for user %s", user);
+
+        if (cfg.debug)
+            pam_log(LOG_DEBUG, "Debug mode enabled (cfg.debug=true)");
+
+        // -------------------------------------------------------
+        // 6. Esegue il test del volto
         // -------------------------------------------------------
         double best_conf = 0.0;
         int best_label   = -1;
@@ -74,16 +91,19 @@ extern "C" {
         );
 
         // -------------------------------------------------------
-        // 6. Log dettagliati solo se debug attivo
+        // 7. Log dettagliati (solo debug)
         // -------------------------------------------------------
-        if (cfg.debug && !test_log.empty()) {
-            pam_syslog(pamh,
-                       ok ? LOG_DEBUG : LOG_ERR,
-                       "%s", test_log.c_str());
+        if (!test_log.empty()) {
+            pam_log(cfg.debug ? LOG_DEBUG : LOG_INFO, "%s", test_log.c_str());
         }
 
+        if (ok)
+            pam_log(LOG_INFO, "FacialAuth: authentication OK for user %s", user);
+        else
+            pam_log(LOG_INFO, "FacialAuth: authentication FAILED for user %s", user);
+
         // -------------------------------------------------------
-        // 7. Ritorna il risultato a PAM
+        // 8. Ritorna il risultato a PAM
         // -------------------------------------------------------
         return ok ? PAM_SUCCESS : PAM_AUTH_ERR;
     }
