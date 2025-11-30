@@ -1,190 +1,209 @@
 #include <iostream>
 #include <string>
-#include <opencv2/opencv.hpp>
-#include <opencv2/dnn.hpp>
+#include <vector>
+#include <cstdlib>
 
-#include "libfacialauth.h"   // tua libreria
+#include "libfacialauth.h"
 
-using namespace std;
+using std::cout;
+using std::cerr;
+using std::endl;
+using std::string;
 
-/* ============================================================
- *  PARSING ARGOMENTI CLI
- * ============================================================ */
-static void print_help() {
-    cout << "Usage: facial_test -u <user> [options]\n"
-    << "Options:\n"
-    << "  -u, --user <name>           Utente da testare\n"
-    << "  -d, --device <path>         Dispositivo video (default /dev/video0)\n"
-    << "      --backend <cpu|cuda>    Backend DNN\n"
-    << "      --target <cpu|cuda>     Target DNN\n"
-    << "      --detector <auto|haar|yunet>\n"
-    << "  --debug                     Abilita debug\n"
-    << "  -h, --help                  Mostra questo help\n";
+struct TestOptions {
+    string user;
+    string device = "/dev/video0";
+    string config_path = "/etc/security/pam_facial.conf";
+    string backend;            // cpu / cuda (vuoto = usa config)
+    string target;             // cpu / cuda (vuoto = usa config)
+    string detector;           // auto / haar / yunet (vuoto = usa config)
+    double threshold = -1.0;   // <0 = usa soglia da config
+    bool debug = false;
+};
+
+static void print_usage(const char *progname) {
+    cout << "Uso: " << progname << " -u USER [opzioni]\n"
+    << "\n"
+    << "Opzioni:\n"
+    << "  -u, --user USER         Utente da testare (obbligatorio)\n"
+    << "  -d, --device DEV        Dispositivo video (default: /dev/video0)\n"
+    << "      --config FILE       File di configurazione (default: /etc/security/pam_facial.conf)\n"
+    << "      --backend B         Backend DNN: cpu | cuda (CLI > config)\n"
+    << "      --target T          Target DNN: cpu | cuda (CLI > config)\n"
+    << "      --detector P        Profilo detector: auto | haar | yunet (CLI > config)\n"
+    << "      --threshold X       Soglia di similarità per SFace (CLI > config)\n"
+    << "      --debug             Abilita debug verboso\n"
+    << "  -h, --help              Mostra questo aiuto\n";
 }
 
-/* ============================================================
- *  MAIN LOGICA DI TEST
- * ============================================================ */
-static bool run_test(const FacialAuthConfig& cfg,
-                     const string& user,
-                     const string& device,
-                     bool debug)
-{
-    if (debug) {
-        cout << "[INFO] Testing SFace model for user " << user
-        << " on " << device << "\n";
-    }
-
-    cv::VideoCapture cap(device);
-    if (!cap.isOpened()) {
-        cerr << "[ERROR] Cannot open video device " << device << "\n";
+static bool parse_args(int argc, char *argv[], TestOptions &opt) {
+    if (argc <= 1) {
+        print_usage(argv[0]);
         return false;
     }
 
-    cv::Mat frame;
-    cap >> frame;
+    for (int i = 1; i < argc; ++i) {
+        string arg = argv[i];
 
-    if (frame.empty()) {
-        cerr << "[ERROR] Empty frame from device\n";
-        return false;
-    }
+        auto need_value = [&](const char *optname) -> bool {
+            if (i + 1 >= argc) {
+                cerr << "Opzione " << optname << " richiede un valore\n";
+                return false;
+            }
+            return true;
+        };
 
-    // ============================================
-    //  Caricamento embedding utente
-    // ============================================
-    vector<float> embeddings;
-    if (!fa_load_user_embeddings(cfg, user, embeddings)) {
-        cerr << "[ERROR] No SFace gallery features for user\n";
-        return false;
-    }
-
-    // ============================================
-    //  Caricamento modello SFace (con backend/target/cuda)
-    // ============================================
-    cv::dnn::Net net;
-    string err;
-
-    if (!load_sface_model_dnn(cfg, cfg.sface_model, net, err)) {
-        cerr << "[ERROR] Failed loading SFace model: " << err << "\n";
-        return false;
-    }
-
-    // ============================================
-    //  Selettore del detector
-    // ============================================
-    Detector det;
-
-    if (!fa_init_detector(det, cfg, err)) {
-        if (debug)
-            cerr << "[DEBUG] Detector '" << cfg.detector_profile
-            << "' failed, fallback to Haar\n";
-
-        cfg.detector_profile = "haar";
-        if (!fa_init_detector(det, cfg, err)) {
-            cerr << "[ERROR] Cannot initialize any detector\n";
+        if (arg == "-u" || arg == "--user") {
+            if (!need_value(arg.c_str())) return false;
+            opt.user = argv[++i];
+        } else if (arg == "-d" || arg == "--device") {
+            if (!need_value(arg.c_str())) return false;
+            opt.device = argv[++i];
+        } else if (arg == "--config") {
+            if (!need_value(arg.c_str())) return false;
+            opt.config_path = argv[++i];
+        } else if (arg == "--backend") {
+            if (!need_value(arg.c_str())) return false;
+            opt.backend = argv[++i];
+        } else if (arg == "--target") {
+            if (!need_value(arg.c_str())) return false;
+            opt.target = argv[++i];
+        } else if (arg == "--detector") {
+            if (!need_value(arg.c_str())) return false;
+            opt.detector = argv[++i];
+        } else if (arg == "--threshold") {
+            if (!need_value(arg.c_str())) return false;
+            try {
+                opt.threshold = std::stod(argv[++i]);
+            } catch (...) {
+                cerr << "Valore non valido per --threshold\n";
+                return false;
+            }
+        } else if (arg == "--debug") {
+            opt.debug = true;
+        } else if (arg == "-h" || arg == "--help") {
+            print_usage(argv[0]);
+            std::exit(0);
+        } else {
+            cerr << "Opzione sconosciuta: " << arg << "\n";
+            print_usage(argv[0]);
             return false;
         }
     }
 
-    if (debug)
-        cout << "[DEBUG] Detector selected: " << det.name << "\n";
-
-    // ============================================
-    //  Estrarre volto
-    // ============================================
-    cv::Rect faceBox;
-    if (!det.detect(frame, faceBox)) {
-        cerr << "[ERROR] No face detected\n";
+    if (opt.user.empty()) {
+        cerr << "Errore: devi specificare l'utente con -u / --user\n";
+        print_usage(argv[0]);
         return false;
     }
 
-    cv::Mat face = frame(faceBox).clone();
-
-    // ============================================
-    //  Calcolo feature con SFace
-    // ============================================
-    vector<float> feat;
-    if (!fa_extract_sface(net, face, feat, err)) {
-        cerr << "[ERROR] Failed extracting SFace features\n";
-        return false;
-    }
-
-    // ============================================
-    //  Similarità con embedding utente
-    // ============================================
-    float sim = fa_cosine_similarity(embeddings, feat);
-
-    cout << "[INFO] SFace similarity = " << sim
-    << " (threshold " << cfg.sface_threshold << ")\n";
-
-    bool ok = sim >= cfg.sface_threshold;
-
-    // ============================================
-    //  RISULTATO FINALE (HUMAN FRIENDLY)
-    // ============================================
-    if (ok) cout << "[RESULT] AUTH OK\n";
-    else    cout << "[RESULT] AUTH FAILED\n";
-
-    return ok;
+    return true;
 }
 
-/* ============================================================
- *  MAIN CLI
- * ============================================================ */
-int main(int argc, char** argv)
-{
-    string user;
-    string device = "/dev/video0";
-    string backend_cli = "";
-    string target_cli  = "";
-    string detector_cli = "";
-    bool debug = false;
-
-    // --- parse CLI ---
-    for (int i = 1; i < argc; i++) {
-        string a = argv[i];
-
-        if (a == "-u" || a == "--user") {
-            if (i + 1 < argc) user = argv[++i];
-        }
-        else if (a == "-d" || a == "--device") {
-            if (i + 1 < argc) device = argv[++i];
-        }
-        else if (a == "--backend") {
-            if (i + 1 < argc) backend_cli = argv[++i];
-        }
-        else if (a == "--target") {
-            if (i + 1 < argc) target_cli = argv[++i];
-        }
-        else if (a == "--detector") {
-            if (i + 1 < argc) detector_cli = argv[++i];
-        }
-        else if (a == "--debug") {
-            debug = true;
-        }
-        else if (a == "-h" || a == "--help") {
-            print_help();
-            return 0;
-        }
-    }
-
-    if (user.empty()) {
-        cerr << "[ERROR] Missing -u <user>\n";
+int facial_test_main(int argc, char *argv[]) {
+    TestOptions opt;
+    if (!parse_args(argc, argv, opt)) {
         return 1;
     }
+
+    FacialAuthConfig cfg;
+    std::string logbuf;
 
     // Carica configurazione
-    FacialAuthConfig cfg;
-    string err;
-    if (!fa_load_config(cfg, err, FACIALAUTH_CONFIG_DEFAULT)) {
-        cerr << "[ERROR] Cannot load config: " << err << "\n";
+    if (!fa_load_config(cfg, logbuf, opt.config_path)) {
+        cerr << "[ERROR] Impossibile caricare la configurazione da '"
+        << opt.config_path << "'\n";
+        if (!logbuf.empty())
+            cerr << logbuf << "\n";
         return 1;
     }
 
-    // Override CLI
-    if (!backend_cli.empty()) cfg.dnn_backend = backend_cli;
-    if (!target_cli.empty())  cfg.dnn_target  = target_cli;
-    if (!detector_cli.empty()) cfg.detector_profile = detector_cli;
+    // Debug da CLI ha la precedenza
+    if (opt.debug) {
+        cfg.debug = true;
+    }
 
-    return run_test(cfg, user, device, debug) ? 0 : 1;
+    if (cfg.debug && !logbuf.empty()) {
+        cerr << "[DEBUG] Config caricata da " << opt.config_path << ":\n"
+        << logbuf << "\n";
+    }
+
+    // CLI deve avere precedenza sul file di configurazione
+    // ---------------------------------------------------
+    // Dispositivo video
+    if (!opt.device.empty()) {
+        cfg.device = opt.device;
+    }
+
+    // Backend/target DNN (SFace) + backend per YUNet
+    if (!opt.backend.empty()) {
+        cfg.dnn_backend   = opt.backend;   // per SFace
+        cfg.yunet_backend = opt.backend;   // per YUNet
+    }
+    if (!opt.target.empty()) {
+        cfg.dnn_target = opt.target;
+    }
+
+    // Profilo detector (auto/haar/yunet)
+    if (!opt.detector.empty()) {
+        cfg.detector_profile = opt.detector;
+    }
+
+    // Soglia override (se fornita)
+    double threshold_override = -1.0;
+    if (opt.threshold >= 0.0) {
+        threshold_override = opt.threshold;
+        cfg.sface_threshold = opt.threshold;  // tiene allineato anche il cfg
+    }
+
+    // Calcola path del modello SFace dell'utente
+    string modelPath = fa_user_model_path(cfg, opt.user);
+
+    if (cfg.debug) {
+        cerr << "[DEBUG] Utente: " << opt.user << "\n"
+        << "[DEBUG] Dispositivo: " << cfg.device << "\n"
+        << "[DEBUG] Backend DNN: " << cfg.dnn_backend << "\n"
+        << "[DEBUG] Target DNN: " << cfg.dnn_target << "\n"
+        << "[DEBUG] Detector profile: " << cfg.detector_profile << "\n"
+        << "[DEBUG] Modello utente: " << modelPath << "\n"
+        << "[DEBUG] Soglia SFace: " << cfg.sface_threshold
+        << (threshold_override >= 0.0 ? " (override CLI)" : "") << "\n";
+    }
+
+    double best_conf = 0.0;
+    int best_label   = -1;
+    std::string logbuf_test;
+
+    bool ok = fa_test_user(
+        opt.user,
+        cfg,
+        modelPath,
+        best_conf,
+        best_label,
+        logbuf_test,
+        threshold_override
+    );
+
+    if (cfg.debug && !logbuf_test.empty()) {
+        cerr << "[DEBUG] Log test:\n" << logbuf_test << "\n";
+    }
+
+    double effective_threshold =
+    (threshold_override >= 0.0) ? threshold_override : cfg.sface_threshold;
+
+    if (ok) {
+        cout << "[SUCCESS] Test FACIALE OK per utente '" << opt.user << "'\n"
+        << "          Similarita' = " << best_conf
+        << " (soglia = " << effective_threshold << ")\n";
+        return 0;
+    } else {
+        cout << "[FAIL]    Test FACIALE FALLITO per utente '" << opt.user << "'\n"
+        << "          Miglior similarita' = " << best_conf
+        << " (soglia = " << effective_threshold << ")\n";
+        return 1;
+    }
+}
+
+int main(int argc, char *argv[]) {
+    return facial_test_main(argc, argv);
 }
