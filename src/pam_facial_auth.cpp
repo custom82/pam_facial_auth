@@ -18,7 +18,7 @@ extern "C" {
         bool cli_debug = false;
 
         // -------------------------------------------------------
-        // 1. Controllo parametro debug passato dal modulo PAM
+        // Leggi parametro debug da pam.d
         // -------------------------------------------------------
         for (int i = 0; i < argc; ++i) {
             if (strcmp(argv[i], "debug") == 0) {
@@ -27,7 +27,7 @@ extern "C" {
         }
 
         // -------------------------------------------------------
-        // 2. Ottieni user PAM
+        // Ottieni user PAM
         // -------------------------------------------------------
         if (pam_get_user(pamh, &user, nullptr) != PAM_SUCCESS || !user) {
             pam_syslog(pamh, LOG_ERR, "Cannot get PAM user");
@@ -35,7 +35,7 @@ extern "C" {
         }
 
         // -------------------------------------------------------
-        // 3. Carica configurazione
+        // Carica configurazione
         // -------------------------------------------------------
         FacialAuthConfig cfg;
         std::string cfg_err;
@@ -45,36 +45,37 @@ extern "C" {
             return PAM_AUTH_ERR;
         }
 
-        // CLI ha precedenza sul file di configurazione
+        // CLI debug ha precedenza sul file di configurazione
         if (cli_debug)
             cfg.debug = true;
 
         // -------------------------------------------------------
-        // 4. Wrapper logging: auth.info / auth.debug
+        // APRI il syslog con facility AUTH
         // -------------------------------------------------------
-        auto pam_log = [&](int level, const char *fmt, ...) {
-            int real_level = (cfg.debug ? LOG_AUTH | LOG_DEBUG
-            : LOG_AUTH | LOG_INFO);
+        openlog("pam_facial_auth", LOG_PID, LOG_AUTH);
+
+        // -------------------------------------------------------
+        // Wrapper logging con pam_syslog
+        // -------------------------------------------------------
+        auto pam_log = [&](const char *fmt, ...) {
+            int level = cfg.debug ? LOG_DEBUG : LOG_INFO;
 
             va_list args;
             va_start(args, fmt);
-            vsyslog(real_level, fmt, args);
+            pam_vsyslog(pamh, level, fmt, args);
             va_end(args);
-
-            // Se vuoi anche farlo vedere nel journal con pam_syslog():
-            // pam_syslog(pamh, cfg.debug ? LOG_DEBUG : LOG_INFO, fmt, ...);
         };
 
         // -------------------------------------------------------
-        // 5. Log iniziale
+        // Log iniziale
         // -------------------------------------------------------
-        pam_log(LOG_INFO, "FacialAuth: starting authentication for user %s", user);
+        pam_log("Starting facial authentication for user %s", user);
 
         if (cfg.debug)
-            pam_log(LOG_DEBUG, "Debug mode enabled (cfg.debug=true)");
+            pam_log("Debug mode enabled (cfg.debug=1)");
 
         // -------------------------------------------------------
-        // 6. Esegue il test del volto
+        // Esegue il test del volto
         // -------------------------------------------------------
         double best_conf = 0.0;
         int best_label   = -1;
@@ -91,20 +92,22 @@ extern "C" {
         );
 
         // -------------------------------------------------------
-        // 7. Log dettagliati (solo debug)
+        // Log dei dettagli (info o debug)
         // -------------------------------------------------------
         if (!test_log.empty()) {
-            pam_log(cfg.debug ? LOG_DEBUG : LOG_INFO, "%s", test_log.c_str());
+            pam_log("%s", test_log.c_str());
         }
 
         if (ok)
-            pam_log(LOG_INFO, "FacialAuth: authentication OK for user %s", user);
+            pam_log("Authentication OK for user %s", user);
         else
-            pam_log(LOG_INFO, "FacialAuth: authentication FAILED for user %s", user);
+            pam_log("Authentication FAILED for user %s", user);
 
         // -------------------------------------------------------
-        // 8. Ritorna il risultato a PAM
+        // Chiudi syslog
         // -------------------------------------------------------
+        closelog();
+
         return ok ? PAM_SUCCESS : PAM_AUTH_ERR;
     }
 
