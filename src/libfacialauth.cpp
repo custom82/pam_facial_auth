@@ -503,96 +503,136 @@ struct DetectorWrapper {
 bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face) const
 {
     face = cv::Rect();
-
     if (frame.empty())
         return false;
 
-    // ========================
-    // Haar Cascade
-    // ========================
+    // -------------------------
+    // Haar
+    // -------------------------
     if (type == DET_HAAR) {
         std::vector<cv::Rect> faces;
         cv::Mat gray;
         cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
-
-        haar.detectMultiScale(
-            gray, faces,
-            1.1, 3,
-            cv::CASCADE_SCALE_IMAGE,
-            cv::Size(60, 60)   // dimensione minima
-        );
-
-        if (faces.empty())
-            return false;
-
-        // prendi faccia più grande
-        face = *std::max_element(
-            faces.begin(), faces.end(),
-                                 [](const cv::Rect &a, const cv::Rect &b) {
-                                     return a.area() < b.area();
-                                 }
-        );
-
-        // controllo ridicolo → evita falsi positivi
-        if (face.width < 40 || face.height < 40)
-            return false;
-
-        return true;
+        haar.detectMultiScale(gray, faces, 1.1, 3, 0, cv::Size(30, 30));
+        if (!faces.empty()) {
+            face = faces[0];
+            return true;
+        }
+        return false;
     }
 
-    // ========================
-    // YuNet (FP32 / INT8)
-    // ========================
-    if (type == DET_YUNET && yunet) {
 
-        cv::Mat blob = cv::dnn::blobFromImage(
-            frame,
-            1.0,
-            input_size,                 // 320x320
-            cv::Scalar(104,117,123),
-                                              true,                       // swapRB
-                                              false
-        );
+    // -------------------------
+    // YuNet
+    // -------------------------
+    if (type == DET_YUNET && yunet)
+    {
+        // individua backend e target
+        int backend = yunet->getPreferableBackend();
+        int target  = yunet->getPreferableTarget();
 
+        cv::Mat blob;
+
+        // =====================================================
+        // CPU BACKEND (OpenCV) → preprocess VGG BGR + NO scale
+        // =====================================================
+        if (backend == cv::dnn::DNN_BACKEND_OPENCV &&
+            target  == cv::dnn::DNN_TARGET_CPU)
+        {
+            blob = cv::dnn::blobFromImage(
+                frame,
+                1.0,
+                cv::Size(320,320),
+                                          cv::Scalar(104,117,123), // mean BGR
+                                          true,                    // swapRB
+                                          false
+            );
+        }
+
+        // =====================================================
+        // CUDA / CUDA_FP16 → preprocess ONNX standard
+        // =====================================================
+        else if (backend == cv::dnn::DNN_BACKEND_CUDA)
+        {
+            cv::Mat resized;
+            cv::resize(frame, resized, cv::Size(320,320));
+
+            blob = cv::dnn::blobFromImage(
+                resized,
+                1.0/255.0,
+                cv::Size(320,320),
+                                          cv::Scalar(),            // no mean
+                                          true,                    // swapRB
+                                          false
+            );
+        }
+
+        // =====================================================
+        // OPENCL → preprocess ONNX standard
+        // =====================================================
+        else if (backend == cv::dnn::DNN_BACKEND_OPENCV &&
+            target  == cv::dnn::DNN_TARGET_OPENCL)
+        {
+            cv::Mat resized;
+            cv::resize(frame, resized, cv::Size(320,320));
+
+            blob = cv::dnn::blobFromImage(
+                resized,
+                1.0/255.0,
+                cv::Size(320,320),
+                                          cv::Scalar(),            // no mean
+                                          true,
+                                          false
+            );
+        }
+
+        // =====================================================
+        // FALLBACK SICURO (CPU mean)
+        // =====================================================
+        else
+        {
+            blob = cv::dnn::blobFromImage(
+                frame,
+                1.0,
+                cv::Size(320,320),
+                                          cv::Scalar(104,117,123),
+                                          true,
+                                          false
+            );
+        }
+
+        // forward
         yunet->setInput(blob);
         cv::Mat out = yunet->forward();
-
         if (out.empty() || out.dims != 3)
             return false;
 
-        int faces_n = out.size[1];
-        float *data = (float*)out.data;
+        int num = out.size[1];
+        float *data = (float*) out.data;
 
-        float best_score = 0.0f;
-        cv::Rect best;
+        float best_score = 0.f;
+        cv::Rect best_rect;
 
-        for (int i = 0; i < faces_n; i++) {
-            float score = data[i * 15 + 4];
-            if (score < 0.85f)    // Soglia più alta per evitare OGGETTI
-                continue;
+        for (int i = 0; i < num; ++i)
+        {
+            float x = data[i*15 + 0];
+            float y = data[i*15 + 1];
+            float w = data[i*15 + 2];
+            float h = data[i*15 + 3];
+            float score = data[i*15 + 4];
 
-            cv::Rect r(
-                (int)data[i * 15 + 0],
-                       (int)data[i * 15 + 1],
-                       (int)data[i * 15 + 2],
-                       (int)data[i * 15 + 3]
-            );
-
-            // correggi bound
-            r &= cv::Rect(0, 0, frame.cols, frame.rows);
-
-            // scarta rettangoli troppo piccoli → mani, oggetti
-            if (r.width < 80 || r.height < 80)
-                continue;
-
-            if (score > best_score) {
+            if (score > 0.6f && score > best_score)
+            {
                 best_score = score;
-                best = r;
+                best_rect  = cv::Rect(
+                    cv::Point((int)x, (int)y),
+                                      cv::Size((int)w, (int)h)
+                );
             }
         }
 
         if (best_score > 0.0f) {
-            face = best;
+            face = best_rect & cv::Rect(0,0,frame.cols,frame.rows);
             return true;
         }
 
@@ -601,6 +641,7 @@ bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face) const
 
     return false;
 }
+
 
 
 
