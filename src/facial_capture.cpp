@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <unistd.h>
 #include <filesystem>
+#include <fstream>
 #include <fcntl.h>
 #include <sys/ioctl.h>
 #include <linux/videodev2.h>
