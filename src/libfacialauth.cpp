@@ -455,7 +455,7 @@ struct DetectorWrapper {
         DET_YUNET
     } type = DET_NONE;
 
-    cv::CascadeClassifier haar;
+    mutable cv::CascadeClassifier haar;
     cv::Ptr<cv::dnn::Net> yunet;
     cv::Size input_size = cv::Size(320, 320);
 
