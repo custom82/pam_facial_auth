@@ -131,4 +131,6 @@ bool fa_test_user(const std::string &user,
                   std::string &log,
                   double threshold_override = -1.0);
 
+bool fa_check_root(const std::string &tool_name);
+
 #endif

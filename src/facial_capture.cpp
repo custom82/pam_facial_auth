@@ -258,8 +258,9 @@ int facial_capture_main(int argc, char **argv)
         cfg.detector_profile=detector_override;
     }
 
-    if (!fa_check_root("facial_capture")) {
-        std::cerr<<"Devi essere root\n"; return 1;
+    std::string tool = "facial_capture";
+    if (!fa_check_root(tool)) {
+            std::cerr<<"Devi essere root\n"; return 1;
     }
 
     if (cfg.verbose)

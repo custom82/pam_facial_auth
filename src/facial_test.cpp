@@ -74,7 +74,7 @@ int facial_test_cli_main(int argc, char **argv)
     if (verbose || debug)
         cfg.debug = true;
 
-    if (!fa_check_root("facial_test")) {
+   if (!fa_check_root("facial_test")) {
         std::cerr << "[ERRORE] Questo strumento deve essere eseguito come root.\n";
         return 1;
     }
