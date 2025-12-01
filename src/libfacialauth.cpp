@@ -15,6 +15,7 @@
 #include <fstream>
 #include <sstream>
 #include <filesystem>
+#include <algorithm>
 #include <cstdarg>
 #include <cctype>
 #include <cstring>
@@ -116,7 +117,6 @@ void log_debug(const FacialAuthConfig &cfg, const char *fmt, ...)
 {
     if (!cfg.debug)
         return;
-
     va_list ap;
     va_start(ap, fmt);
     vlog_stderr("DEBUG", fmt, ap);
@@ -227,7 +227,7 @@ bool fa_load_config(FacialAuthConfig &cfg,
             // Runtime / logging
             else if (key == "debug")            cfg.debug              = str_to_bool(val, cfg.debug);
             else if (key == "nogui")            cfg.nogui              = str_to_bool(val, cfg.nogui);
-            else if (key == "log_file")         cfg.log_file           = val; // unused now
+            else if (key == "log_file")         cfg.log_file           = val; // currently unused
 
             // Classic models
             else if (key == "training_method")  cfg.training_method    = val;
@@ -567,7 +567,7 @@ static bool load_sface_model_dnn(
     int tg = cv::dnn::DNN_TARGET_CPU;
 
     // Backend selection
-    if (backend == "auto") {
+    if (backend == "auto" || backend.empty()) {
         #ifdef ENABLE_CUDA
         if (cv::cuda::getCudaEnabledDeviceCount() > 0) {
             be = cv::dnn::DNN_BACKEND_CUDA;
@@ -597,7 +597,7 @@ static bool load_sface_model_dnn(
     } else if (backend == "opencl") {
         be = cv::dnn::DNN_BACKEND_DEFAULT;
         tg = cv::dnn::DNN_TARGET_OPENCL;
-    } else if (backend == "cpu" || backend.empty()) {
+    } else if (backend == "cpu") {
         be = cv::dnn::DNN_BACKEND_OPENCV;
         tg = cv::dnn::DNN_TARGET_CPU;
     } else {
@@ -630,7 +630,7 @@ static bool load_sface_model_dnn(
     log_debug(cfg,
               "Loaded SFace model '%s' backend=%s target=%s",
               model_path.c_str(),
-              backend.empty() ? "cpu" : backend.c_str(),
+              backend.empty() ? "auto" : backend.c_str(),
               target.empty()  ? "auto" : target.c_str());
 
     return true;
@@ -786,7 +786,6 @@ static bool open_camera(const FacialAuthConfig &cfg,
         devs.push_back(cfg.device);
 
     if (cfg.fallback_device) {
-        // Basic fallback set
         devs.push_back("/dev/video0");
         devs.push_back("/dev/video1");
         devs.push_back("/dev/video2");
@@ -1460,6 +1459,20 @@ static std::vector<std::string> fa_list_video_devices()
     return devs;
 }
 
+static std::string fa_read_sys_file(const fs::path &base,
+                                    const std::string &name)
+{
+    fs::path p = base / name;
+    if (!fs::exists(p))
+        return {};
+    std::ifstream f(p);
+    if (!f.is_open())
+        return {};
+    std::string s;
+    std::getline(f, s);
+    return s;
+}
+
 static void fa_print_device_info_v4l2(const std::string &dev)
 {
     int fd = open(dev.c_str(), O_RDWR | O_NONBLOCK);
@@ -1486,26 +1499,48 @@ static void fa_print_device_info_v4l2(const std::string &dev)
     << ((cap.version >> 8)  & 0xff) << "."
     << (cap.version & 0xff) << "\n";
 
-    // Try to read USB/vendor info from sysfs
-    std::string base = "/sys/class/video4linux/" +
-    fs::path(dev).filename().string() + "/device/";
+    // Try to locate USB metadata by walking up from /sys/class/video4linux/videoX/device
+    bool printed_usb = false;
+    try {
+        std::string video_name = fs::path(dev).filename().string(); // "video0"
+        fs::path sys_dev = fs::path("/sys/class/video4linux") / video_name / "device";
 
-    auto read_file = [&](const std::string &file) -> std::string {
-        std::ifstream f(base + file);
-        if (!f.is_open()) return "";
-        std::string s; std::getline(f, s);
-        return s;
-    };
+        fs::path p = fs::canonical(sys_dev);
+        for (int depth = 0; depth < 6; ++depth) {
+            if (!fs::exists(p))
+                break;
 
-    std::string vendor  = read_file("idVendor");
-    std::string product = read_file("idProduct");
-    std::string manuf   = read_file("manufacturer");
-    std::string model   = read_file("product");
+            std::string idVendor  = fa_read_sys_file(p, "idVendor");
+            std::string idProduct = fa_read_sys_file(p, "idProduct");
+            std::string manuf     = fa_read_sys_file(p, "manufacturer");
+            std::string product   = fa_read_sys_file(p, "product");
 
-    if (!vendor.empty())  std::cout << "  Vendor ID:   " << vendor  << "\n";
-    if (!product.empty()) std::cout << "  Product ID:  " << product << "\n";
-    if (!manuf.empty())   std::cout << "  Maker:       " << manuf   << "\n";
-    if (!model.empty())   std::cout << "  Model:       " << model   << "\n";
+            if (!idVendor.empty() || !idProduct.empty() ||
+                !manuf.empty()   || !product.empty()) {
+                if (!idVendor.empty())
+                    std::cout << "  USB Vendor ID:   " << idVendor  << "\n";
+                if (!idProduct.empty())
+                    std::cout << "  USB Product ID:  " << idProduct << "\n";
+                if (!manuf.empty())
+                    std::cout << "  USB Manufacturer: " << manuf   << "\n";
+                if (!product.empty())
+                    std::cout << "  USB Product:      " << product << "\n";
+                printed_usb = true;
+            break;
+                }
+
+                fs::path parent = p.parent_path();
+                if (parent == p)
+                    break;
+            p = parent;
+        }
+    } catch (...) {
+        // ignore sysfs failures
+    }
+
+    if (!printed_usb) {
+        std::cout << "  (no USB/sysfs metadata found)\n";
+    }
 
     std::cout << "\n";
     close(fd);
