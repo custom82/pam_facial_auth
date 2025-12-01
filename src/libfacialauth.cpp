@@ -499,35 +499,59 @@ struct DetectorWrapper {
 bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face) const
 {
     face = cv::Rect();
-    if (frame.empty()) {
-        return false;
-    }
 
+    if (frame.empty())
+        return false;
+
+    //
+    // --- Modalità Haar Cascade ---
+    //
     if (type == DET_HAAR) {
         std::vector<cv::Rect> faces;
         cv::Mat gray;
+
         cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
         haar.detectMultiScale(gray, faces, 1.1, 3,
-                              0 | cv::CASCADE_SCALE_IMAGE,
+                              cv::CASCADE_SCALE_IMAGE,
                               cv::Size(30, 30));
-        if (!faces.empty()) {
-            face = faces[0];
-            return true;
-        }
-        return false;
-    } else if (type == DET_YUNET && yunet) {
+
+        if (faces.empty())
+            return false;
+
+        // Ritorna il volto più grande (più probabile)
+        auto best = std::max_element(
+            faces.begin(), faces.end(),
+                                     [](const cv::Rect &a, const cv::Rect &b) {
+                                         return a.area() < b.area();
+                                     }
+        );
+
+        face = *best;
+        return true;
+    }
+
+    //
+    // --- Modalità YuNet (DNN) ---
+    //
+    if (type == DET_YUNET && yunet) {
+
+        // Pre-elaborazione
         cv::Mat blob = cv::dnn::blobFromImage(
             frame, 1.0, input_size,
-            cv::Scalar(104, 117, 123), true, false
+            cv::Scalar(104, 117, 123),  // mean BGR
+                                              true,                       // swapRB
+                                              false                       // crop
         );
+
         yunet->setInput(blob);
         cv::Mat out = yunet->forward();
-        if (out.empty() || out.dims != 3) {
+
+        if (out.empty() || out.dims != 3)
             return false;
-        }
 
         int num = out.size[1];
         float *data = (float*)out.data;
+
         float best_score = 0.f;
         cv::Rect best_rect;
 
@@ -537,7 +561,11 @@ bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face) const
             float w = data[i * 15 + 2];
             float h = data[i * 15 + 3];
             float score = data[i * 15 + 4];
-            if (score > 0.7f && score > best_score) {
+
+            if (score < 0.7f)  // soglia YuNet standard
+                continue;
+
+            if (score > best_score) {
                 best_score = score;
                 best_rect = cv::Rect(
                     cv::Point((int)x, (int)y),
@@ -546,14 +574,21 @@ bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face) const
             }
         }
 
-        if (best_score > 0.0f) {
-            face = best_rect & cv::Rect(0, 0, frame.cols, frame.rows);
-            return true;
-        }
-        return false;
+        if (best_score <= 0.0f)
+            return false;
+
+        // Clipping ai limiti dell’immagine
+        best_rect &= cv::Rect(0, 0, frame.cols, frame.rows);
+        if (best_rect.width <= 0 || best_rect.height <= 0)
+            return false;
+
+        face = best_rect;
+        return true;
     }
+
     return false;
 }
+
 
 // ==========================================================
 // Recognizer wrapper (classic LBPH/Eigen/Fisher)
@@ -1098,6 +1133,48 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
                              // ==========================================================
                              // Public API: capture images
                              // ==========================================================
+
+                             static bool fa_ensure_directory(const std::string &path, std::string &log)
+                             {
+                                 try {
+                                     if (!fs::exists(path))
+                                         fs::create_directories(path);
+                                     return true;
+                                 }
+                                 catch (const std::exception &e) {
+                                     log += "Cannot create directory '" + path + "': " + e.what() + "\n";
+                                     return false;
+                                 }
+                             }
+
+
+                             static int fa_find_next_image_index(const std::string &dir, const std::string &format)
+                             {
+                                 int max_idx = 0;
+
+                                 if (!fs::exists(dir))
+                                     return 1;
+
+                                 for (auto &p : fs::directory_iterator(dir)) {
+                                     if (!p.is_regular_file()) continue;
+
+                                     auto name = p.path().filename().string();
+
+                                     if (p.path().extension() == "." + format) {
+                                         try {
+                                             int idx = std::stoi(p.path().stem().string());
+                                             if (idx > max_idx)
+                                                 max_idx = idx;
+                                         }
+                                         catch (...) {}
+                                     }
+                                 }
+
+                                 return max_idx + 1;
+                             }
+
+
+
 
                              bool fa_capture_images(const std::string &user,
                                                     const FacialAuthConfig &cfg,
