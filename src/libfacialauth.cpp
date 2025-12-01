@@ -1474,19 +1474,3 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
                                  return true;
                              }
 
-                             // CLI entrypoints sono definiti in altri file
-                             // ============================
-                             //  WRAPPER FUNZIONI CLI
-                             // ============================
-
-                             int facial_capture_main(int argc, char **argv) {
-                                 return run_facial_capture(argc, argv);
-                             }
-
-                             int facial_test_cli_main(int argc, char **argv) {
-                                 return run_facial_test(argc, argv);
-                             }
-
-                             int facial_training_cli_main(int argc, char **argv) {
-                                 return run_facial_training(argc, argv);
-                             }

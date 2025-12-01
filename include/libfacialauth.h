@@ -108,9 +108,5 @@ bool fa_test_user(
 // Utilità
 bool fa_check_root(const char *tool_name);
 
-// Entry-point CLI (definiti nei rispettivi .cpp)
-int facial_capture_main(int argc, char *argv[]);
-int facial_training_cli_main(int argc, char *argv[]);
-int facial_test_cli_main(int argc, char *argv[]);
 
 #endif // LIBFACIALAUTH_H
