@@ -1196,8 +1196,8 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
                                      return false;
                                  }
 
-                                 if (cfg.debug)
-                                     std::cout << "[DEBUG] Salvataggio in: " << user_dir << "\n";
+                                 // Messaggio iniziale chiaro
+                                 std::cout << "[INFO] Salverò le immagini in: " << user_dir << "\n";
 
                                  // Trova indice iniziale
                                  int start_idx = 1;
@@ -1281,8 +1281,7 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
                                          continue;
                                      }
 
-                                     if (cfg.verbose)
-                                         std::cout << "[VERBOSE] Salvata: " << outfile << "\n";
+                                     std::cout << "[SAVE] " << outfile << "\n";
 
                                      if (cfg.debug)
                                          std::cout << "[DEBUG] Attendo " << cfg.sleep_ms << " ms\n";
@@ -1297,6 +1296,7 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
                                  log += "[INFO] Cattura completata.\n";
                                  return true;
                              }
+
 
 
 
