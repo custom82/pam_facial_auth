@@ -506,79 +506,104 @@ bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face) const
     if (frame.empty())
         return false;
 
-    // -------------------------------------
-    // HAAR CASCADE
-    // -------------------------------------
+    auto dbg = [&](const std::string &msg){
+        if (debug_enabled)  // flag globale impostato da facial_capture
+            std::cerr << "[DETECT] " << msg << "\n";
+    };
+
+    // --------------------------------------
+    // HAAR
+    // --------------------------------------
     if (type == DET_HAAR) {
         std::vector<cv::Rect> faces;
         cv::Mat gray;
         cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
         haar.detectMultiScale(gray, faces, 1.1, 3,
-                              cv::CASCADE_SCALE_IMAGE,
+                              0 | cv::CASCADE_SCALE_IMAGE,
                               cv::Size(30, 30));
+
         if (!faces.empty()) {
+            dbg("Volto rilevato (HAAR).");
             face = faces[0];
             return true;
         }
+
+        dbg("Nessun volto rilevato (HAAR).");
         return false;
     }
 
-    // -------------------------------------
-    // YUNET (DNN)
-    // -------------------------------------
+    // --------------------------------------
+    // YuNet
+    // --------------------------------------
     if (type == DET_YUNET && yunet) {
 
-        // YuNet richiede input 320×320
-        cv::Mat resized;
-        cv::resize(frame, resized, input_size);
-
-        // Preprocess DIFFERENTE per CPU vs CUDA/OpenCL
-        cv::Mat blob;
-
-        // CPU → mean BGR, nessuna normalizzazione
-        blob = cv::dnn::blobFromImage(
-            resized,
-            1.0,                      // scale factor
-            input_size,
-            cv::Scalar(104,117,123),  // mean BGR
-                                      true,                     // swapRB
-                                      false                     // crop
-        );
+        cv::Mat blob = cv::dnn::blobFromImage(
+            frame, 1.0, input_size,
+            cv::Scalar(104,117,123), true, false);
 
         yunet->setInput(blob);
         cv::Mat out = yunet->forward();
 
-        if (out.empty() || out.dims != 3)
+        if (out.empty() || out.dims != 3) {
+            dbg("Output YuNet non valido → nessun volto.");
             return false;
+        }
 
         int num = out.size[1];
-        float* data = (float*)out.data;
+        float *data = (float*)out.data;
 
         float best_score = 0.f;
-        cv::Rect best;
+        cv::Rect best_rect;
 
         for (int i = 0; i < num; i++) {
+
+            float score = data[i * 15 + 4];
             float x = data[i * 15 + 0];
             float y = data[i * 15 + 1];
             float w = data[i * 15 + 2];
             float h = data[i * 15 + 3];
-            float score = data[i * 15 + 4];
 
-            if (score > 0.7f && score > best_score) {
+            // Score minimo consigliato
+            if (score < 0.75f) {
+                dbg("Scarto detection: score troppo basso (" +
+                std::to_string(score) + ")");
+                continue;
+            }
+
+            // Dimensioni minime per evitare falsi positivi
+            if (w < 40 || h < 40) {
+                dbg("Scarto detection: bounding box troppo piccolo (" +
+                std::to_string((int)w) + "x" + std::to_string((int)h) + ")");
+                continue;
+            }
+
+            // Tiene la migliore detection
+            if (score > best_score) {
                 best_score = score;
-                best = cv::Rect((int)x, (int)y, (int)w, (int)h);
+                best_rect = cv::Rect((int)x, (int)y, (int)w, (int)h);
             }
         }
 
-        if (best_score > 0.f) {
-            face = best & cv::Rect(0, 0, frame.cols, frame.rows);
-            return true;
+        if (best_score <= 0.f) {
+            dbg("Nessun volto valido rilevato (YuNet).");
+            return false;
         }
-        return false;
+
+        // Ritaglio nel frame
+        face = best_rect & cv::Rect(0, 0, frame.cols, frame.rows);
+        dbg("Volto rilevato (YuNet) → pos=" +
+        std::to_string(face.x) + "," + std::to_string(face.y) +
+        " size=" + std::to_string(face.width) + "x" +
+        std::to_string(face.height) +
+        " score=" + std::to_string(best_score));
+
+        return true;
     }
 
+    dbg("Detector non inizializzato.");
     return false;
 }
+
 
 
 
@@ -1171,120 +1196,132 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 
                              bool fa_capture_images(const std::string &user,
                                                     const FacialAuthConfig &cfg,
-                                                    const std::string &format,
+                                                    const std::string &img_format,
                                                     std::string &log)
                              {
-                                 namespace fs = std::filesystem;
+                                 log.clear();
 
-                                 // ---------------------------
-                                 // 1. Prepara directory utente
-                                 // ---------------------------
-                                 std::string user_dir = fa_user_image_dir(cfg, user);
-                                 if (!fa_ensure_directory(user_dir, log)) {
-                                     log += "[ERRORE] Impossibile creare directory immagini: " + user_dir + "\n";
+                                 std::string imgdir = fa_user_image_dir(cfg, user);
+                                 if (!fa_ensure_directory(imgdir, log)) {
                                      return false;
                                  }
 
-                                 // Messaggio iniziale chiaro
-                                 std::cout << "[INFO] Salverò le immagini in: " << user_dir << "\n";
+                                 int next_index = fa_next_image_index(imgdir, img_format);
+                                 if (cfg.debug)
+                                     log += "[DEBUG] Prossimo indice: " + std::to_string(next_index) + "\n";
 
-                                 // Trova indice iniziale
-                                 int start_idx = 1;
-                                 if (!cfg.force_overwrite) {
-                                     start_idx = fa_find_next_image_index(user_dir, format);
-                                     if (cfg.debug)
-                                         std::cout << "[DEBUG] Prossimo indice: " << start_idx << "\n";
-                                 }
-
-                                 // ---------------------------
-                                 // 2. Apri webcam
-                                 // ---------------------------
-                                 cv::VideoCapture cap(cfg.device, cv::CAP_V4L2);
+                                 cv::VideoCapture cap(cfg.device);
                                  if (!cap.isOpened()) {
                                      log += "[ERRORE] Impossibile aprire la webcam: " + cfg.device + "\n";
                                      return false;
                                  }
+                                 if (cfg.debug)
+                                     log += "[DEBUG] Webcam aperta: " + cfg.device + "\n";
 
-                                 if (cfg.debug) {
-                                     std::cout << "[DEBUG] Webcam aperta: " << cfg.device << "\n";
-                                     std::cout << "[DEBUG] Imposto risoluzione " << cfg.width << "x" << cfg.height << "\n";
-                                 }
-
+                                 // Set risoluzione
                                  cap.set(cv::CAP_PROP_FRAME_WIDTH,  cfg.width);
                                  cap.set(cv::CAP_PROP_FRAME_HEIGHT, cfg.height);
 
-                                 // ---------------------------
-                                 // 3. Inizializza detector
-                                 // ---------------------------
+                                 if (cfg.debug) {
+                                     log += "[DEBUG] Imposto risoluzione " +
+                                     std::to_string(cfg.width) + "x" +
+                                     std::to_string(cfg.height) + "\n";
+                                 }
+
+                                 // Inizializza detector
                                  DetectorWrapper detector;
                                  if (!init_detector(cfg, detector, log)) {
                                      log += "[ERRORE] Impossibile inizializzare il detector.\n";
                                      return false;
                                  }
 
-                                 if (cfg.debug)
-                                     std::cout << "[DEBUG] Detector inizializzato: " << cfg.detector_profile << "\n";
+                                 if (cfg.verbose)
+                                     log += "[INFO] Cattura avviata...\n";
+
+                                 if (cfg.verbose)
+                                     log += "[INFO] Salverò le immagini in: " + imgdir + "\n";
+
+                                 int saved = 0;
 
                                  // ---------------------------
-                                 // 4. Ciclo di cattura
+                                 // CICLO PRINCIPALE DI CATTURA
                                  // ---------------------------
-                                 for (int i = 0; i < cfg.frames; i++) {
+                                 for (int frame_idx = 1; frame_idx <= cfg.frames; ++frame_idx) {
 
                                      cv::Mat frame;
                                      cap >> frame;
 
                                      if (frame.empty()) {
-                                         log += "[ERRORE] Frame vuoto dalla webcam\n";
-                                         return false;
+                                         log += "[ERRORE] Frame vuoto dalla webcam.\n";
+                                         continue;
                                      }
 
                                      if (cfg.verbose)
-                                         std::cout << "[VERBOSE] Frame " << (i + 1)
-                                         << "/" << cfg.frames << " acquisito\n";
+                                         log += "[VERBOSE] Frame " + std::to_string(frame_idx) +
+                                         "/" + std::to_string(cfg.frames) + " acquisito\n";
 
-                                     // -------------------
-                                     // Rilevamento volto
-                                     // -------------------
+                                     // ---- Rilevamento volto ----
                                      cv::Rect face;
-                                     if (!detector.detect(frame, face)) {
+
+                                     bool detected = detector.detect(frame, face);
+
+                                     if (!detected) {
                                          if (cfg.verbose)
-                                             std::cout << "[VERBOSE] Nessun volto rilevato → salto\n";
+                                             log += "[VERBOSE] Nessun volto rilevato → salto\n";
                                          continue;
                                      }
+
+                                     // --- Controlli anti-falso-positivo ---
+                                     if (face.width <= 1 || face.height <= 1) {
+                                         if (cfg.debug)
+                                             log += "[DEBUG] Bounding box nullo → ignorato\n";
+                                         continue;
+                                     }
+
+                                     if (face.width < 20 || face.height < 20) {
+                                         if (cfg.debug)
+                                             log += "[DEBUG] Bounding box troppo piccolo → ignorato\n";
+                                         continue;
+                                     }
+
+                                     // Ritaglia ai bordi validi
+                                     face &= cv::Rect(0, 0, frame.cols, frame.rows);
 
                                      if (cfg.debug) {
-                                         std::cout << "[DEBUG] Volto: x=" << face.x
-                                         << " y=" << face.y
-                                         << " w=" << face.width
-                                         << " h=" << face.height << "\n";
+                                         log += "[DEBUG] Volto valido: x=" + std::to_string(face.x) +
+                                         " y=" + std::to_string(face.y) +
+                                         " w=" + std::to_string(face.width) +
+                                         " h=" + std::to_string(face.height) + "\n";
                                      }
 
-                                     // -------------------
-                                     // Salvataggio immagine
-                                     // -------------------
-                                     std::string outfile =
-                                     user_dir + "/" + std::to_string(start_idx + i) + "." + format;
+                                     // ---- Salvataggio ----
+                                     std::string filename = imgdir + "/" +
+                                     std::to_string(next_index++) + "." +
+                                     img_format;
 
-                                     if (!cv::imwrite(outfile, frame)) {
-                                         log += "[ERRORE] Impossibile salvare immagine: " + outfile + "\n";
+                                     if (!cv::imwrite(filename, frame)) {
+                                         log += "[ERRORE] Impossibile salvare " + filename + "\n";
                                          continue;
                                      }
 
-                                     std::cout << "[SAVE] " << outfile << "\n";
+                                     if (cfg.verbose)
+                                         log += "[SAVE] " + filename + "\n";
 
+                                     saved++;
+
+                                     // Attendi tra un frame e l'altro
                                      if (cfg.debug)
-                                         std::cout << "[DEBUG] Attendo " << cfg.sleep_ms << " ms\n";
+                                         log += "[DEBUG] Attendo " + std::to_string(cfg.sleep_ms) + " ms\n";
 
-                                     // -------------------
-                                     // Pausa
-                                     // -------------------
-                                     if (cfg.sleep_ms > 0)
-                                         usleep(cfg.sleep_ms * 1000);
+                                     cv::waitKey(cfg.sleep_ms);
                                  }
 
-                                 log += "[INFO] Cattura completata.\n";
+                                 if (cfg.verbose)
+                                     log += "[INFO] Cattura completata.\n";
+
                                  return true;
                              }
+
 
 
 
