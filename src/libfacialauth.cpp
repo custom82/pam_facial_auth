@@ -506,14 +506,16 @@ bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face) const
     if (frame.empty())
         return false;
 
-    // -------------------------
-    // Haar
-    // -------------------------
+    // -------------------------------------
+    // HAAR CASCADE
+    // -------------------------------------
     if (type == DET_HAAR) {
         std::vector<cv::Rect> faces;
         cv::Mat gray;
         cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
-        haar.detectMultiScale(gray, faces, 1.1, 3, 0, cv::Size(30, 30));
+        haar.detectMultiScale(gray, faces, 1.1, 3,
+                              cv::CASCADE_SCALE_IMAGE,
+                              cv::Size(30, 30));
         if (!faces.empty()) {
             face = faces[0];
             return true;
@@ -521,121 +523,57 @@ bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face) const
         return false;
     }
 
+    // -------------------------------------
+    // YUNET (DNN)
+    // -------------------------------------
+    if (type == DET_YUNET && yunet) {
 
-    // -------------------------
-    // YuNet
-    // -------------------------
-    if (type == DET_YUNET && yunet)
-    {
-        // individua backend e target
-        int backend = yunet->getPreferableBackend();
-        int target  = yunet->getPreferableTarget();
+        // YuNet richiede input 320×320
+        cv::Mat resized;
+        cv::resize(frame, resized, input_size);
 
+        // Preprocess DIFFERENTE per CPU vs CUDA/OpenCL
         cv::Mat blob;
 
-        // =====================================================
-        // CPU BACKEND (OpenCV) → preprocess VGG BGR + NO scale
-        // =====================================================
-        if (backend == cv::dnn::DNN_BACKEND_OPENCV &&
-            target  == cv::dnn::DNN_TARGET_CPU)
-        {
-            blob = cv::dnn::blobFromImage(
-                frame,
-                1.0,
-                cv::Size(320,320),
-                                          cv::Scalar(104,117,123), // mean BGR
-                                          true,                    // swapRB
-                                          false
-            );
-        }
+        // CPU → mean BGR, nessuna normalizzazione
+        blob = cv::dnn::blobFromImage(
+            resized,
+            1.0,                      // scale factor
+            input_size,
+            cv::Scalar(104,117,123),  // mean BGR
+                                      true,                     // swapRB
+                                      false                     // crop
+        );
 
-        // =====================================================
-        // CUDA / CUDA_FP16 → preprocess ONNX standard
-        // =====================================================
-        else if (backend == cv::dnn::DNN_BACKEND_CUDA)
-        {
-            cv::Mat resized;
-            cv::resize(frame, resized, cv::Size(320,320));
-
-            blob = cv::dnn::blobFromImage(
-                resized,
-                1.0/255.0,
-                cv::Size(320,320),
-                                          cv::Scalar(),            // no mean
-                                          true,                    // swapRB
-                                          false
-            );
-        }
-
-        // =====================================================
-        // OPENCL → preprocess ONNX standard
-        // =====================================================
-        else if (backend == cv::dnn::DNN_BACKEND_OPENCV &&
-            target  == cv::dnn::DNN_TARGET_OPENCL)
-        {
-            cv::Mat resized;
-            cv::resize(frame, resized, cv::Size(320,320));
-
-            blob = cv::dnn::blobFromImage(
-                resized,
-                1.0/255.0,
-                cv::Size(320,320),
-                                          cv::Scalar(),            // no mean
-                                          true,
-                                          false
-            );
-        }
-
-        // =====================================================
-        // FALLBACK SICURO (CPU mean)
-        // =====================================================
-        else
-        {
-            blob = cv::dnn::blobFromImage(
-                frame,
-                1.0,
-                cv::Size(320,320),
-                                          cv::Scalar(104,117,123),
-                                          true,
-                                          false
-            );
-        }
-
-        // forward
         yunet->setInput(blob);
         cv::Mat out = yunet->forward();
+
         if (out.empty() || out.dims != 3)
             return false;
 
         int num = out.size[1];
-        float *data = (float*) out.data;
+        float* data = (float*)out.data;
 
         float best_score = 0.f;
-        cv::Rect best_rect;
+        cv::Rect best;
 
-        for (int i = 0; i < num; ++i)
-        {
-            float x = data[i*15 + 0];
-            float y = data[i*15 + 1];
-            float w = data[i*15 + 2];
-            float h = data[i*15 + 3];
-            float score = data[i*15 + 4];
+        for (int i = 0; i < num; i++) {
+            float x = data[i * 15 + 0];
+            float y = data[i * 15 + 1];
+            float w = data[i * 15 + 2];
+            float h = data[i * 15 + 3];
+            float score = data[i * 15 + 4];
 
-            if (score > 0.6f && score > best_score)
-            {
+            if (score > 0.7f && score > best_score) {
                 best_score = score;
-                best_rect  = cv::Rect(
-                    cv::Point((int)x, (int)y),
-                                      cv::Size((int)w, (int)h)
-                );
+                best = cv::Rect((int)x, (int)y, (int)w, (int)h);
             }
         }
 
-        if (best_score > 0.0f) {
-            face = best_rect & cv::Rect(0,0,frame.cols,frame.rows);
+        if (best_score > 0.f) {
+            face = best & cv::Rect(0, 0, frame.cols, frame.rows);
             return true;
         }
-
         return false;
     }
 
