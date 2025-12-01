@@ -6,6 +6,9 @@
 #include <opencv2/objdetect.hpp>
 #include <opencv2/dnn.hpp>
 #include <opencv2/face.hpp>
+#include <opencv2/highgui.hpp>
+
+
 
 #ifdef ENABLE_CUDA
 #include <opencv2/core/cuda.hpp>
@@ -26,6 +29,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <dirent.h>
+#include <unistd.h>   // per usleep
 
 #include <filesystem>
 namespace fs = std::filesystem;
@@ -1184,7 +1188,7 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
                                  namespace fs = std::filesystem;
 
                                  // ---------------------------
-                                 // 1. Prepara cartella utente
+                                 // 1. Prepara directory utente
                                  // ---------------------------
                                  std::string user_dir = fa_user_image_dir(cfg, user);
                                  if (!fa_ensure_directory(user_dir, log)) {
@@ -1192,11 +1196,10 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
                                      return false;
                                  }
 
-                                 if (cfg.debug) {
+                                 if (cfg.debug)
                                      std::cout << "[DEBUG] Salvataggio in: " << user_dir << "\n";
-                                 }
 
-                                 // Se non forzato, trova indice iniziale
+                                 // Trova indice iniziale
                                  int start_idx = 1;
                                  if (!cfg.force_overwrite) {
                                      start_idx = fa_find_next_image_index(user_dir, format);
@@ -1218,7 +1221,7 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
                                      std::cout << "[DEBUG] Imposto risoluzione " << cfg.width << "x" << cfg.height << "\n";
                                  }
 
-                                 cap.set(cv::CAP_PROP_FRAME_WIDTH, cfg.width);
+                                 cap.set(cv::CAP_PROP_FRAME_WIDTH,  cfg.width);
                                  cap.set(cv::CAP_PROP_FRAME_HEIGHT, cfg.height);
 
                                  // ---------------------------
@@ -1230,9 +1233,8 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
                                      return false;
                                  }
 
-                                 if (cfg.debug) {
+                                 if (cfg.debug)
                                      std::cout << "[DEBUG] Detector inizializzato: " << cfg.detector_profile << "\n";
-                                 }
 
                                  // ---------------------------
                                  // 4. Ciclo di cattura
@@ -1248,40 +1250,31 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
                                      }
 
                                      if (cfg.verbose)
-                                         std::cout << "[VERBOSE] Frame " << (i + 1) << "/" << cfg.frames << " acquisito\n";
+                                         std::cout << "[VERBOSE] Frame " << (i + 1)
+                                         << "/" << cfg.frames << " acquisito\n";
 
                                      // -------------------
                                      // Rilevamento volto
                                      // -------------------
-                                     std::vector<cv::Rect> faces;
-                                     if (!detector.detect(frame, faces)) {
-                                         log += "[ERRORE] Il detector ha fallito.\n";
+                                     cv::Rect face;
+                                     if (!detector.detect(frame, face)) {
+                                         if (cfg.verbose)
+                                             std::cout << "[VERBOSE] Nessun volto rilevato → salto\n";
                                          continue;
                                      }
 
                                      if (cfg.debug) {
-                                         std::cout << "[DEBUG] Volti rilevati: " << faces.size() << "\n";
+                                         std::cout << "[DEBUG] Volto: x=" << face.x
+                                         << " y=" << face.y
+                                         << " w=" << face.width
+                                         << " h=" << face.height << "\n";
                                      }
-
-                                     if (faces.empty()) {
-                                         if (cfg.verbose)
-                                             std::cout << "[VERBOSE] Nessun volto trovato → salto immagine\n";
-                                         continue;
-                                     }
-
-                                     // Usa il volto più grande
-                                     cv::Rect face = faces[0];
-
-                                     if (cfg.debug)
-                                         std::cout << "[DEBUG] Salvo volto con bounding box: "
-                                         << face.x << "," << face.y << " "
-                                         << face.width << "x" << face.height << "\n";
 
                                      // -------------------
                                      // Salvataggio immagine
                                      // -------------------
-                                     std::string outfile = user_dir + "/" +
-                                     std::to_string(start_idx + i) + "." + format;
+                                     std::string outfile =
+                                     user_dir + "/" + std::to_string(start_idx + i) + "." + format;
 
                                      if (!cv::imwrite(outfile, frame)) {
                                          log += "[ERRORE] Impossibile salvare immagine: " + outfile + "\n";
@@ -1298,12 +1291,13 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
                                      // Pausa
                                      // -------------------
                                      if (cfg.sleep_ms > 0)
-                                         cv::waitKey(cfg.sleep_ms);
+                                         usleep(cfg.sleep_ms * 1000);
                                  }
 
                                  log += "[INFO] Cattura completata.\n";
                                  return true;
                              }
+
 
 
                              // ==========================================================
