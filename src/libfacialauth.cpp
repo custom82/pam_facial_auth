@@ -457,14 +457,14 @@ struct DetectorWrapper {
 
     cv::CascadeClassifier haar;
     cv::Ptr<cv::dnn::Net> yunet;
-    cv::Size input_size = cv::Size(320, 240);
+    cv::Size input_size = cv::Size(320, 320);
 
     std::string model_path;
 
-    bool detect(const cv::Mat &frame, cv::Rect &face);
+    bool detect(const cv::Mat &frame, cv::Rect &face) const;
 };
 
-bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face)
+bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face) const
 {
     face = cv::Rect();
     if (type == DET_HAAR) {
