@@ -4,7 +4,10 @@
 #include <string>
 #include <map>
 #include <vector>
+
 #include <opencv2/core.hpp>
+#include <opencv2/objdetect.hpp>
+#include <opencv2/dnn.hpp>
 
 //
 // Path di default del file di configurazione
@@ -80,18 +83,15 @@ struct FacialAuthConfig
     std::string sface_model_int8;
 
     //
-    // RILEVANTE PER LA TUA VERSIONE
-    // (mancavano → ora aggiunti)
+    // Metodo di training: "lbph", "sface", "auto" …
     //
-
-    // Metodo di training: "lbph", "sface", "hybrid" …
     std::string training_method = "lbph";
 
-    // Backend DNN (CPU/CUDA/OpenVINO/TensorRT ecc.)
-    std::string dnn_backend = "cpu";
-
-    // Target DNN (CPU/FP32/FP16/CUDA/OPENCL ecc.)
-    std::string dnn_target = "cpu";
+    //
+    // DNN backend / target
+    //
+    std::string dnn_backend = "cpu"; // cpu / cuda / cuda_fp16 / opencl ...
+    std::string dnn_target  = "cpu"; // cpu / cuda / cuda_fp16 / opencl ...
 
     //
     // Mappature dinamiche config: detect_*  e recognize_*
@@ -105,30 +105,45 @@ struct FacialAuthConfig
     std::string image_format = "jpg";
 };
 
-struct DetectorWrapper {
+struct DetectorWrapper
+{
+    //
+    // Tipo di detector
+    //
+    enum DetectorType {
+        DET_NONE = 0,
+        DET_HAAR,
+        DET_YUNET
+    };
+
     DetectorType type = DET_NONE;
 
-    // Haar
+    // Haar cascade
     cv::CascadeClassifier haar;
 
     // YuNet
     cv::Size input_size = cv::Size(320, 320);
-    cv::dnn::Net* yunet = nullptr;
+    cv::Ptr<cv::dnn::Net> yunet;   // YuNet come cv::Ptr
+    std::string model_path;
 
-    bool debug = false;   // <-- QUESTO È IL FLAG DI DEBUG
+    bool debug = false;            // flag di debug
+
+    // API di rilevazione volto
+    bool detect(const cv::Mat &frame, cv::Rect &face) const;
 };
-
 
 
 // --------- FUNZIONI DELLA LIBRERIA ---------
 
-bool fa_load_config(FacialAuthConfig&, std::string &log, const std::string &path);
+bool fa_load_config(FacialAuthConfig &cfg,
+                    std::string &log,
+                    const std::string &path);
 
-bool fa_check_root(const std::string &toolname);
+std::string fa_user_image_dir(const FacialAuthConfig &cfg,
+                              const std::string &user);
 
-std::string fa_user_image_dir(const FacialAuthConfig&, const std::string &user);
-std::string fa_user_model_path(const FacialAuthConfig&, const std::string &user);
-
+std::string fa_user_model_path(const FacialAuthConfig &cfg,
+                               const std::string &user);
 
 bool fa_capture_images(const std::string &user,
                        const FacialAuthConfig &cfg,
@@ -149,4 +164,4 @@ bool fa_test_user(const std::string &user,
 
 bool fa_check_root(const std::string &tool_name);
 
-#endif
+#endif // LIBFACIALAUTH_H
