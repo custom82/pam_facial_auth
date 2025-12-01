@@ -504,85 +504,79 @@ bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face) const
 {
     face = cv::Rect();
 
-    auto on_frame = [&](const cv::Mat &f) -> bool {
-        cv::Rect r;
-        bool ok = detector.detect(f, r);
-
-        if (cfg.debug) {
-            std::cout << "[DEBUG] detect() ritorna " << (ok ? "true" : "false")
-            << "  bbox=" << r.x << "," << r.y
-            << " " << r.width << "x" << r.height << "\n";
-        }
-
-        return ok;
-    };
-
     if (frame.empty()) {
-        dbg("Frame vuoto");
+        if (debug_mode)
+            std::cout << "[DEBUG] Frame vuoto, nessun volto.\n";
         return false;
     }
 
-    // --- HAAR ---
+    // ---------------------------
+    // 1) HAAR CASCADE
+    // ---------------------------
     if (type == DET_HAAR) {
         std::vector<cv::Rect> faces;
         cv::Mat gray;
         cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
 
         haar.detectMultiScale(
-            gray, faces, 1.1, 3,
-            0 | cv::CASCADE_SCALE_IMAGE,
+            gray, faces,
+            1.1, 3, 0,
             cv::Size(30, 30)
         );
 
         if (!faces.empty()) {
             face = faces[0];
-            dbg("Volto rilevato (HAAR)");
+            if (debug_mode)
+                std::cout << "[DEBUG] HAAR: volto rilevato.\n";
             return true;
         }
 
-        dbg("Nessun volto (HAAR)");
+        if (debug_mode)
+            std::cout << "[DEBUG] HAAR: nessun volto.\n";
+
         return false;
     }
 
-    // --- YUNET ---
+    // ---------------------------
+    // 2) YUNET DNN
+    // ---------------------------
     if (type == DET_YUNET && yunet) {
 
         cv::Mat blob = cv::dnn::blobFromImage(
-            frame, 1.0, input_size,
-            cv::Scalar(104,117,123), true, false
+            frame,
+            1.0,
+            input_size,
+            cv::Scalar(104, 117, 123),
+                                              true,
+                                              false
         );
 
         yunet->setInput(blob);
         cv::Mat out = yunet->forward();
 
         if (out.empty() || out.dims != 3) {
-            dbg("YuNet output non valido");
+            if (debug_mode)
+                std::cout << "[DEBUG] YuNet: output non valido.\n";
             return false;
         }
 
-        float best_score = 0.f;
+        int num_faces = out.size[1];
+        float* data = (float*)out.data;
+
+        float best_score = 0.0f;
         cv::Rect best_rect;
 
-        const int num = out.size[1];
-        float *data = (float*)out.data;
+        for (int i = 0; i < num_faces; i++) {
+            float x = data[i * 15 + 0];
+            float y = data[i * 15 + 1];
+            float w = data[i * 15 + 2];
+            float h = data[i * 15 + 3];
+            float score = data[i * 15 + 4];
 
-        for (int i=0; i < num; i++) {
-
-            float x = data[i*15 + 0];
-            float y = data[i*15 + 1];
-            float w = data[i*15 + 2];
-            float h = data[i*15 + 3];
-            float score = data[i*15 + 4];
-
-            if (score < 0.75f) {
-                dbg("Scarto: score basso " + std::to_string(score));
-                continue;
-            }
-
-            if (w < 40 || h < 40) {
-                dbg("Scarto: box troppo piccolo " + std::to_string(w) + "x" + std::to_string(h));
-                continue;
-            }
+            // SCORE MIN 0.7
+            if (score < 0.70f) continue;
+            // DIMENSIONE MINIMA
+            if (w < 40 || h < 40) continue;
 
             if (score > best_score) {
                 best_score = score;
@@ -590,26 +584,27 @@ bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face) const
             }
         }
 
-        if (best_score <= 0.f) {
-            dbg("Nessun volto valido (YuNet)");
+        if (best_score == 0.0f) {
+            if (debug_mode)
+                std::cout << "[DEBUG] YuNet: nessun volto valido.\n";
             return false;
         }
 
-        face = best_rect & cv::Rect(0,0,frame.cols, frame.rows);
-        dbg("Volto rilevato YuNet: "
-        "x=" + std::to_string(face.x) +
-        " y=" + std::to_string(face.y) +
-        " w=" + std::to_string(face.width) +
-        " h=" + std::to_string(face.height) +
-        " score=" + std::to_string(best_score));
+        face = best_rect & cv::Rect(0, 0, frame.cols, frame.rows);
+
+        if (debug_mode)
+            std::cout << "[DEBUG] YuNet: volto rilevato "
+            << face.x << "," << face.y
+            << " " << face.width << "x" << face.height << "\n";
 
         return true;
     }
 
-    dbg("Detector non inizializzato");
+    if (debug_mode)
+        std::cout << "[DEBUG] Detector non inizializzato.\n";
+
     return false;
 }
-
 
 // ==========================================================
 // Recognizer wrapper (classic LBPH/Eigen/Fisher)
