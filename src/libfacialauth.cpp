@@ -1189,113 +1189,129 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
 
 
 
-                             bool fa_capture_images(const std::string &username,
+                             bool fa_capture_images(const std::string &user,
                                                     const FacialAuthConfig &cfg,
-                                                    const std::string &img_format,
+                                                    const std::string &format,
                                                     std::string &log)
                              {
-                                 log.clear();
+                                 // ---------------------------
+                                 // 1. Prepara cartella utente
+                                 // ---------------------------
+                                 std::string img_format = format.empty()
+                                 ? (cfg.image_format.empty() ? "jpg" : cfg.image_format)
+                                 : format;
 
-                                 // Directory immagini utente
-                                 std::string imgdir = cfg.basedir + "/images/" + username;
-                                 fa_mkdir_p(imgdir);
-
-                                 // next index
-                                 int next_index = fa_find_next_image_index(imgdir, img_format);
-                                 if (cfg.debug) {
-                                     log += "[DEBUG] Prossimo indice disponibile: " + std::to_string(next_index) + "\n";
-                                 }
-
-                                 // Apri webcam
-                                 cv::VideoCapture cap(cfg.device);
-                                 if (!cap.isOpened()) {
-                                     log += "[ERROR] Impossibile aprire webcam: " + cfg.device + "\n";
+                                 std::string imgdir = fa_user_image_dir(cfg, user);
+                                 ensure_dirs(imgdir);
+                                 if (!is_dir(imgdir)) {
+                                     log += "[ERRORE] Impossibile creare la directory immagini: " + imgdir + "\n";
                                      return false;
                                  }
 
-                                 if (cfg.debug)
-                                     log += "[DEBUG] Webcam aperta: " + cfg.device + "\n";
+                                 int start_index = fa_find_next_image_index(imgdir, img_format);
+                                 if (cfg.debug) {
+                                     std::cout << "[DEBUG] Salverò le immagini in: " << imgdir << "\n";
+                                     std::cout << "[DEBUG] Prossimo indice disponibile: " << start_index << "\n";
+                                 }
 
-                                 cap.set(cv::CAP_PROP_FRAME_WIDTH, cfg.width);
+                                 // ---------------------------
+                                 // 2. Apri webcam
+                                 // ---------------------------
+                                 cv::VideoCapture cap;
+                                 if (!open_camera(cap, cfg, log)) {
+                                     log += "[ERRORE] Impossibile aprire la webcam.\n";
+                                     return false;
+                                 }
+
+                                 if (cfg.debug) {
+                                     std::cout << "[DEBUG] Webcam aperta\n";
+                                     std::cout << "[DEBUG] Imposto risoluzione "
+                                     << cfg.width << "x" << cfg.height << "\n";
+                                 }
+
+                                 cap.set(cv::CAP_PROP_FRAME_WIDTH,  cfg.width);
                                  cap.set(cv::CAP_PROP_FRAME_HEIGHT, cfg.height);
 
-                                 if (cfg.debug)
-                                     log += "[DEBUG] Risoluzione impostata: " +
-                                     std::to_string(cfg.width) + "x" +
-                                     std::to_string(cfg.height) + "\n";
-
-                                 // Detector wrapper
+                                 // ---------------------------
+                                 // 3. Inizializza detector
+                                 // ---------------------------
                                  DetectorWrapper detector;
-                                 detector.setDebug(cfg.debug);
-                                 if (!detector.init(cfg.detector_profile, cfg)) {
-                                     log += "[ERROR] Impossibile inizializzare detector\n";
+                                 if (!init_detector(cfg, detector, log)) {
+                                     log += "[ERRORE] Impossibile inizializzare il detector (profilo=" +
+                                     cfg.detector_profile + ").\n";
                                      return false;
                                  }
+                                 if (cfg.debug) {
+                                     std::cout << "[DEBUG] Detector inizializzato: "
+                                     << (cfg.detector_profile.empty() ? "auto" : cfg.detector_profile)
+                                     << "\n";
+                                 }
 
-                                 if (cfg.debug)
-                                     log += "[DEBUG] Detector inizializzato: " + cfg.detector_profile + "\n";
-
+                                 // ---------------------------
+                                 // 4. Ciclo di cattura
+                                 // ---------------------------
                                  int saved = 0;
-
-                                 // Ciclo cattura
-                                 for (int frame_idx = 1; frame_idx <= cfg.num_images; frame_idx++) {
-
-                                     if (cfg.verbose)
-                                         log += "[VERBOSE] Frame " + std::to_string(frame_idx) + "/" +
-                                         std::to_string(cfg.num_images) + "\n";
-
+                                 for (int i = 0; i < cfg.frames; ++i) {
                                      cv::Mat frame;
-                                     cap.read(frame);
+                                     if (!capture_frame(cap, frame, cfg, log)) {
+                                         log += "[ERRORE] Frame non valido dalla webcam.\n";
+                                         break;
+                                     }
 
-                                     if (frame.empty()) {
-                                         if (cfg.debug)
-                                             log += "[DEBUG] Frame vuoto\n";
-                                         continue;
+                                     if (cfg.verbose) {
+                                         std::cout << "[VERBOSE] Frame " << (i + 1) << "/"
+                                         << cfg.frames << " acquisito\n";
                                      }
 
                                      cv::Rect face;
                                      if (!detector.detect(frame, face)) {
-                                         if (cfg.verbose)
-                                             log += "[VERBOSE] Nessun volto rilevato → salto\n";
+                                         if (cfg.verbose) {
+                                             std::cout << "[VERBOSE] Nessun volto rilevato → immagine scartata\n";
+                                         }
+                                         continue;
+                                     }
+
+                                     if (face.width <= 0 || face.height <= 0) {
+                                         if (cfg.verbose) {
+                                             std::cout << "[VERBOSE] Bounding box nulla o degenerata → immagine scartata\n";
+                                         }
                                          continue;
                                      }
 
                                      if (cfg.debug) {
-                                         log += "[DEBUG] Volto valido: x=" + std::to_string(face.x) +
-                                         " y=" + std::to_string(face.y) +
-                                         " w=" + std::to_string(face.width) +
-                                         " h=" + std::to_string(face.height) + "\n";
+                                         std::cout << "[DEBUG] Volto rilevato: x=" << face.x
+                                         << " y=" << face.y
+                                         << " w=" << face.width
+                                         << " h=" << face.height << "\n";
                                      }
 
-                                     // Salvataggio
-                                     std::string filename = imgdir + "/" +
-                                     std::to_string(next_index++) + "." +
-                                     img_format;
+                                     int idx = start_index + saved;
+                                     std::string outfile = imgdir + "/" + std::to_string(idx) + "." + img_format;
 
-                                     if (cv::imwrite(filename, frame)) {
-                                         saved++;
-                                         log += "[SAVE] " + filename + "\n";
+                                     if (!cv::imwrite(outfile, frame)) {
+                                         log += "[ERRORE] Impossibile salvare immagine: " + outfile + "\n";
                                      } else {
-                                         log += "[ERROR] Impossibile salvare " + filename + "\n";
+                                         ++saved;
+                                         if (cfg.verbose) {
+                                             std::cout << "[VERBOSE] Salvata: " << outfile << "\n";
+                                         }
                                      }
 
-                                     // Sleep
                                      if (cfg.sleep_ms > 0) {
-                                         if (cfg.debug)
-                                             log += "[DEBUG] Attendo " + std::to_string(cfg.sleep_ms) + " ms\n";
-                                         cv::waitKey(cfg.sleep_ms);
+                                         sleep_ms_int(cfg.sleep_ms);
                                      }
                                  }
 
                                  if (saved == 0) {
-                                     log += "[INFO] Nessuna immagine catturata (nessun volto rilevato)\n";
-                                 } else {
-                                     log += "[INFO] Cattura completata. Immagini salvate: " +
-                                     std::to_string(saved) + "\n";
+                                     log += "[WARN] Nessuna immagine salvata: nessun volto rilevato nei frame acquisiti.\n";
+                                     return false;
                                  }
 
+                                 log += "[INFO] Cattura completata. Immagini salvate: " +
+                                 std::to_string(saved) + "\n";
                                  return true;
                              }
+
 
                              // ==========================================================
                              // Public API: train user
