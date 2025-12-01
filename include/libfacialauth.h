@@ -107,9 +107,6 @@ struct FacialAuthConfig
 
 struct DetectorWrapper
 {
-    //
-    // Tipo di detector
-    //
     enum DetectorType {
         DET_NONE = 0,
         DET_HAAR,
@@ -118,16 +115,14 @@ struct DetectorWrapper
 
     DetectorType type = DET_NONE;
 
-    // Haar cascade (serve mutable perché detect() è const)
-    mutable cv::CascadeClassifier haar;
-
-    // YuNet
+    cv::CascadeClassifier haar;
     cv::Size input_size = cv::Size(320, 320);
     cv::Ptr<cv::dnn::Net> yunet;
     std::string model_path;
 
     bool debug = false;
 
+    // IMPORTANTE: NIENTE const QUI
     bool detect(const cv::Mat &frame, cv::Rect &face);
 };
 
