@@ -13,13 +13,13 @@ using std::string;
 struct TestOptions {
     string user;
     string device = "/dev/video0";
-    string config_path = "/etc/security/pam_facial.conf";
-    string backend;            // cpu / cuda (vuoto = usa config)
-    string target;             // cpu / cuda (vuoto = usa config)
-    string detector;           // auto / haar / yunet (vuoto = usa config)
-    double threshold = -1.0;   // <0 = usa soglia da config
+    string config_path = FACIALAUTH_CONFIG_DEFAULT;
+    string backend;            // cpu | cuda | auto | opencl (CLI > config)
+    string target;             // cpu | cuda | cuda_fp16 | auto | opencl (CLI > config)
+    string detector;           // auto | haar | yunet_fp32 | yunet_int8 (CLI > config)
+    double threshold = -1.0;   // <0 = use config threshold
     bool debug = false;
-    bool debug_override = false;  // nuovo: indica che la CLI ha forzato debug
+    bool debug_override = false;  // CLI forced debug on/off
 };
 
 static void print_usage(const char *progname) {
@@ -28,10 +28,11 @@ static void print_usage(const char *progname) {
     << "Opzioni:\n"
     << "  -u, --user USER         Utente da testare (obbligatorio)\n"
     << "  -d, --device DEV        Dispositivo video (default: /dev/video0)\n"
-    << "      --config FILE       File di configurazione (default: /etc/security/pam_facial.conf)\n"
-    << "      --backend B         Backend DNN: cpu | cuda (CLI > config)\n"
-    << "      --target T          Target DNN: cpu | cuda (CLI > config)\n"
-    << "      --detector P        Profilo detector: auto | haar | yunet (CLI > config)\n"
+    << "      --config FILE       File di configurazione (default: "
+    << FACIALAUTH_CONFIG_DEFAULT << ")\n"
+    << "      --backend B         Backend DNN: auto | cpu | cuda | cuda_fp16 | opencl\n"
+    << "      --target T          Target DNN: auto | cpu | cuda | cuda_fp16 | opencl\n"
+    << "      --detector P        Profilo detector: auto | haar | yunet_fp32 | yunet_int8\n"
     << "      --threshold X       Soglia di similarità per SFace (CLI > config)\n"
     << "      --debug             Abilita debug verboso (CLI > config)\n"
     << "      --no-debug          Disabilita debug (CLI > config)\n"
@@ -134,7 +135,7 @@ int facial_test_main(int argc, char *argv[]) {
         return 1;
     }
 
-    // Debug override
+    // Debug override (CLI ha la precedenza sul file di config)
     if (opt.debug_override)
         cfg.debug = opt.debug;
 
@@ -145,13 +146,12 @@ int facial_test_main(int argc, char *argv[]) {
 
     // CLI > config
     // ---------------------------------------------
-
     if (!opt.device.empty())
         cfg.device = opt.device;
 
     if (!opt.backend.empty()) {
-        cfg.dnn_backend   = opt.backend;
-        cfg.yunet_backend = opt.backend;
+        // Unico backend DNN per SFace e YuNet
+        cfg.dnn_backend = opt.backend;
     }
 
     if (!opt.target.empty())
@@ -164,10 +164,10 @@ int facial_test_main(int argc, char *argv[]) {
 
     if (opt.threshold >= 0.0) {
         threshold_override = opt.threshold;
-        cfg.sface_threshold = opt.threshold;
+        cfg.sface_threshold = opt.threshold;  // tieni coerente anche il cfg
     }
 
-    // Model path
+    // Path del modello dell'utente
     string modelPath = fa_user_model_path(cfg, opt.user);
 
     if (cfg.debug) {
