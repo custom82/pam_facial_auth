@@ -1,25 +1,27 @@
 #include "../include/libfacialauth.h"
 
-#include <security/pam_modules.h>
-#include <security/pam_ext.h>
+extern "C" {
+    #include <security/pam_modules.h>
+    #include <security/pam_ext.h>
+    #include <security/pam_appl.h>
+}
 
-#include <syslog.h>
-#include <pwd.h>
-#include <unistd.h>
-#include <cstring>
 #include <string>
 
-// Semplice helper per loggare su syslog con prefisso [pam_facial_auth]
-static void pam_log(int priority, const std::string &msg)
+static const char *DEFAULT_CONFIG_PATH = "/etc/security/pam_facial.conf";
+
+static int get_pam_user(pam_handle_t *pamh, std::string &user)
 {
-    syslog(priority, "[pam_facial_auth] %s", msg.c_str());
+    const char *puser = nullptr;
+    int ret = pam_get_user(pamh, &puser, nullptr);
+    if (ret != PAM_SUCCESS || !puser || !*puser)
+        return ret;
+    user = puser;
+    return PAM_SUCCESS;
 }
 
 extern "C" {
 
-    // =====================================================================
-    // pam_sm_authenticate
-    // =====================================================================
     PAM_EXTERN int pam_sm_authenticate(
         pam_handle_t *pamh,
         int flags,
@@ -29,162 +31,53 @@ extern "C" {
     {
         (void)flags;
 
-        openlog("pam_facial_auth", LOG_PID, LOG_AUTHPRIV);
-
-        // --------------------------------------------------------------
-        // Recupera utente da PAM
-        // --------------------------------------------------------------
-        const char *user_c = nullptr;
-        int pret = pam_get_user(pamh, &user_c, "Username: ");
-        if (pret != PAM_SUCCESS || !user_c || !*user_c) {
-            pam_log(LOG_ERR, "Failed to get PAM user");
-            closelog();
-            return PAM_AUTH_ERR;
-        }
-
-        std::string user(user_c);
-
-        // --------------------------------------------------------------
-        // Opzioni PAM:
-        //   debug
-        //   config=/path/to/pam_facial.conf
-        //   cuda=true|false|yes|no|1|0
-        //   opencl=true|false|yes|no|1|0
-        // --------------------------------------------------------------
-        bool cli_debug   = false;
-        bool cli_cuda    = false;
-        bool cli_opencl  = false;
-        std::string config_path = FACIALAUTH_CONFIG_DEFAULT;
-
-        auto parse_bool = [](const char *v) -> bool {
-            if (!v) return false;
-            if (strcmp(v, "1") == 0) return true;
-            if (strcasecmp(v, "true") == 0) return true;
-            if (strcasecmp(v, "yes") == 0)  return true;
-            return false;
-        };
+        std::string cfg_path = DEFAULT_CONFIG_PATH;
+        bool ignore_failure_override = false;
 
         for (int i = 0; i < argc; ++i) {
-            if (!argv[i])
-                continue;
-
-            if (strcmp(argv[i], "debug") == 0) {
-                cli_debug = true;
-            } else if (strncmp(argv[i], "config=", 7) == 0) {
-                config_path = std::string(argv[i] + 7);
-            } else if (strncmp(argv[i], "cuda=", 5) == 0) {
-                cli_cuda = parse_bool(argv[i] + 5);
-            } else if (strncmp(argv[i], "opencl=", 7) == 0) {
-                cli_opencl = parse_bool(argv[i] + 7);
+            std::string opt = argv[i] ? argv[i] : "";
+            if (opt.rfind("config=", 0) == 0) {
+                cfg_path = opt.substr(7);
+            } else if (opt == "ignore_failure") {
+                ignore_failure_override = true;
             }
         }
 
-        // --------------------------------------------------------------
-        // Carica configurazione
-        // --------------------------------------------------------------
-        FacialAuthConfig cfg;
-        std::string logbuf;
+        std::string user;
+        int pret = get_pam_user(pamh, user);
+        if (pret != PAM_SUCCESS) {
+            pam_syslog(pamh, LOG_ERR, "pam_facial_auth: cannot get user");
+            return pret;
+        }
 
-        if (!fa_load_config(cfg, logbuf, config_path)) {
-            pam_log(LOG_ERR,
-                    "Cannot load config file: " + config_path);
-            if (!logbuf.empty())
-                pam_log(LOG_ERR, logbuf);
-            closelog();
+        FacialAuthConfig cfg;
+        std::string log;
+        if (!fa_load_config(cfg, log, cfg_path)) {
+            pam_syslog(pamh, LOG_ERR, "pam_facial_auth: failed to load config: %s", log.c_str());
+            // Se la config non c'è, meglio fallire "pulito" o ignorare?
             return PAM_AUTH_ERR;
         }
 
-        // debug da PAM > config
-        if (cli_debug)
-            cfg.debug = true;
+        if (ignore_failure_override)
+            cfg.ignore_failure = true;
 
-        if (cfg.debug && !logbuf.empty()) {
-            pam_log(LOG_DEBUG,
-                    "Config loaded from " + config_path + ":\n" + logbuf);
-        }
-
-        // --------------------------------------------------------------
-        // Override CUDA / OPENCL da PAM, rispettando i macro di build
-        // --------------------------------------------------------------
-        #ifdef ENABLE_CUDA
-        if (cli_cuda) {
-            cfg.dnn_backend = "cuda";
-            cfg.dnn_target  = "cuda";
-            if (cfg.debug)
-                pam_log(LOG_DEBUG, "PAM option cuda=true: forcing DNN backend/target to CUDA");
-        }
-        #else
-        if (cli_cuda && cfg.debug) {
-            pam_log(LOG_DEBUG,
-                    "PAM option cuda=true requested but pam_facial_auth was built without ENABLE_CUDA, ignoring");
-        }
-        #endif
-
-        #ifdef ENABLE_OPENCL
-        if (cli_opencl) {
-            cfg.dnn_backend = "opencl";
-            cfg.dnn_target  = "opencl";
-            if (cfg.debug)
-                pam_log(LOG_DEBUG, "PAM option opencl=true: forcing DNN backend/target to OpenCL");
-        }
-        #else
-        if (cli_opencl && cfg.debug) {
-            pam_log(LOG_DEBUG,
-                    "PAM option opencl=true requested but pam_facial_auth was built without ENABLE_OPENCL, ignoring");
-        }
-        #endif
-
-        // --------------------------------------------------------------
-        // Costruisci path modello utente
-        // --------------------------------------------------------------
-        std::string modelPath = fa_user_model_path(cfg, user);
-
-        if (cfg.debug) {
-            pam_log(LOG_DEBUG,
-                    "Authenticating user '" + user + "' with model '" + modelPath + "'" +
-                    ", backend='" + cfg.dnn_backend + "', target='" + cfg.dnn_target + "'");
-        }
-
-        // --------------------------------------------------------------
-        // Esegui test
-        // --------------------------------------------------------------
+        std::string model_path = fa_user_model_path(cfg, user);
         double best_conf = 0.0;
-        int best_label   = -1;
-        std::string logbuf_test;
+        int best_label = -1;
+        bool ok = fa_test_user(user, cfg, model_path, best_conf, best_label, log, -1.0);
 
-        // threshold_override < 0 → usa cfg.sface_threshold / soglie classiche
-        bool ok = fa_test_user(
-            user,
-            cfg,
-            modelPath,
-            best_conf,
-            best_label,
-            logbuf_test,
-            -1.0
-        );
-
-        if (!logbuf_test.empty()) {
-            pam_log(cfg.debug ? LOG_DEBUG : LOG_INFO, logbuf_test);
-        }
+        pam_syslog(pamh, LOG_INFO, "pam_facial_auth: %s", log.c_str());
 
         if (ok) {
-            pam_log(LOG_INFO,
-                    "Authentication SUCCESS for user '" + user +
-                    "', similarity/confidence=" + std::to_string(best_conf));
-            closelog();
             return PAM_SUCCESS;
         } else {
-            pam_log(LOG_INFO,
-                    "Authentication FAILED for user '" + user +
-                    "', best similarity/confidence=" + std::to_string(best_conf));
-            closelog();
+            if (cfg.ignore_failure) {
+                return PAM_IGNORE;
+            }
             return PAM_AUTH_ERR;
         }
     }
 
-    // =====================================================================
-    // pam_sm_setcred: no-op
-    // =====================================================================
     PAM_EXTERN int pam_sm_setcred(
         pam_handle_t *pamh,
         int flags,
