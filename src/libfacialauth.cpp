@@ -504,9 +504,17 @@ bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face) const
 {
     face = cv::Rect();
 
-    auto dbg = [&](const std::string &msg){
-        if (debug)
-            std::cerr << "[DETECT] " << msg << "\n";
+    auto on_frame = [&](const cv::Mat &f) -> bool {
+        cv::Rect r;
+        bool ok = detector.detect(f, r);
+
+        if (cfg.debug) {
+            std::cout << "[DEBUG] detect() ritorna " << (ok ? "true" : "false")
+            << "  bbox=" << r.x << "," << r.y
+            << " " << r.width << "x" << r.height << "\n";
+        }
+
+        return ok;
     };
 
     if (frame.empty()) {
