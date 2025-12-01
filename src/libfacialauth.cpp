@@ -478,7 +478,7 @@ static int parse_dnn_target(const std::string &t)
 // Detector wrapper (Haar / YuNet)
 // ==========================================================
 
-bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face) const
+bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face)
 {
     face = cv::Rect();
 

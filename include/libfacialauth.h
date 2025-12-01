@@ -118,19 +118,19 @@ struct DetectorWrapper
 
     DetectorType type = DET_NONE;
 
-    // Haar cascade
-    cv::CascadeClassifier haar;
+    // Haar cascade (serve mutable perché detect() è const)
+    mutable cv::CascadeClassifier haar;
 
     // YuNet
     cv::Size input_size = cv::Size(320, 320);
-    cv::Ptr<cv::dnn::Net> yunet;   // YuNet come cv::Ptr
+    cv::Ptr<cv::dnn::Net> yunet;
     std::string model_path;
 
-    bool debug = false;            // flag di debug
+    bool debug = false;
 
-    // API di rilevazione volto
-    bool detect(const cv::Mat &frame, cv::Rect &face) const;
+    bool detect(const cv::Mat &frame, cv::Rect &face);
 };
+
 
 
 // --------- FUNZIONI DELLA LIBRERIA ---------
