@@ -35,6 +35,20 @@ using std::cerr;
 using std::cout;
 using std::endl;
 
+bool fa_check_root(const std::string &toolname)
+{
+    // Controllo se UID è 0
+    if (geteuid() != 0)
+    {
+        std::cerr << "[" << toolname << "] "
+        << "Questo comando deve essere eseguito come root." << std::endl;
+        return false;
+    }
+
+    return true;
+}
+
+
 // ==========================================================
 // Helpers
 // ==========================================================
