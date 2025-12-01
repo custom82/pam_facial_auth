@@ -507,44 +507,51 @@ bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face) const
     if (frame.empty())
         return false;
 
-    //
-    // --- Modalità Haar Cascade ---
-    //
+    // ========================
+    // Haar Cascade
+    // ========================
     if (type == DET_HAAR) {
         std::vector<cv::Rect> faces;
         cv::Mat gray;
-
         cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
-        haar.detectMultiScale(gray, faces, 1.1, 3,
-                              cv::CASCADE_SCALE_IMAGE,
-                              cv::Size(30, 30));
+
+        haar.detectMultiScale(
+            gray, faces,
+            1.1, 3,
+            cv::CASCADE_SCALE_IMAGE,
+            cv::Size(60, 60)   // dimensione minima
+        );
 
         if (faces.empty())
             return false;
 
-        // Ritorna il volto più grande (più probabile)
-        auto best = std::max_element(
+        // prendi faccia più grande
+        face = *std::max_element(
             faces.begin(), faces.end(),
-                                     [](const cv::Rect &a, const cv::Rect &b) {
-                                         return a.area() < b.area();
-                                     }
+                                 [](const cv::Rect &a, const cv::Rect &b) {
+                                     return a.area() < b.area();
+                                 }
         );
 
-        face = *best;
+        // controllo ridicolo → evita falsi positivi
+        if (face.width < 40 || face.height < 40)
+            return false;
+
         return true;
     }
 
-    //
-    // --- Modalità YuNet (DNN) ---
-    //
+    // ========================
+    // YuNet (FP32 / INT8)
+    // ========================
     if (type == DET_YUNET && yunet) {
 
-        // Pre-elaborazione
         cv::Mat blob = cv::dnn::blobFromImage(
-            frame, 1.0, input_size,
-            cv::Scalar(104, 117, 123),  // mean BGR
+            frame,
+            1.0,
+            input_size,                 // 320x320
+            cv::Scalar(104,117,123),
                                               true,                       // swapRB
-                                              false                       // crop
+                                              false
         );
 
         yunet->setInput(blob);
@@ -553,45 +560,48 @@ bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face) const
         if (out.empty() || out.dims != 3)
             return false;
 
-        int num = out.size[1];
+        int faces_n = out.size[1];
         float *data = (float*)out.data;
 
-        float best_score = 0.f;
-        cv::Rect best_rect;
+        float best_score = 0.0f;
+        cv::Rect best;
 
-        for (int i = 0; i < num; ++i) {
-            float x = data[i * 15 + 0];
-            float y = data[i * 15 + 1];
-            float w = data[i * 15 + 2];
-            float h = data[i * 15 + 3];
+        for (int i = 0; i < faces_n; i++) {
             float score = data[i * 15 + 4];
+            if (score < 0.85f)    // Soglia più alta per evitare OGGETTI
+                continue;
 
-            if (score < 0.7f)  // soglia YuNet standard
+            cv::Rect r(
+                (int)data[i * 15 + 0],
+                       (int)data[i * 15 + 1],
+                       (int)data[i * 15 + 2],
+                       (int)data[i * 15 + 3]
+            );
+
+            // correggi bound
+            r &= cv::Rect(0, 0, frame.cols, frame.rows);
+
+            // scarta rettangoli troppo piccoli → mani, oggetti
+            if (r.width < 80 || r.height < 80)
                 continue;
 
             if (score > best_score) {
                 best_score = score;
-                best_rect = cv::Rect(
-                    cv::Point((int)x, (int)y),
-                                     cv::Size((int)w, (int)h)
-                );
+                best = r;
             }
         }
 
-        if (best_score <= 0.0f)
-            return false;
+        if (best_score > 0.0f) {
+            face = best;
+            return true;
+        }
 
-        // Clipping ai limiti dell’immagine
-        best_rect &= cv::Rect(0, 0, frame.cols, frame.rows);
-        if (best_rect.width <= 0 || best_rect.height <= 0)
-            return false;
-
-        face = best_rect;
-        return true;
+        return false;
     }
 
     return false;
 }
+
 
 
 // ==========================================================
