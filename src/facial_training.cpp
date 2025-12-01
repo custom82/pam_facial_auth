@@ -23,7 +23,7 @@ static void print_training_help()
 int facial_training_cli_main(int argc, char **argv)
 {
     std::string user;
-    std::string config_path = "/etc/pam_facial_auth/pam_facial.conf";
+    std::string config_path = FACIALAUTH_DEFAULT_CONFIG;
     bool verbose = false;
     bool debug = false;
 

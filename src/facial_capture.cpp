@@ -231,7 +231,7 @@ static bool apply_detector_override(FacialAuthConfig &cfg,
 int facial_capture_main(int argc, char **argv)
 {
     std::string user;
-    std::string config_path = "/etc/pam_facial_auth/pam_facial.conf";
+    std::string config_path = FACIALAUTH_DEFAULT_CONFIG;
     std::string device_override;
     int width_override  = -1;
     int height_override = -1;

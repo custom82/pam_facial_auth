@@ -6,6 +6,12 @@
 #include <vector>
 #include <opencv2/core.hpp>
 
+// Path di default per il file di configurazione PAM
+#ifndef FACIALAUTH_DEFAULT_CONFIG
+#define FACIALAUTH_DEFAULT_CONFIG "/etc/security/pam_facial.conf"
+#endif
+
+
 // Struttura di configurazione globale
 struct FacialAuthConfig {
     // Percorsi / generali

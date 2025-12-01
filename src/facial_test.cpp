@@ -23,7 +23,7 @@ static void print_test_help()
 int facial_test_cli_main(int argc, char **argv)
 {
     std::string user;
-    std::string config_path = "/etc/pam_facial_auth/pam_facial.conf";
+    std::string config_path = FACIALAUTH_DEFAULT_CONFIG;
     double threshold_override = -1.0;
     bool verbose = false;
     bool debug = false;
