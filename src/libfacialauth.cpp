@@ -1125,9 +1125,19 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
                                          continue;
                                      }
 
-                                     cv::Mat face = frame(face_rect).clone();
+                                     // Clamp del bounding box dentro i limiti dell'immagine
+                                     cv::Rect r = face_rect & cv::Rect(0, 0, frame.cols, frame.rows);
+
+                                     if (r.width <= 0 || r.height <= 0) {
+                                         if (cfg.debug)
+                                             log += "YuNet returned invalid face rectangle.\n";
+                                         return false;
+                                     }
+
+                                     cv::Mat face = frame(r).clone();
                                      cv::Mat resized;
                                      cv::resize(face, resized, cv::Size(224, 224));
+
 
                                      std::ostringstream fn;
                                      fn << imgdir << "/img_" << (captured + 1) << "." << fmt;
@@ -1368,9 +1378,19 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
                                          return false;
                                      }
 
-                                     cv::Mat face = frame(face_rect).clone();
+                                     // Clamp del bounding box dentro i limiti dell'immagine
+                                     cv::Rect r = face_rect & cv::Rect(0, 0, frame.cols, frame.rows);
+
+                                     if (r.width <= 0 || r.height <= 0) {
+                                         if (cfg.debug)
+                                             log += "YuNet returned invalid face rectangle.\n";
+                                         return false;
+                                     }
+
+                                     cv::Mat face = frame(r).clone();
                                      cv::Mat resized;
-                                     cv::resize(face, resized, cv::Size(112, 112));
+                                     cv::resize(face, resized, cv::Size(224, 224));
+
 
                                      cv::Mat emb;
                                      std::string log_emb;
