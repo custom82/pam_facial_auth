@@ -105,6 +105,21 @@ struct FacialAuthConfig
     std::string image_format = "jpg";
 };
 
+struct DetectorWrapper {
+    DetectorType type = DET_NONE;
+
+    // Haar
+    cv::CascadeClassifier haar;
+
+    // YuNet
+    cv::Size input_size = cv::Size(320, 320);
+    cv::dnn::Net* yunet = nullptr;
+
+    bool debug = false;   // <-- QUESTO È IL FLAG DI DEBUG
+};
+
+
+
 // --------- FUNZIONI DELLA LIBRERIA ---------
 
 bool fa_load_config(FacialAuthConfig&, std::string &log, const std::string &path);
@@ -113,6 +128,7 @@ bool fa_check_root(const std::string &toolname);
 
 std::string fa_user_image_dir(const FacialAuthConfig&, const std::string &user);
 std::string fa_user_model_path(const FacialAuthConfig&, const std::string &user);
+
 
 bool fa_capture_images(const std::string &user,
                        const FacialAuthConfig &cfg,

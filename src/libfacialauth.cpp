@@ -505,7 +505,7 @@ bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face) const
     face = cv::Rect();
 
     if (frame.empty()) {
-        if (debug_mode)
+        if (debug)
             std::cout << "[DEBUG] Frame vuoto, nessun volto.\n";
         return false;
     }
@@ -514,6 +514,7 @@ bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face) const
     // 1) HAAR CASCADE
     // ---------------------------
     if (type == DET_HAAR) {
+
         std::vector<cv::Rect> faces;
         cv::Mat gray;
         cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
@@ -526,16 +527,81 @@ bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face) const
 
         if (!faces.empty()) {
             face = faces[0];
-            if (debug_mode)
+            if (debug)
                 std::cout << "[DEBUG] HAAR: volto rilevato.\n";
             return true;
         }
 
-        if (debug_mode)
+        if (debug)
             std::cout << "[DEBUG] HAAR: nessun volto.\n";
 
         return false;
     }
+
+    // ---------------------------
+    // 2) YUNET DNN
+    // ---------------------------
+    if (type == DET_YUNET && yunet) {
+
+        cv::Mat blob = cv::dnn::blobFromImage(
+            frame, 1.0, input_size,
+            cv::Scalar(104, 117, 123),
+                                              true, false
+        );
+        yunet->setInput(blob);
+
+        cv::Mat out = yunet->forward();
+
+        if (out.empty() || out.dims != 3) {
+            if (debug)
+                std::cout << "[DEBUG] YuNet: output non valido.\n";
+            return false;
+        }
+
+        int num_faces = out.size[1];
+        float* data = (float*)out.data;
+
+        float best_score = 0.0f;
+        cv::Rect best_rect;
+
+        for (int i = 0; i < num_faces; i++) {
+            float x = data[i * 15 + 0];
+            float y = data[i * 15 + 1];
+            float w = data[i * 15 + 2];
+            float h = data[i * 15 + 3];
+            float score = data[i * 15 + 4];
+
+            if (score < 0.70f) continue;
+            if (w < 40 || h < 40) continue;
+
+            if (score > best_score) {
+                best_score = score;
+                best_rect = cv::Rect((int)x, (int)y, (int)w, (int)h);
+            }
+        }
+
+        if (best_score == 0.0f) {
+            if (debug)
+                std::cout << "[DEBUG] YuNet: nessun volto valido.\n";
+            return false;
+        }
+
+        face = best_rect & cv::Rect(0, 0, frame.cols, frame.rows);
+
+        if (debug)
+            std::cout << "[DEBUG] YuNet: volto rilevato "
+            << face.x << "," << face.y << " "
+            << face.width << "x" << face.height << "\n";
+
+        return true;
+    }
+
+    if (debug)
+        std::cout << "[DEBUG] Detector non inizializzato.\n";
+
+    return false;
+}
+
 
     // ---------------------------
     // 2) YUNET DNN
