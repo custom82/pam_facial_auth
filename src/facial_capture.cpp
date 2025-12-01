@@ -10,11 +10,8 @@
 #include <fstream>
 #include <filesystem>
 
-
 #include <linux/videodev2.h>
 #include <sys/ioctl.h>
-#include <sys/types.h>
-#include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
 
@@ -25,49 +22,39 @@ static void print_help()
     "Options:\n"
     "  -u, --user <name>          Nome utente per cui salvare le immagini\n"
     "  -c, --config <file>        File di configurazione\n"
-    "                             (default: /etc/pam_facial_auth/pam_facial.conf)\n"
+    "                             (default: " FACIALAUTH_DEFAULT_CONFIG ")\n"
     "  -d, --device <path>        Device della webcam (es: /dev/video0)\n"
     "  -w, --width <px>           Larghezza frame\n"
     "  -h, --height <px>          Altezza frame\n"
     "  -f, --force                Sovrascrive immagini esistenti\n"
-    "      --flush, --clean       Elimina tutte le immagini dell'utente e termina\n"
+    "      --flush, --clean       Elimina tutte le immagini dell'utente\n"
     "  -n, --num-images <num>     Numero di immagini da acquisire\n"
     "  -s, --sleep <sec>          Pausa tra una cattura e l'altra (secondi)\n"
-    "      --detector <name>      Selettore del detector (haar|yunet|yunet_int8|auto)\n"
-    "      --list-detectors       Elenca i detector disponibili dal file di config\n"
-    "      --list-devices         Elenca le webcam disponibili (tramite V4L2)\n"
-    "      --list-resolutions     Elenca le risoluzioni supportate dalla webcam\n"
-    "      --format <fmt>         Formato immagine: jpg|png|bmp\n"
-    "  -v, --verbose              Output dettagliato\n"
-    "      --debug                Abilita output di debug\n"
-    "      --nogui                Disabilita GUI, cattura solo da console\n"
-    "  -H, --help                 Mostra questo messaggio\n";
+    "      --detector <name>      Detector da usare (haar|yunet|yunet_int8|auto)\n"
+    "      --list-detectors       Mostra detector disponibili\n"
+    "      --list-devices         Mostra webcam reali (V4L2)\n"
+    "      --list-resolutions     Mostra risoluzioni webcam\n"
+    "      --format <fmt>         Formato: jpg|png|bmp\n"
+    "  -v, --verbose              Output informativo\n"
+    "      --debug                Output dettagliato\n"
+    "      --nogui                Disabilita GUI\n"
+    "  -H, --help                 Mostra help\n";
 }
-
-// ----------------------------------------------------------
-// Helpers V4L2
-// ----------------------------------------------------------
-
 static bool has_video_capture_capability(int fd)
 {
-    struct v4l2_capability cap {};
+    struct v4l2_capability cap{};
     if (ioctl(fd, VIDIOC_QUERYCAP, &cap) != 0)
         return false;
 
-    if (!(cap.capabilities & V4L2_CAP_VIDEO_CAPTURE) &&
-        !(cap.capabilities & V4L2_CAP_VIDEO_CAPTURE_MPLANE))
-        return false;
-
-    return true;
+    return (cap.capabilities & V4L2_CAP_VIDEO_CAPTURE) ||
+    (cap.capabilities & V4L2_CAP_VIDEO_CAPTURE_MPLANE);
 }
 
-static std::string read_sysfs_attr(const std::string &path)
+static std::string read_sysfs_attr(const std::string &p)
 {
-    std::ifstream f(path);
-    if (!f.is_open())
-        return {};
-    std::string v;
-    f >> v;
+    std::ifstream f(p);
+    if (!f.is_open()) return {};
+    std::string v; f >> v;
     return v;
 }
 
@@ -76,360 +63,223 @@ static void list_devices_v4l()
     for (int i = 0; i < 32; ++i) {
         std::string dev = "/dev/video" + std::to_string(i);
         int fd = ::open(dev.c_str(), O_RDONLY | O_NONBLOCK);
-        if (fd < 0)
-            continue;
+        if (fd < 0) continue;
 
-        struct v4l2_capability cap {};
         if (!has_video_capture_capability(fd)) {
-            ::close(fd);
+            close(fd);
             continue;
         }
 
-        if (ioctl(fd, VIDIOC_QUERYCAP, &cap) != 0) {
-            ::close(fd);
-            continue;
+        struct v4l2_capability cap{};
+        if (ioctl(fd, VIDIOC_QUERYCAP, &cap) == 0) {
+            std::string vendor  = read_sysfs_attr("/sys/class/video4linux/video" + std::to_string(i) + "/device/idVendor");
+            std::string product = read_sysfs_attr("/sys/class/video4linux/video" + std::to_string(i) + "/device/idProduct");
+
+            std::cout << dev << " ";
+            if (!vendor.empty() && !product.empty())
+                std::cout << "(" << vendor << ":" << product << ") ";
+
+            std::cout << cap.card << "\n";
         }
-
-        std::string card(reinterpret_cast<const char*>(cap.card));
-        std::string bus(reinterpret_cast<const char*>(cap.bus_info));
-
-        // Proviamo a recuperare vendor/product da sysfs (solo per dispositivi USB / PCI)
-        std::string sysbase = "/sys/class/video4linux/video" + std::to_string(i) + "/device/";
-        std::string vendor  = read_sysfs_attr(sysbase + "idVendor");
-        std::string product = read_sysfs_attr(sysbase + "idProduct");
-
-        std::cout << dev << "  ";
-
-        if (!vendor.empty() && !product.empty())
-            std::cout << "(" << vendor << ":" << product << ") ";
-
-        std::cout << card;
-
-        if (!bus.empty())
-            std::cout << " [" << bus << "]";
-
-        std::cout << "\n";
-
-        ::close(fd);
+        close(fd);
     }
 }
 
-static void list_resolutions_for_device(const std::string &device)
+static void list_resolutions_for_device(const std::string &dev)
 {
-    int fd = ::open(device.c_str(), O_RDONLY | O_NONBLOCK);
+    int fd = ::open(dev.c_str(), O_RDONLY | O_NONBLOCK);
     if (fd < 0) {
-        std::cerr << "[ERRORE] Impossibile aprire " << device << " per leggere le risoluzioni.\n";
+        std::cerr << "[ERRORE] Impossibile aprire " << dev << "\n";
         return;
     }
 
     if (!has_video_capture_capability(fd)) {
-        std::cerr << "[ERRORE] Il device " << device << " non supporta la cattura video.\n";
-        ::close(fd);
+        std::cerr << "[ERRORE] Il device non supporta la cattura video.\n";
+        close(fd);
         return;
     }
 
-    std::cout << "Risoluzioni disponibili per " << device << ":\n";
+    std::cout << "Risoluzioni per " << dev << ":\n";
 
-    struct v4l2_fmtdesc fmtdesc {};
-    fmtdesc.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-
-    for (fmtdesc.index = 0; ioctl(fd, VIDIOC_ENUM_FMT, &fmtdesc) == 0; ++fmtdesc.index) {
-        uint32_t pixelformat = fmtdesc.pixelformat;
+    struct v4l2_fmtdesc fmt{}; fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    for (fmt.index = 0; ioctl(fd, VIDIOC_ENUM_FMT, &fmt) == 0; fmt.index++) {
+        uint32_t pf = fmt.pixelformat;
         char fourcc[5] = {
-            char(pixelformat & 0xFF),
-            char((pixelformat >> 8) & 0xFF),
-            char((pixelformat >> 16) & 0xFF),
-            char((pixelformat >> 24) & 0xFF),
+            char(pf & 0xFF),
+            char((pf>>8) & 0xFF),
+            char((pf>>16)&0xFF),
+            char((pf>>24)&0xFF),
             0
         };
 
-        std::cout << "  Format " << fmtdesc.index << " (" << fourcc << "):\n";
+        std::cout << "  [" << fmt.index << "] " << fourcc << "\n";
 
-        struct v4l2_frmsizeenum frmsize {};
-        frmsize.pixel_format = pixelformat;
-
-        for (frmsize.index = 0; ioctl(fd, VIDIOC_ENUM_FRAMESIZES, &frmsize) == 0; ++frmsize.index) {
-            if (frmsize.type == V4L2_FRMSIZE_TYPE_DISCRETE) {
-                std::cout << "    "
-                << frmsize.discrete.width  << "x"
-                << frmsize.discrete.height << "\n";
-            } else if (frmsize.type == V4L2_FRMSIZE_TYPE_STEPWISE ||
-                frmsize.type == V4L2_FRMSIZE_TYPE_CONTINUOUS) {
-                std::cout << "    "
-                << frmsize.stepwise.min_width << "x" << frmsize.stepwise.min_height
-                << " .. "
-                << frmsize.stepwise.max_width << "x" << frmsize.stepwise.max_height
-                << "\n";
-            break; // Evitiamo spam infinito
-                }
+        struct v4l2_frmsizeenum fr{};
+        fr.pixel_format = pf;
+        for (fr.index = 0; ioctl(fd, VIDIOC_ENUM_FRAMESIZES, &fr) == 0; fr.index++) {
+            if (fr.type == V4L2_FRMSIZE_TYPE_DISCRETE)
+                std::cout << "    " << fr.discrete.width << "x" << fr.discrete.height << "\n";
         }
     }
 
-    ::close(fd);
+    close(fd);
 }
 
-// ----------------------------------------------------------
-// Helpers per config / detectors
-// ----------------------------------------------------------
-
-static void list_detectors_from_config(const FacialAuthConfig &cfg)
+static void debug_dump(const FacialAuthConfig &cfg)
 {
-    if (cfg.detector_models.empty()) {
-        std::cout << "Nessun detector configurato (chiavi detect_* mancanti nel file di config).\n";
-        return;
-    }
-
-    std::cout << "Detector disponibili (da file di configurazione):\n";
-    for (const auto &kv : cfg.detector_models) {
-        std::cout << "  " << kv.first;
-        if (!kv.second.empty())
-            std::cout << " -> " << kv.second;
-        std::cout << "\n";
-    }
+    std::cerr << "[DEBUG] Config:\n"
+    << " device=" << cfg.device << "\n"
+    << " width=" << cfg.width << "\n"
+    << " height=" << cfg.height << "\n"
+    << " frames=" << cfg.frames << "\n"
+    << " sleep_ms=" << cfg.sleep_ms << "\n"
+    << " detector=" << cfg.detector_profile << "\n"
+    << " format=" << cfg.image_format << "\n"
+    << " debug=" << (cfg.debug?"yes":"no") << "\n"
+    << " verbose=" << (cfg.verbose?"yes":"no") << "\n";
 }
-
-// Normalizza il nome passato a --detector:
-//  - se inizia con "detect_" lo taglia
-//  - altrimenti usa il nome così com'è
-static std::string normalize_detector_name(const std::string &name)
-{
-    if (name.rfind("detect_", 0) == 0)
-        return name.substr(std::string("detect_").size());
-    return name;
-}
-
-static bool apply_detector_override(FacialAuthConfig &cfg,
-                                    const std::string &det_name,
-                                    std::string &log)
-{
-    if (det_name.empty())
-        return true;
-
-    std::string norm = normalize_detector_name(det_name);
-
-    // accettiamo alias classici
-    if (norm == "haar" || norm == "yunet" || norm == "yunet_fp32" || norm == "yunet_int8") {
-        cfg.detector_profile = norm;
-        return true;
-    }
-
-    // Se nel map detector_models esiste una voce con quel nome, usiamo quel profilo
-    auto it = cfg.detector_models.find(norm);
-    if (it != cfg.detector_models.end()) {
-        cfg.detector_profile = norm;
-        return true;
-    }
-
-    log += "Detector sconosciuto: " + det_name + "\n";
-    return false;
-}
-
-// ----------------------------------------------------------
-// Implementazione CLI principale
-// ----------------------------------------------------------
-
 int facial_capture_main(int argc, char **argv)
 {
     std::string user;
     std::string config_path = FACIALAUTH_DEFAULT_CONFIG;
+
     std::string device_override;
-    int width_override  = -1;
-    int height_override = -1;
-    int frames_override = -1;   // numero immagini
-    int sleep_sec       = -1;
+    int width_override=-1, height_override=-1, frames_override=-1;
+    int sleep_sec=-1;
+
     std::string detector_override;
     std::string format_override;
-    bool force      = false;
-    bool flush_only = false;
-    bool verbose    = false;
-    bool debug      = false;
-    bool nogui      = false;
-    bool list_devices    = false;
-    bool list_res        = false;
-    bool list_detectors  = false;
 
-    // ----------------- Parsing argomenti -----------------
-    for (int i = 1; i < argc; ++i) {
-        std::string arg = argv[i];
+    bool force=false, flush_only=false;
+    bool verbose=false, debug=false, nogui=false;
+    bool list_dev=false, list_res=false, list_det=false;
 
-        auto take_value = [&](const std::string &opt) -> std::string {
-            if (i + 1 >= argc) {
-                std::cerr << "Manca il valore per l'opzione " << opt << "\n";
-                exit(1);
-            }
+    for (int i = 1; i < argc; i++)
+    {
+        std::string a = argv[i];
+        auto take = [&](const std::string &opt)->std::string{
+            if (i+1>=argc) { std::cerr<<"Valore mancante per "<<opt<<"\n"; exit(1);}
             return argv[++i];
         };
 
-        if (arg == "-u" || arg == "--user") {
-            user = take_value(arg);
-        } else if (arg == "-c" || arg == "--config") {
-            config_path = take_value(arg);
-        } else if (arg == "-d" || arg == "--device") {
-            device_override = take_value(arg);
-        } else if (arg == "-w" || arg == "--width") {
-            width_override = std::stoi(take_value(arg));
-        } else if (arg == "-h" || arg == "--height") {
-            height_override = std::stoi(take_value(arg));
-        } else if (arg == "-f" || arg == "--force") {
-            force = true;
-        } else if (arg == "--flush" || arg == "--clean") {
-            flush_only = true;
-        } else if (arg == "-n" || arg == "--num-images") {
-            frames_override = std::stoi(take_value(arg));
-        } else if (arg == "-s" || arg == "--sleep") {
-            sleep_sec = std::stoi(take_value(arg));
-        } else if (arg == "--detector") {
-            detector_override = take_value(arg);
-        } else if (arg == "--list-detectors") {
-            list_detectors = true;
-        } else if (arg == "--list-devices") {
-            list_devices = true;
-        } else if (arg == "--list-resolutions") {
-            list_res = true;
-        } else if (arg == "--format") {
-            format_override = take_value(arg);
-        } else if (arg == "-v" || arg == "--verbose") {
-            verbose = true;
-        } else if (arg == "--debug") {
-            debug = true;
-        } else if (arg == "--nogui") {
-            nogui = true;
-        } else if (arg == "--help" || arg == "-H") {
-            print_help();
-            return 0;
-        } else {
-            std::cerr << "Opzione sconosciuta: " << arg << "\n";
-            print_help();
-            return 1;
+        if (a=="-u"||a=="--user") user=take(a);
+        else if (a=="-c"||a=="--config") config_path=take(a);
+        else if (a=="-d"||a=="--device") device_override=take(a);
+        else if (a=="-w"||a=="--width") width_override=std::stoi(take(a));
+        else if (a=="-h"||a=="--height") height_override=std::stoi(take(a));
+        else if (a=="-f"||a=="--force") force=true;
+        else if (a=="--flush"||a=="--clean") flush_only=true;
+        else if (a=="-n"||a=="--num-images") frames_override=std::stoi(take(a));
+        else if (a=="-s"||a=="--sleep") sleep_sec=std::stoi(take(a));
+        else if (a=="--detector") detector_override=take(a);
+        else if (a=="--list-detectors") list_det=true;
+        else if (a=="--list-devices") list_dev=true;
+        else if (a=="--list-resolutions") list_res=true;
+        else if (a=="--format") format_override=take(a);
+        else if (a=="-v"||a=="--verbose") verbose=true;
+        else if (a=="--debug") debug=true;
+        else if (a=="--nogui") nogui=true;
+        else if (a=="--help"||a=="-H") { print_help(); return 0; }
+        else {
+            std::cerr<<"Opzione sconosciuta "<<a<<"\n"; return 1;
         }
     }
 
-    // Opzioni che non richiedono config/utente
-    if (list_devices) {
-        list_devices_v4l();
-        return 0;
-    }
+    if (list_dev) { list_devices_v4l(); return 0; }
 
-    // Carichiamo la configurazione
     FacialAuthConfig cfg;
     std::string log;
-    if (!fa_load_config(cfg, log, config_path)) {
+
+    if (!fa_load_config(cfg, log, config_path))
         std::cerr << log;
-        // continuiamo con i defaults di cfg (già inizializzato nel costruttore)
+
+    cfg.debug |= debug;
+    cfg.verbose |= verbose;
+
+    if (cfg.debug)
+        debug_dump(cfg);
+
+    if (!device_override.empty()) cfg.device=device_override;
+    if (width_override>0) cfg.width=width_override;
+    if (height_override>0) cfg.height=height_override;
+    if (frames_override>0) cfg.frames=frames_override;
+    if (sleep_sec>=0) cfg.sleep_ms=sleep_sec*1000;
+    if (!format_override.empty()) cfg.image_format=format_override;
+
+    if (force) cfg.force_overwrite=true;
+    if (nogui) cfg.nogui=true;
+
+    std::string fmt = cfg.image_format;
+    std::transform(fmt.begin(), fmt.end(), fmt.begin(), ::tolower);
+    if (fmt=="jpeg") fmt="jpg";
+    if (fmt!="jpg" && fmt!="png" && fmt!="bmp") {
+        std::cerr<<"[ERRORE] Formato non valido\n"; return 1;
     }
+    cfg.image_format=fmt;
 
-    // Applichiamo override da CLI
-    if (!device_override.empty())
-        cfg.device = device_override;
-    if (width_override > 0)
-        cfg.width = width_override;
-    if (height_override > 0)
-        cfg.height = height_override;
-    if (frames_override > 0)
-        cfg.frames = frames_override;
-    if (sleep_sec >= 0)
-        cfg.sleep_ms = sleep_sec * 1000;
-    if (!format_override.empty())
-        cfg.image_format = format_override;
-
-    if (verbose)
-        cfg.debug = true;
-    if (debug)
-        cfg.debug = true;
-    if (nogui)
-        cfg.nogui = true;
-    if (force)
-        cfg.force_overwrite = true;
-
-    // Validazione formato
-    {
-        std::string low = cfg.image_format;
-        std::transform(low.begin(), low.end(), low.begin(),
-                       [](unsigned char c){ return std::tolower(c); });
-        if (low != "jpg" && low != "jpeg" && low != "png" && low != "bmp") {
-            std::cerr << "[ERRORE] Formato immagine non supportato: " << cfg.image_format
-            << " (usa jpg|png|bmp).\n";
-            return 1;
+    if (list_det) {
+        if (cfg.detector_models.empty()) {
+            std::cout<<"Nessun detector configurato\n";
+        } else {
+            std::cout<<"Detector:\n";
+            for (auto &kv : cfg.detector_models)
+                std::cout<<"  "<<kv.first<<" -> "<<kv.second<<"\n";
         }
-        if (low == "jpeg")
-            cfg.image_format = "jpg";
-    }
-
-    // Lista detectors (richiede config)
-    if (list_detectors) {
-        list_detectors_from_config(cfg);
         return 0;
     }
 
-    // Lista risoluzioni (usa device da config/override)
     if (list_res) {
         list_resolutions_for_device(cfg.device);
         return 0;
     }
 
-    // Flush: cancella immagini e termina
     if (flush_only) {
-        std::string imgdir = fa_user_image_dir(cfg, user.empty() ? "default" : user);
-        // Usa helper di libfacialauth per creare la dir se serve, ma qui la svuotiamo a mano
         if (user.empty()) {
-            std::cerr << "[ERRORE] --flush richiede anche --user.\n";
-            return 1;
+            std::cerr<<"--flush richiede --user\n"; return 1;
         }
-
+        std::string dir = fa_user_image_dir(cfg, user);
         namespace fs = std::filesystem;
-        try {
-            fs::path p(imgdir);
-            if (fs::exists(p) && fs::is_directory(p)) {
-                for (auto &entry : fs::directory_iterator(p)) {
-                    fs::remove(entry.path());
-                }
-                std::cout << "[INFO] Immagini cancellate in " << imgdir << "\n";
-            } else {
-                std::cout << "[INFO] Nessuna immagine da cancellare (directory inesistente).\n";
-            }
-        } catch (const std::exception &e) {
-            std::cerr << "[ERRORE] Impossibile cancellare le immagini: " << e.what() << "\n";
-            return 1;
+        if (fs::exists(dir)) {
+            for (auto &e : fs::directory_iterator(dir))
+                fs::remove(e.path());
+            std::cout<<"[INFO] Immagini cancellate\n";
         }
         return 0;
     }
 
-    // Da qui in poi, richiediamo lo user
     if (user.empty()) {
-        std::cerr << "[ERRORE] Devi specificare --user <name>.\n";
-        return 1;
+        std::cerr<<"Devi specificare --user\n"; return 1;
     }
 
-    // Applicazione override detector (--detector)
     if (!detector_override.empty()) {
-        if (!apply_detector_override(cfg, detector_override, log)) {
-            std::cerr << log;
-            return 1;
+        if (cfg.detector_models.count(detector_override)==0) {
+            std::cerr<<"Detector sconosciuto\n"; return 1;
         }
+        cfg.detector_profile=detector_override;
     }
 
-    // Verifica privilegi se necessario
     if (!fa_check_root("facial_capture")) {
-        std::cerr << "[ERRORE] Questo strumento deve essere eseguito come root.\n";
-        return 1;
+        std::cerr<<"Devi essere root\n"; return 1;
     }
 
-    // Chiamata alla libreria: cattura immagini con rilevamento volto
+    if (cfg.verbose)
+        std::cerr<<"[INFO] Cattura avviata...\n";
+
     std::string capture_log;
-    if (!fa_capture_images(user, cfg, cfg.image_format, capture_log)) {
+    bool ok = fa_capture_images(user, cfg, cfg.image_format, capture_log);
+
+    if (!ok) {
         std::cerr << capture_log;
         return 1;
     }
 
-    if (!capture_log.empty())
-        std::cout << capture_log;
+    std::cout << capture_log;
+
+    if (cfg.verbose)
+        std::cerr<<"[INFO] Cattura terminata.\n";
 
     return 0;
 }
-
-// ----------------------------------------------------------
-// Wrapper main() con gestione eccezioni OpenCV/std
-// ----------------------------------------------------------
 
 int main(int argc, char **argv)
 {
@@ -437,11 +287,11 @@ int main(int argc, char **argv)
         return facial_capture_main(argc, argv);
     }
     catch (const cv::Exception &e) {
-        std::cerr << "[OpenCV ERROR] " << e.what() << std::endl;
+        std::cerr << "[OpenCV] " << e.what() << "\n";
         return 1;
     }
     catch (const std::exception &e) {
-        std::cerr << "[ERROR] " << e.what() << std::endl;
+        std::cerr << "[ERROR] " << e.what() << "\n";
         return 1;
     }
 }

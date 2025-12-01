@@ -92,21 +92,30 @@ bool fa_load_config(
     const std::string &path
 )
 {
-    cfg = FacialAuthConfig(); // reset to defaults
+    // reset con valori di default della struct
+    cfg = FacialAuthConfig();
+    logbuf.clear();
 
-    std::ifstream f(path);
+    //
+    // Determina il path del file di configurazione:
+    //  - se la CLI ha passato una stringa vuota → usa default
+    //  - altrimenti usa quello specificato
+    //
+    std::string cfg_path = path.empty() ? FACIALAUTH_DEFAULT_CONFIG : path;
+
+    std::ifstream f(cfg_path);
     if (!f.is_open()) {
-        logbuf += "Cannot open config file: " + path + "\n";
+        logbuf += "Cannot open config file: " + cfg_path + "\n";
         return false;
     }
 
-    logbuf.clear();
     std::string line;
     int lineno = 0;
 
     while (std::getline(f, line)) {
         ++lineno;
         std::string s = trim(line);
+
         if (s.empty() || s[0] == '#')
             continue;
 
@@ -148,6 +157,8 @@ bool fa_load_config(
                 cfg.sleep_ms = std::stoi(val);
             } else if (key == "debug") {
                 to_bool(val, cfg.debug);
+            } else if (key == "verbose") {
+                to_bool(val, cfg.verbose);
             } else if (key == "nogui") {
                 to_bool(val, cfg.nogui);
             } else if (key == "training_method") {
@@ -161,19 +172,20 @@ bool fa_load_config(
             } else if (key == "image_format") {
                 cfg.image_format = val;
 
-                // Detector / recognizer profile
+                // Detector / recognizer profiles
             } else if (key == "detector_profile") {
                 cfg.detector_profile = val;
             } else if (key == "recognizer_profile") {
                 cfg.recognizer_profile = val;
 
-                // Thresholds classici
+                // Thresholds
             } else if (key == "lbph_threshold") {
                 cfg.lbph_threshold = std::stod(val);
             } else if (key == "eigen_threshold") {
                 cfg.eigen_threshold = std::stod(val);
             } else if (key == "fisher_threshold") {
                 cfg.fisher_threshold = std::stod(val);
+
             } else if (key == "eigen_components") {
                 cfg.eigen_components = std::stoi(val);
             } else if (key == "fisher_components") {
@@ -195,55 +207,46 @@ bool fa_load_config(
             } else if (key == "dnn_target") {
                 cfg.dnn_target = val;
 
-                // Legacy fields (kept for compatibility)
+                // Legacy fields
             } else if (key == "model_path") {
                 cfg.model_path = val;
             } else if (key == "haar_cascade_path") {
                 cfg.haar_cascade_path = val;
-            } else if (key == "log_file") {
-                // ignorato, legacy
-            }
 
-            // Dynamic detector model mapping: keys starting with detect_
-            else if (starts_with(key, "detect_")) {
-                std::string subkey = key.substr(std::string("detect_").size());
-                if (!subkey.empty()) {
-                    cfg.detector_models[subkey] = val;
-                }
+                // Dynamic detectors detect_*
+            } else if (starts_with(key, "detect_")) {
+                std::string subkey = key.substr(7);
+                cfg.detector_models[subkey] = val;
 
-                // Normalizzazione nomi "canonici"
-                if (subkey == "haar") {
-                    cfg.haar_cascade_path = val;
-                } else if (subkey == "haar_model") {
+                if (subkey == "haar" || subkey == "haar_model") {
                     cfg.haar_cascade_path = val;
                     cfg.detector_models["haar"] = val;
-                } else if (subkey == "yunet_fp32" || subkey == "yunet_model_fp32") {
+                }
+                else if (subkey == "yunet_fp32" || subkey == "yunet_model_fp32") {
                     cfg.yunet_model = val;
                     cfg.detector_models["yunet_fp32"] = val;
-                } else if (subkey == "yunet_int8" || subkey == "yunet_model_int8") {
+                }
+                else if (subkey == "yunet_int8" || subkey == "yunet_model_int8") {
                     cfg.yunet_model_int8 = val;
                     cfg.detector_models["yunet_int8"] = val;
                 }
-            }
 
-            // Dynamic recognizer model mapping: keys starting with recognize_
-            else if (starts_with(key, "recognize_")) {
-                std::string subkey = key.substr(std::string("recognize_").size());
-                if (!subkey.empty()) {
-                    cfg.recognizer_models[subkey] = val;
-                }
+                // Dynamic recognizers recognize_*
+            } else if (starts_with(key, "recognize_")) {
+                std::string subkey = key.substr(10);
+                cfg.recognizer_models[subkey] = val;
 
                 if (subkey == "sface_fp32" || subkey == "sface_model_fp32") {
                     cfg.sface_model = val;
                     cfg.recognizer_models["sface_fp32"] = val;
-                } else if (subkey == "sface_int8" || subkey == "sface_model_int8") {
+                }
+                else if (subkey == "sface_int8" || subkey == "sface_model_int8") {
                     cfg.sface_model_int8 = val;
                     cfg.recognizer_models["sface_int8"] = val;
                 }
-            }
 
-            // Backward compatibility keys (vecchi nomi)
-            else if (key == "yunet_model") {
+                // Backward compatibility keys
+            } else if (key == "yunet_model") {
                 cfg.yunet_model = val;
                 cfg.detector_models["yunet_fp32"] = val;
             } else if (key == "yunet_model_int8") {
@@ -264,7 +267,8 @@ bool fa_load_config(
                 logbuf += "Unknown key at line " + std::to_string(lineno) +
                 ": '" + key + "'\n";
             }
-        } catch (const std::exception &e) {
+        }
+        catch (const std::exception &e) {
             logbuf += "Error parsing line " + std::to_string(lineno) +
             " ('" + key + "'): " + e.what() + "\n";
         }
@@ -272,6 +276,7 @@ bool fa_load_config(
 
     f.close();
 
+    // Se basedir è vuoto, imposta default
     if (cfg.basedir.empty())
         cfg.basedir = "/var/lib/pam_facial_auth";
 
