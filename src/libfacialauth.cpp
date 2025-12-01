@@ -3,8 +3,6 @@
 #include <opencv2/imgproc.hpp>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/videoio.hpp>
-#include <opencv2/objdetect.hpp>
-#include <opencv2/dnn.hpp>
 #include <opencv2/face.hpp>
 #include <opencv2/highgui.hpp>
 
@@ -27,7 +25,6 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <dirent.h>
-#include <unistd.h>   // usleep
 
 #include <filesystem>
 namespace fs = std::filesystem;
@@ -374,9 +371,8 @@ static bool capture_frame(
     }
     return true;
 }
-
 // ==========================================================
-// SFace model save/load helpers (XML con metadata)
+// SFace model save/load helpers (XML with metadata)
 // ==========================================================
 
 static bool fa_save_sface_model(const FacialAuthConfig &cfg,
@@ -479,7 +475,7 @@ static int parse_dnn_target(const std::string &t)
 }
 
 // ==========================================================
-// Detector wrapper (Haar / YuNet) - implementazione
+// Detector wrapper (Haar / YuNet)
 // ==========================================================
 
 bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face) const
@@ -501,6 +497,7 @@ bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face) const
         cv::Mat gray;
         cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
 
+        // 'haar' è mutable nel .h, quindi possiamo usarlo da metodo const
         haar.detectMultiScale(
             gray, faces,
             1.1, 3, 0,
@@ -526,12 +523,9 @@ bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face) const
     if (type == DET_YUNET && yunet) {
 
         cv::Mat blob = cv::dnn::blobFromImage(
-            frame,
-            1.0,
-            input_size,
+            frame, 1.0, input_size,
             cv::Scalar(104, 117, 123),
-                                              true,
-                                              false
+                                              true, false
         );
         yunet->setInput(blob);
 
@@ -556,7 +550,9 @@ bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face) const
             float h = data[i * 15 + 3];
             float score = data[i * 15 + 4];
 
+            // SCORE MIN 0.7
             if (score < 0.70f) continue;
+            // DIMENSIONE MINIMA
             if (w < 40 || h < 40) continue;
 
             if (score > best_score) {
@@ -728,7 +724,6 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
                                      return false;
                                  }
                              }
-
                              // ==========================================================
                              // SFace embedding helper
                              // ==========================================================
@@ -869,13 +864,13 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
                                                 [](unsigned char c){ return std::tolower(c); });
 
                                  if (low == "auto") {
-                                     // Prefer YuNet FP32 → INT8 → Haar
+                                     // 1) YuNet FP32
                                      if (cfg.detector_models.count("yunet_fp32") &&
                                          file_exists(cfg.detector_models.at("yunet_fp32"))) {
                                          std::string path = cfg.detector_models.at("yunet_fp32");
                                      try {
                                          det.yunet = cv::makePtr<cv::dnn::Net>(cv::dnn::readNetFromONNX(path));
-                                         det.type = DET_YUNET;
+                                         det.type = DetectorWrapper::DET_YUNET;
                                          det.model_path = path;
 
                                          int backend = parse_dnn_backend(cfg.dnn_backend);
@@ -892,12 +887,13 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
                                      }
                                          }
 
+                                         // 2) YuNet INT8
                                          if (cfg.detector_models.count("yunet_int8") &&
                                              file_exists(cfg.detector_models.at("yunet_int8"))) {
                                              std::string path = cfg.detector_models.at("yunet_int8");
                                          try {
                                              det.yunet = cv::makePtr<cv::dnn::Net>(cv::dnn::readNetFromONNX(path));
-                                             det.type = DET_YUNET;
+                                             det.type = DetectorWrapper::DET_YUNET;
                                              det.model_path = path;
 
                                              int backend = parse_dnn_backend(cfg.dnn_backend);
@@ -914,11 +910,12 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
                                          }
                                              }
 
+                                             // 3) Haar
                                              if (cfg.detector_models.count("haar") &&
                                                  file_exists(cfg.detector_models.at("haar"))) {
                                                  std::string path = cfg.detector_models.at("haar");
                                              if (det.haar.load(path)) {
-                                                 det.type = DET_HAAR;
+                                                 det.type = DetectorWrapper::DET_HAAR;
                                                  det.model_path = path;
                                                  if (cfg.debug) {
                                                      log += "Using Haar detector: " + path + "\n";
@@ -933,7 +930,8 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
                                                  return false;
                                  }
 
-                                 // Espliciti
+                                 // ------- Profili espliciti -------
+
                                  if (low == "haar") {
                                      std::string path;
                                      auto it = cfg.detector_models.find("haar");
@@ -954,7 +952,7 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
                                          log += "Failed to load Haar cascade: " + path + "\n";
                                          return false;
                                      }
-                                     det.type = DET_HAAR;
+                                     det.type = DetectorWrapper::DET_HAAR;
                                      det.model_path = path;
                                      if (cfg.debug) {
                                          log += "Using Haar detector: " + path + "\n";
@@ -976,7 +974,7 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
                                      }
                                      try {
                                          det.yunet = cv::makePtr<cv::dnn::Net>(cv::dnn::readNetFromONNX(path));
-                                         det.type = DET_YUNET;
+                                         det.type = DetectorWrapper::DET_YUNET;
                                          det.model_path = path;
 
                                          int backend = parse_dnn_backend(cfg.dnn_backend);
@@ -1008,7 +1006,7 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
                                      }
                                      try {
                                          det.yunet = cv::makePtr<cv::dnn::Net>(cv::dnn::readNetFromONNX(path));
-                                         det.type = DET_YUNET;
+                                         det.type = DetectorWrapper::DET_YUNET;
                                          det.model_path = path;
 
                                          int backend = parse_dnn_backend(cfg.dnn_backend);
@@ -1029,9 +1027,8 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
                                  log += "Unknown detector_profile: " + profile + "\n";
                                  return false;
                              }
-
                              // ==========================================================
-                             // Training helpers
+                             // Training helpers (classic methods)
                              // ==========================================================
 
                              static bool train_classic(
@@ -1049,9 +1046,13 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
                                      return false;
                                  }
 
-                                 std::vector<cv::String> files;
-                                 cv::glob(imgdir + "/*.jpg", files, false);
-                                 cv::glob(imgdir + "/*.png", files, false);
+                                 std::vector<cv::String> files_jpg;
+                                 std::vector<cv::String> files_png;
+                                 cv::glob(imgdir + "/*.jpg", files_jpg, false);
+                                 cv::glob(imgdir + "/*.png", files_png, false);
+
+                                 std::vector<cv::String> files = files_jpg;
+                                 files.insert(files.end(), files_png.begin(), files_png.end());
 
                                  if (files.empty()) {
                                      log += "No images found in: " + imgdir + "\n";
@@ -1130,7 +1131,7 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
                              }
 
                              // ==========================================================
-                             // Public API: capture images
+                             // Helper per directory immagini utente
                              // ==========================================================
 
                              static bool fa_ensure_directory(const std::string &path, std::string &log)
@@ -1171,12 +1172,18 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
                                  return max_idx + 1;
                              }
 
+                             // ==========================================================
+                             // Public API: capture images
+                             // ==========================================================
+
                              bool fa_capture_images(const std::string &user,
                                                     const FacialAuthConfig &cfg,
                                                     const std::string &format,
                                                     std::string &log)
                              {
+                                 // ---------------------------
                                  // 1. Prepara cartella utente
+                                 // ---------------------------
                                  std::string img_format = format.empty()
                                  ? (cfg.image_format.empty() ? "jpg" : cfg.image_format)
                                  : format;
@@ -1194,7 +1201,9 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
                                      std::cout << "[DEBUG] Prossimo indice disponibile: " << start_index << "\n";
                                  }
 
+                                 // ---------------------------
                                  // 2. Apri webcam
+                                 // ---------------------------
                                  cv::VideoCapture cap;
                                  if (!open_camera(cap, cfg, log)) {
                                      log += "[ERRORE] Impossibile aprire la webcam.\n";
@@ -1210,7 +1219,9 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
                                  cap.set(cv::CAP_PROP_FRAME_WIDTH,  cfg.width);
                                  cap.set(cv::CAP_PROP_FRAME_HEIGHT, cfg.height);
 
+                                 // ---------------------------
                                  // 3. Inizializza detector
+                                 // ---------------------------
                                  DetectorWrapper detector;
                                  if (!init_detector(cfg, detector, log)) {
                                      log += "[ERRORE] Impossibile inizializzare il detector (profilo=" +
@@ -1223,7 +1234,9 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
                                      << "\n";
                                  }
 
+                                 // ---------------------------
                                  // 4. Ciclo di cattura
+                                 // ---------------------------
                                  int saved = 0;
                                  for (int i = 0; i < cfg.frames; ++i) {
                                      cv::Mat frame;
@@ -1333,9 +1346,13 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
                                          return false;
                                      }
 
-                                     std::vector<cv::String> files;
-                                     cv::glob(imgdir + "/*.jpg", files, false);
-                                     cv::glob(imgdir + "/*.png", files, false);
+                                     std::vector<cv::String> files_jpg;
+                                     std::vector<cv::String> files_png;
+                                     cv::glob(imgdir + "/*.jpg", files_jpg, false);
+                                     cv::glob(imgdir + "/*.png", files_png, false);
+
+                                     std::vector<cv::String> files = files_jpg;
+                                     files.insert(files.end(), files_png.begin(), files_png.end());
 
                                      if (files.empty()) {
                                          log += "No images found for SFace training in: " + imgdir + "\n";
@@ -1400,7 +1417,6 @@ bool FaceRecWrapper::Predict(const cv::Mat &face,
                                      );
                                  }
                              }
-
                              // ==========================================================
                              // Public API: test user
                              // ==========================================================
