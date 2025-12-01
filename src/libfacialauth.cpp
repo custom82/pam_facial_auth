@@ -484,22 +484,6 @@ static int parse_dnn_target(const std::string &t)
 // Detector wrapper (Haar / YuNet)
 // ==========================================================
 
-struct DetectorWrapper {
-    enum Type {
-        DET_NONE,
-        DET_HAAR,
-        DET_YUNET
-    } type = DET_NONE;
-
-    mutable cv::CascadeClassifier haar;
-    cv::Ptr<cv::dnn::Net> yunet;
-    cv::Size input_size = cv::Size(320, 320);
-
-    std::string model_path;
-
-    bool detect(const cv::Mat &frame, cv::Rect &face) const;
-};
-
 bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face) const
 {
     face = cv::Rect();
