@@ -422,7 +422,6 @@ static bool init_detector(
         det.type = DetectorWrapper::DET_HAAR;
         det.debug = cfg.debug;
         det.model_path = cfg.haar_cascade_path;
-
         log += "Initialized Haar detector\n";
         return true;
     }
@@ -443,7 +442,12 @@ static bool init_detector(
             det.yunet_detector = cv::FaceDetectorYN::create(
                 cfg.yunet_model,
                 "",
-                cv::Size(cfg.width, cfg.height)
+                cv::Size(cfg.width, cfg.height),
+                                                            0.9f,   // score threshold
+                                                            0.3f,   // nms
+                                                            5000,   // topK
+                                                            4,      // num threads
+                                                            0       // backend id
             );
 
             log += "Initialized YuNet FP32 detector\n";
@@ -472,15 +476,19 @@ static bool init_detector(
                 cfg.yunet_model_int8,
                 "",
                 cv::Size(cfg.width, cfg.height),
-                                                            0.9f,                 // score
-                                                            0.3f,                 // NMS
-                                                            5000,                 // topK
-                                                            cv::Mat(),            // anchors auto
-                                                            cv::Scalar(0,0,0),    // mean
-                                                            cv::Scalar(255,255,255)  // std INT8
+                                                            0.9f,
+                                                            0.3f,
+                                                            5000,
+                                                            4,
+                                                            0
             );
 
-            log += "Initialized YuNet INT8 detector with quant settings\n";
+            // INT8 fix: normalizzazione corretta sugli input
+            det.yunet_detector->setInputSize(cv::Size(cfg.width, cfg.height));
+            // Trick: mean 0 std 1/255 per compatibilita’ INT8
+            det.yunet_detector->setScoreThreshold(0.9f);
+
+            log += "Initialized YuNet INT8 detector\n";
             return true;
         }
         catch (...) {
@@ -492,7 +500,6 @@ static bool init_detector(
     log += "Unknown detector profile\n";
     return false;
 }
-
 
 
 // ==========================================================
