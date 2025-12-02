@@ -218,15 +218,33 @@ int facial_capture_main(int argc, char **argv)
     cfg.image_format=fmt;
 
     if (list_det) {
-        if (cfg.detector_models.empty()) {
-            std::cout<<"Nessun detector configurato\n";
-        } else {
-            std::cout<<"Detector:\n";
-            for (auto &kv : cfg.detector_models)
-                std::cout<<"  "<<kv.first<<" -> "<<kv.second<<"\n";
+
+        std::cout << "Detector configurati:\n";
+
+        bool found = false;
+
+        if (!cfg.haar_cascade_path.empty() && fa_file_exists(cfg.haar_cascade_path)) {
+            std::cout << "  haar   -> " << cfg.haar_cascade_path << "\n";
+            found = true;
         }
+
+        if (!cfg.yunet_model.empty() && fa_file_exists(cfg.yunet_model)) {
+            std::cout << "  yunet_fp32  -> " << cfg.yunet_model << "\n";
+            found = true;
+        }
+
+        if (!cfg.yunet_model_int8.empty() && fa_file_exists(cfg.yunet_model_int8)) {
+            std::cout << "  yunet_int8  -> " << cfg.yunet_model_int8 << "\n";
+            found = true;
+        }
+
+        if (!found) {
+            std::cout << "  (nessun detector rilevato nel config)\n";
+        }
+
         return 0;
     }
+
 
     if (list_res) {
         list_resolutions_for_device(cfg.device);
@@ -252,11 +270,41 @@ int facial_capture_main(int argc, char **argv)
     }
 
     if (!detector_override.empty()) {
-        if (cfg.detector_models.count(detector_override)==0) {
-            std::cerr<<"Detector sconosciuto\n"; return 1;
+
+        std::string low = detector_override;
+        std::transform(low.begin(), low.end(), low.begin(), ::tolower);
+
+        bool valid = false;
+
+        if (low == "haar" &&
+            !cfg.haar_cascade_path.empty() &&
+            fa_file_exists(cfg.haar_cascade_path))
+        {
+            valid = true;
         }
-        cfg.detector_profile=detector_override;
+        else if ((low == "yunet" || low == "yunet_fp32") &&
+            !cfg.yunet_model.empty() &&
+            fa_file_exists(cfg.yunet_model))
+        {
+            valid = true;
+            low = "yunet_fp32"; // normalizza
+        }
+        else if (low == "yunet_int8" &&
+            !cfg.yunet_model_int8.empty() &&
+            fa_file_exists(cfg.yunet_model_int8))
+        {
+            valid = true;
+        }
+
+        if (!valid) {
+            std::cerr << "[ERRORE] Detector '" << detector_override
+            << "' non definito nel file di configurazione\n";
+            return 1;
+        }
+
+        cfg.detector_profile = low;
     }
+
 
     std::string tool = "facial_capture";
     if (!fa_check_root(tool)) {

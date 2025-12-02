@@ -1,153 +1,134 @@
-cmake_minimum_required(VERSION 3.16)
-project(pam_facial_auth CXX)
+cmake_minimum_required(VERSION 3.20)
 
+project(pam_facial_auth LANGUAGES CXX)
+
+# ======================================
+# Build options
+# ======================================
+option(ENABLE_CUDA     "Enable CUDA support"     ON)
+option(ENABLE_OPENCL   "Enable OpenCL support"   ON)
+
+# ======================================
+# Compiler flags
+# ======================================
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-# ========================================================
-#  RPATH FIX — importantissimo su Gentoo + CUDA
-# ========================================================
-set(CMAKE_SKIP_RPATH FALSE)
-set(CMAKE_BUILD_WITH_INSTALL_RPATH TRUE)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -Wall -Wextra")
+# =========================================================
+# Prevent CUDA OpenCL conflicts in RPATH
+# =========================================================
+set(CMAKE_SKIP_RPATH TRUE)
+set(CMAKE_SKIP_BUILD_RPATH TRUE)
+set(CMAKE_SKIP_INSTALL_RPATH TRUE)
 
-# Directory CUDA (se abilitata)
-set(CUDA_LIBDIR "/opt/cuda-13.0.2/targets/x86_64-linux/lib")
-set(CUDA_INCDIR "/opt/cuda-13.0.2/include")
-
-# ========================================================
-#  Opzioni configurazione
-# ========================================================
-option(ENABLE_CUDA   "Enable CUDA backend"   OFF)
-option(ENABLE_OPENCL "Enable OpenCL backend" OFF)
-
-# ========================================================
-#  OpenCV
-# ========================================================
-find_package(OpenCV REQUIRED
-    PATHS /usr
-    COMPONENTS core imgproc videoio imgcodecs dnn objdetect face
+# ======================================
+# Locate OpenCV
+# ======================================
+find_package(OpenCV 4 REQUIRED COMPONENTS
+    core imgproc videoio highgui dnn face
 )
 
-include_directories(${OpenCV_INCLUDE_DIRS})
-link_directories(${OpenCV_LIB_DIR})
+message(STATUS "OpenCV found: ${OpenCV_VERSION}")
+message(STATUS "OpenCV libraries: ${OpenCV_LIBS}")
 
-# ========================================================
-#  CUDA (se abilitata)
-# ========================================================
+# ======================================
+# CUDA optional detection (CMake 4 compatible)
+# ======================================
 if(ENABLE_CUDA)
-    message(STATUS "CUDA ENABLED")
-    include_directories(${CUDA_INCDIR})
-    link_directories(${CUDA_LIBDIR})
+    cmake_policy(SET CMP0146 NEW)
+
+    find_package(CUDAToolkit)
+    if(CUDAToolkit_FOUND)
+        message(STATUS "CUDA support ENABLED — version ${CUDAToolkit_VERSION}")
+        add_compile_definitions(ENABLE_CUDA=1)
+    else()
+        message(WARNING "CUDA requested but NOT detected — disabling")
+        set(ENABLE_CUDA OFF)
+    endif()
 endif()
 
-# ========================================================
-#  OpenCL (se abilitata)
-# ========================================================
+# ======================================
+# OpenCL optional detection
+# ======================================
 if(ENABLE_OPENCL)
-    message(STATUS "OPENCL ENABLED")
-    find_library(OPENCL_LIBRARY OpenCL REQUIRED)
+    find_package(OpenCL)
+    if(OpenCL_FOUND)
+        message(STATUS "OpenCL support ENABLED")
+        add_compile_definitions(ENABLE_OPENCL=1)
+    else()
+        message(WARNING "OpenCL requested but NOT found — disabling")
+        set(ENABLE_OPENCL OFF)
+    endif()
 endif()
 
-include_directories(${CMAKE_SOURCE_DIR}/include)
+# ======================================
+# Include paths
+# ======================================
+include_directories(
+    ${OpenCV_INCLUDE_DIRS}
+    ${CMAKE_SOURCE_DIR}/include
+)
 
-# ========================================================
-#  Libreria condivisa libfacialauth.so
-# ========================================================
-add_library(facialauth SHARED
+# ======================================
+# Sources
+# ======================================
+set(SOURCES_LIB
     src/libfacialauth.cpp
 )
 
-target_link_libraries(facialauth
-    ${OpenCV_LIBS}
-)
-
-if(ENABLE_CUDA)
-    target_link_libraries(facialauth
-        ${CUDA_LIBDIR}/libcudart_static.a
-        nppial nppitc nppig nppist nppidei nppicc nppif nppim nppc
-        cublas culibos cublasLt cufft
-    )
-endif()
-
-if(ENABLE_OPENCL)
-    target_link_libraries(facialauth ${OPENCL_LIBRARY})
-endif()
-
-# Imposta un RPATH pulito
-set_target_properties(facialauth PROPERTIES
-    INSTALL_RPATH "${CUDA_LIBDIR}"
-)
-
-# ========================================================
-#  PAM module pam_facial_auth.so
-# ========================================================
-add_library(pam_facial_auth SHARED
+set(SOURCES_PAM
     src/pam_facial_auth.cpp
 )
 
-target_link_libraries(pam_facial_auth
-    facialauth
-    pam
-    ${OpenCV_LIBS}
+set(SOURCES_CAPTURE
+    src/facial_capture.cpp
 )
 
-if(ENABLE_CUDA)
-    target_link_libraries(pam_facial_auth
-        ${CUDA_LIBDIR}/libcudart_static.a
-        nppial nppitc nppig nppist nppidei nppicc nppif nppim nppc
-        cublas culibos cublasLt cufft
-    )
+set(SOURCES_TRAIN
+    src/facial_training.cpp
+)
+
+set(SOURCES_TEST
+    src/facial_test.cpp
+)
+
+# ======================================
+# Build shared library: libfacialauth.so
+# ======================================
+add_library(facialauth SHARED ${SOURCES_LIB})
+target_link_libraries(facialauth ${OpenCV_LIBS})
+
+if(ENABLE_OPENCL AND OpenCL_FOUND)
+    target_link_libraries(facialauth OpenCL::OpenCL)
 endif()
 
-if(ENABLE_OPENCL)
-    target_link_libraries(pam_facial_auth ${OPENCL_LIBRARY})
+if(ENABLE_CUDA AND CUDAToolkit_FOUND)
+    target_link_libraries(facialauth CUDA::cudart CUDA::cuda_driver)
 endif()
 
-set_target_properties(pam_facial_auth PROPERTIES
-    PREFIX ""                     # gera pam_facial_auth.so (senza lib)
-    INSTALL_RPATH "${CUDA_LIBDIR}"
-)
+# ======================================
+# Build PAM module
+# ======================================
+add_library(pam_facial_auth SHARED ${SOURCES_PAM})
+target_link_libraries(pam_facial_auth facialauth)
 
-# ========================================================
-#  Eseguibili
-# ========================================================
-add_executable(facial_capture   src/facial_capture.cpp)
-add_executable(facial_training  src/facial_training.cpp)
-add_executable(facial_test      src/facial_test.cpp)
+# ======================================
+# Build CLI tools
+# ======================================
+add_executable(facial_capture  ${SOURCES_CAPTURE})
+add_executable(facial_training ${SOURCES_TRAIN})
+add_executable(facial_test     ${SOURCES_TEST})
 
-foreach(bin facial_capture facial_training facial_test)
-    target_link_libraries(${bin}
-        facialauth
-        ${OpenCV_LIBS}
-    )
+target_link_libraries(facial_capture  facialauth)
+target_link_libraries(facial_training facialauth)
+target_link_libraries(facial_test     facialauth)
 
-    if(ENABLE_CUDA)
-        target_link_libraries(${bin}
-            ${CUDA_LIBDIR}/libcudart_static.a
-            nppial nppitc nppig nppist nppidei nppicc nppif nppim nppc
-            cublas culibos cublasLt cufft
-        )
-    endif()
-
-    if(ENABLE_OPENCL)
-        target_link_libraries(${bin} ${OPENCL_LIBRARY})
-    endif()
-
-    set_target_properties(${bin} PROPERTIES
-        INSTALL_RPATH "${CUDA_LIBDIR}"
-    )
-endforeach()
-
-# ========================================================
-#  Installazione
-# ========================================================
-install(TARGETS facialauth pam_facial_auth
-    LIBRARY DESTINATION lib64/security
-)
-
-install(TARGETS facial_capture facial_training facial_test
-    RUNTIME DESTINATION sbin
-)
-
-install(FILES etc/pam_facial.conf DESTINATION /etc/security)
-install(FILES README.md LICENSE DESTINATION /usr/share/doc/pam_facial_auth)
+# ======================================
+# Build Summary Output
+# ======================================
+message(STATUS "======== Build summary ========")
+message(STATUS "CUDA enabled: ${ENABLE_CUDA}")
+message(STATUS "OpenCL enabled: ${ENABLE_OPENCL}")
+message(STATUS "===============================")
