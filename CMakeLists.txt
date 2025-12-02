@@ -112,8 +112,11 @@ endif()
 # Build PAM module
 # ======================================
 add_library(pam_facial_auth SHARED ${SOURCES_PAM})
-target_link_libraries(pam_facial_auth facialauth)
-
+# Rimuovere il prefisso lib e chiamarlo pam_facial_auth.so
+set_target_properties(pam_facial_auth PROPERTIES
+    PREFIX ""                # niente "lib"
+    OUTPUT_NAME "pam_facial_auth"  # nome del modulo PAM
+)
 # ======================================
 # Build CLI tools
 # ======================================
