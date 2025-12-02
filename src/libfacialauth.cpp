@@ -1034,15 +1034,13 @@ static bool train_classic(
     std::vector<cv::Mat> faces;
     std::vector<int> labels;
 
-    // Use DetectorWrapper for detection (haar-only here for classic)
+    // Use unified detector (YuNet or Haar)
     DetectorWrapper det;
-    {
-        FacialAuthConfig tmp = cfg;
-        tmp.detector_profile = "haar";
-        if (!init_detector(tmp, det, log)) {
-            log += "Failed to initialize Haar detector for classic training.\n";
-            return false;
-        }
+    FacialAuthConfig tmp = cfg;
+    tmp.detector_profile = "haar"; // HAAR is best for classic training
+    if (!init_detector(tmp, det, log)) {
+        log += "Failed to initialize Haar detector for classic training.\n";
+        return false;
     }
 
     for (const auto &fn : files) {
@@ -1061,7 +1059,7 @@ static bool train_classic(
         cv::Mat face = img(face_rect).clone();
         cv::Mat gray;
         cv::cvtColor(face, gray, cv::COLOR_BGR2GRAY);
-        cv::resize(gray, gray, cv::Size(92, 112));
+        cv::resize(gray, gray, cv::Size(92,112));
 
         faces.push_back(gray);
         labels.push_back(0);
@@ -1072,150 +1070,40 @@ static bool train_classic(
         return false;
     }
 
-    std::string err;
-    cv::Ptr<cv::face::FaceRecognizer> rec =
-    create_classic_recognizer(method, cfg, err);
-    if (!rec) {
-        log += "Unsupported training method: " + method + " (" + err + ")\n";
+    // Create the OpenCV recognizer directly
+    cv::Ptr<cv::face::FaceRecognizer> rec;
+
+    std::string m = method;
+    std::transform(m.begin(), m.end(), m.begin(),
+                   [](unsigned char c){ return std::tolower(c); });
+
+    if (m == "lbph") {
+        rec = cv::face::LBPHFaceRecognizer::create();
+        rec->setThreshold(cfg.lbph_threshold);
+    }
+    else if (m == "eigen") {
+        rec = cv::face::EigenFaceRecognizer::create(cfg.eigen_components, cfg.eigen_threshold);
+    }
+    else if (m == "fisher") {
+        rec = cv::face::FisherFaceRecognizer::create(cfg.fisher_components, cfg.fisher_threshold);
+    }
+    else {
+        log += "Unsupported training method: " + method + "\n";
         return false;
     }
 
-    try {
-        rec->train(faces, labels);
-    } catch (const std::exception &e) {
-        log += std::string("Training failed (classic): ") + e.what() + "\n";
-        return false;
-    }
+    rec->train(faces, labels);
 
     if (file_exists(model_path) && !force_overwrite) {
         log += "Model file already exists (use --force to overwrite): " + model_path + "\n";
         return false;
     }
 
-    try {
-        ensure_dirs(fs::path(model_path).parent_path().string());
-        rec->save(model_path);
-    } catch (const std::exception &e) {
-        log += std::string("Failed to save model: ") + e.what() + "\n";
-        return false;
-    }
-
+    rec->save(model_path);
     log += "Classic model saved to: " + model_path + "\n";
     return true;
 }
-
-// ==========================================================
-// Public API: capture images
-// ==========================================================
-
-static bool fa_ensure_directory(const std::string &path, std::string &log)
-{
-    try {
-        if (!fs::exists(path))
-            fs::create_directories(path);
-        return true;
-    }
-    catch (const std::exception &e) {
-        log += "Cannot create directory '" + path + "': " + std::string(e.what()) + "\n";
-        return false;
-    }
-}
-
-static int fa_find_next_image_index(const std::string &dir, const std::string &format)
-{
-    int max_idx = 0;
-
-    if (!fs::exists(dir))
-        return 1;
-
-    for (auto &p : fs::directory_iterator(dir)) {
-        if (!p.is_regular_file()) continue;
-
-        if (p.path().extension() == "." + format) {
-            try {
-                int idx = std::stoi(p.path().stem().string());
-                if (idx > max_idx)
-                    max_idx = idx;
-            }
-            catch (...) {}
-        }
-    }
-
-    return max_idx + 1;
-}
-
-bool fa_capture_images(const std::string &user,
-                       const FacialAuthConfig &cfg,
-                       const std::string &format,
-                       std::string &log)
-{
-    std::string img_format = format.empty()
-    ? (cfg.image_format.empty() ? "jpg" : cfg.image_format)
-    : format;
-
-    std::string imgdir = fa_user_image_dir(cfg, user);
-    ensure_dirs(imgdir);
-    if (!is_dir(imgdir)) {
-        log += "[ERROR] Cannot create image directory: " + imgdir + "\n";
-        return false;
-    }
-
-    int start_index = fa_find_next_image_index(imgdir, img_format);
-    if (cfg.debug) {
-        std::cout << "[DEBUG] Images will be saved in: " << imgdir << "\n";
-        std::cout << "[DEBUG] Next available index: " << start_index << "\n";
-    }
-
-    cv::VideoCapture cap;
-    if (!open_camera(cap, cfg, log)) {
-        log += "[ERROR] Cannot open camera.\n";
-        return false;
-    }
-
-    if (cfg.debug) {
-        std::cout << "[DEBUG] Camera opened\n";
-        std::cout << "[DEBUG] Set resolution to "
-        << cfg.width << "x" << cfg.height << "\n";
-    }
-
-    cap.set(cv::CAP_PROP_FRAME_WIDTH,  cfg.width);
-    cap.set(cv::CAP_PROP_FRAME_HEIGHT, cfg.height);
-
-    DetectorWrapper detector;
-    if (!init_detector(cfg, detector, log)) {
-        log += "[ERROR] Cannot initialize detector (profile=" +
-        cfg.detector_profile + ").\n";
-        return false;
-    }
-    if (cfg.debug) {
-        std::cout << "[DEBUG] Detector initialized: "
-        << (cfg.detector_profile.empty() ? "auto" : cfg.detector_profile)
-        << "\n";
-    }
-
-    int saved = 0;
-    for (int i = 0; i < cfg.frames; ++i) {
-        cv::Mat frame;
-        if (!capture_frame(cap, frame, cfg, log)) {
-            log += "[ERROR] Invalid frame from camera.\n";
-            break;
-        }
-
-        if (cfg.verbose) {
-            std::cout << "[VERBOSE] Frame " << (i + 1) << "/"
-            << cfg.frames << " captured\n";
-        }
-
-        cv::Rect face;
-        if (!detector.detect(frame, face)) {
-            if (cfg.verbose) {
-                std::cout << "[VERBOSE] No face detected → image discarded\n";
-            }
-            continue;
-        }
-
-        if (face.width <= 0 || face.height <= 0) {
-            if (cfg.verbose) {
+if (cfg.verbose) {
                 std::cout << "[VERBOSE] Invalid bounding box → image discarded\n";
             }
             continue;
