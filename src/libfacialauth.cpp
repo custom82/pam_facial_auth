@@ -505,17 +505,26 @@ static int fa_find_next_image_index(const std::string &dir, const std::string &f
         if (!p.is_regular_file()) continue;
 
         auto path = p.path();
-        if (path.extension() == ("." + format)) {
-            try {
-                int idx = std::stoi(path.stem().string());
-                if (idx > max_idx) max_idx = idx;
-            }
-            catch (...) {}
+        auto name = path.stem().string();      // es: "img_14"
+        auto ext  = path.extension().string(); // ".jpg"
+
+        if (ext != "." + format)
+            continue;
+
+        if (name.rfind("img_", 0) != 0) // deve iniziare con img_
+            continue;
+
+        try {
+            int idx = std::stoi(name.substr(4)); // ottiene numero dopo img_
+            if (idx > max_idx) max_idx = idx;
         }
+        catch (...) {}
     }
 
     return max_idx + 1;
 }
+
+
 
 bool fa_capture_images(
     const std::string &user,
@@ -540,9 +549,19 @@ bool fa_capture_images(
         return false;
     }
 
-    int start_index = fa_find_next_image_index(imgdir, img_format);
+    // Calcolo index di partenza
+    int start_index = 1;
+
+    if (!cfg.force_overwrite) {
+        start_index = fa_find_next_image_index(imgdir, img_format);
+    } else {
+        if (cfg.debug || cfg.verbose) {
+            std::cout << "[INFO] Force mode enabled: starting index at 1\n";
+        }
+    }
+
     if (cfg.debug || cfg.verbose) {
-        std::cout << "[INFO] Saving captured images into: " << imgdir << "\n";
+        std::cout << "[INFO] Saving captured images to: " << imgdir << "\n";
         std::cout << "[INFO] Starting index: " << start_index << "\n";
     }
 
@@ -573,7 +592,7 @@ bool fa_capture_images(
             continue;
 
         int idx = start_index + saved;
-        std::string outfile = imgdir + "/" + std::to_string(idx) + "." + img_format;
+        std::string outfile = imgdir + "/img_" + std::to_string(idx) + "." + img_format;
 
         if (!cv::imwrite(outfile, frame))
         {
@@ -586,7 +605,7 @@ bool fa_capture_images(
             if (cfg.debug || cfg.verbose)
             {
                 std::cout << "[DEBUG] (" << saved << "/" << cfg.frames
-                << ") Saved image: " << outfile << "\n";
+                << ") Saved: " << outfile << "\n";
             }
         }
 
@@ -599,9 +618,10 @@ bool fa_capture_images(
         return false;
     }
 
-    log += "[INFO] Capture completed. Images saved: " + std::to_string(saved) + "\n";
+    log += "[INFO] Capture complete. Images saved: " + std::to_string(saved) + "\n";
     return true;
 }
+
 
 // ==========================================================
 // Training helpers (classic LBPH/Eigen/Fisher)

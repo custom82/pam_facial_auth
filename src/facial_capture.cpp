@@ -26,7 +26,7 @@ static void print_help()
     "  -d, --device <path>        Video device to use (e.g. /dev/video0)\n"
     "  -w, --width <px>           Frame width\n"
     "  -h, --height <px>          Frame height\n"
-    "  -f, --force                Overwrite existing images if present\n"
+    "  -f, --force                Force overwrite and restart numbering from img_1\n"
     "      --flush, --clean       Delete all stored images for the user\n"
     "  -n, --num-images <num>     Number of frames to capture\n"
     "  -s, --sleep <sec>          Delay between captures (seconds)\n"
@@ -35,7 +35,6 @@ static void print_help()
     "                                 haar          - Haar cascade model\n"
     "                                 yunet_fp32    - YuNet FP32 DNN model\n"
     "                                 yunet_int8    - YuNet INT8 optimized model\n"
-    "                             Default: auto-selected via configuration\n"
     "      --list-detectors       List configured detectors\n"
     "      --list-devices         List V4L2 capture devices\n"
     "      --list-resolutions     List supported resolutions for the webcam\n"
@@ -134,24 +133,25 @@ static void list_resolutions_for_device(const std::string &dev)
 static void debug_dump(const FacialAuthConfig &cfg)
 {
     std::cerr << "[DEBUG] Config:\n"
-    << " device=" << cfg.device << "\n"
-    << " width=" << cfg.width << "\n"
-    << " height=" << cfg.height << "\n"
-    << " frames=" << cfg.frames << "\n"
+    << " device="  << cfg.device  << "\n"
+    << " width="   << cfg.width   << "\n"
+    << " height="  << cfg.height  << "\n"
+    << " frames="  << cfg.frames  << "\n"
     << " sleep_ms=" << cfg.sleep_ms << "\n"
     << " detector=" << cfg.detector_profile << "\n"
-    << " format=" << cfg.image_format << "\n"
-    << " debug=" << (cfg.debug?"yes":"no") << "\n"
-    << " verbose=" << (cfg.verbose?"yes":"no") << "\n";
+    << " format="   << cfg.image_format << "\n"
+    << " debug="    << (cfg.debug?"yes":"no") << "\n"
+    << " verbose="  << (cfg.verbose?"yes":"no") << "\n";
 }
+
 int facial_capture_main(int argc, char **argv)
 {
     std::string user;
     std::string config_path = FACIALAUTH_DEFAULT_CONFIG;
 
     std::string device_override;
-    int width_override=-1, height_override=-1, frames_override=-1;
-    int sleep_sec=-1;
+    int width_override = -1, height_override = -1, frames_override = -1;
+    int sleep_sec = -1;
 
     std::string detector_override;
     std::string format_override;
@@ -202,7 +202,6 @@ int facial_capture_main(int argc, char **argv)
     cfg.debug |= debug;
     cfg.verbose |= verbose;
 
-
     if (!device_override.empty()) cfg.device=device_override;
     if (width_override>0) cfg.width=width_override;
     if (height_override>0) cfg.height=height_override;
@@ -222,7 +221,6 @@ int facial_capture_main(int argc, char **argv)
     cfg.image_format=fmt;
 
     if (list_det) {
-
         std::cout << "Detector configurati:\n";
 
         bool found = false;
@@ -248,7 +246,6 @@ int facial_capture_main(int argc, char **argv)
 
         return 0;
     }
-
 
     if (list_res) {
         list_resolutions_for_device(cfg.device);
@@ -311,7 +308,6 @@ int facial_capture_main(int argc, char **argv)
             debug_dump(cfg);
 
     }
-
 
     std::string tool = "facial_capture";
     if (!fa_check_root(tool)) {
