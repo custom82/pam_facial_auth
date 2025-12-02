@@ -9,24 +9,21 @@
 #include <opencv2/objdetect.hpp>
 #include <opencv2/dnn.hpp>
 
-//
-// Path di default del file di configurazione
-//
+// Default config path
 #ifndef FACIALAUTH_DEFAULT_CONFIG
 #define FACIALAUTH_DEFAULT_CONFIG "/etc/security/pam_facial.conf"
 #endif
 
+//
+// Main configuration structure
+//
 struct FacialAuthConfig
 {
-    //
-    // PATH / DEVICE
-    //
+    // Paths and device
     std::string basedir;
     std::string device;
 
-    //
-    // Parametri video
-    //
+    // Video parameters
     int width  = 640;
     int height = 480;
 
@@ -41,15 +38,11 @@ struct FacialAuthConfig
     bool ignore_failure     = false;
     bool save_failed_images = false;
 
-    //
-    // Profili detector/recognizer
-    //
+    // Model profile selectors
     std::string detector_profile;
     std::string recognizer_profile;
 
-    //
-    // Thresholds classici
-    //
+    // Classic face recognizer thresholds
     double lbph_threshold   = 80.0;
     double eigen_threshold  = 5000.0;
     double fisher_threshold = 500.0;
@@ -57,54 +50,43 @@ struct FacialAuthConfig
     int eigen_components  = 80;
     int fisher_components = 80;
 
-    //
-    // SFace Thresholds
-    //
+    // SFace thresholds
     double sface_threshold      = 0.5;
     double sface_fp32_threshold = 0.5;
     double sface_int8_threshold = 0.5;
 
-    //
-    // Modelli legacy
-    //
+    // Legacy models
     std::string model_path;
     std::string haar_cascade_path;
 
-    //
-    // Modelli YUNet
-    //
+    // YuNet models
     std::string yunet_model;
     std::string yunet_model_int8;
 
-    //
-    // Modelli SFace
-    //
+    // SFace models
     std::string sface_model;
     std::string sface_model_int8;
 
-    //
-    // Metodo di training: "lbph", "sface", "auto" …
-    //
+    // Training method selector: lbph / sface / auto
     std::string training_method = "lbph";
 
-    //
-    // DNN backend / target
-    //
-    std::string dnn_backend = "cpu"; // cpu / cuda / cuda_fp16 / opencl ...
-    std::string dnn_target  = "cpu"; // cpu / cuda / cuda_fp16 / opencl ...
+    // DNN control
+    std::string dnn_backend = "cpu";
+    std::string dnn_target  = "cpu";
 
-    //
-    // Mappature dinamiche config: detect_*  e recognize_*
-    //
+    // Dynamic config model maps
     std::map<std::string, std::string> detector_models;
     std::map<std::string, std::string> recognizer_models;
 
-    //
-    // Output images
-    //
+    // Output format
     std::string image_format = "jpg";
 };
 
+
+//
+// Unified face detector wrapper:
+// Supports HAAR and YuNet detection.
+//
 struct DetectorWrapper
 {
     enum DetectorType {
@@ -116,17 +98,20 @@ struct DetectorWrapper
     DetectorType type = DET_NONE;
 
     cv::CascadeClassifier haar;
-    cv::Size input_size = cv::Size(320, 320);
     cv::Ptr<cv::dnn::Net> yunet;
-    std::string model_path;
+    cv::Size input_size = cv::Size(320,320);
 
     bool debug = false;
+    std::string model_path;
 
-    // IMPORTANTE: NIENTE const QUI
+    // Unified detector interface
     bool detect(const cv::Mat &frame, cv::Rect &face);
 };
 
 
+//
+// SFace model resolution function
+//
 bool resolve_sface_model(
     const FacialAuthConfig &cfg,
     const std::string &profile,
@@ -134,6 +119,9 @@ bool resolve_sface_model(
     std::string &out_resolved_profile
 );
 
+//
+// SFace embedding computation
+//
 bool compute_sface_embedding(
     const FacialAuthConfig &cfg,
     const cv::Mat &face,
@@ -143,10 +131,9 @@ bool compute_sface_embedding(
 );
 
 
-
-
-// --------- FUNZIONI DELLA LIBRERIA ---------
-
+//
+// Main library API
+//
 bool fa_load_config(FacialAuthConfig &cfg,
                     std::string &log,
                     const std::string &path);

@@ -5,6 +5,7 @@
 #include <opencv2/videoio.hpp>
 #include <opencv2/face.hpp>
 #include <opencv2/highgui.hpp>
+#include <opencv2/dnn.hpp>
 
 #ifdef ENABLE_CUDA
 #include <opencv2/core/cuda.hpp>
@@ -67,7 +68,7 @@ static void sleep_ms_int(int ms)
 }
 
 // ==========================================================
-// fa_check_root (public API version using std::string)
+// fa_check_root (public API, string version)
 // ==========================================================
 
 bool fa_check_root(const std::string &tool_name)
@@ -79,7 +80,7 @@ bool fa_check_root(const std::string &tool_name)
     return true;
 }
 
-// Optional internal helper for const char*
+// Optional: internal helper for const char*
 static bool fa_check_root_cstr(const char *tool_name)
 {
     return fa_check_root(std::string(tool_name));
@@ -361,18 +362,19 @@ static bool capture_frame(
         log += "Failed to read frame from camera\n";
         return false;
     }
-
     return true;
 }
 
 // ==========================================================
-// SFace model save/load helpers
+// SFace model save/load helpers (user gallery)
 // ==========================================================
 
-static bool fa_save_sface_model(const FacialAuthConfig &cfg,
-                                const std::string &profile,
-                                const std::string &file,
-                                const std::vector<cv::Mat> &embeds)
+static bool fa_save_sface_model(
+    const FacialAuthConfig &cfg,
+    const std::string &profile,
+    const std::string &file,
+    const std::vector<cv::Mat> &embeds
+)
 {
     try {
         ensure_dirs(fs::path(file).parent_path().string());
@@ -382,15 +384,15 @@ static bool fa_save_sface_model(const FacialAuthConfig &cfg,
         fs << "type" << "sface";
         fs << "version" << 1;
 
-        fs << "recognizer_profile"   << profile;
-        fs << "detector_profile"     << cfg.detector_profile;
-        fs << "dnn_backend"          << cfg.dnn_backend;
-        fs << "dnn_target"           << cfg.dnn_target;
-        fs << "sface_fp32_threshold" << cfg.sface_fp32_threshold;
-        fs << "sface_int8_threshold" << cfg.sface_int8_threshold;
-        fs << "width"                << cfg.width;
-        fs << "height"               << cfg.height;
-        fs << "frames"               << cfg.frames;
+        fs << "recognizer_profile"    << profile;
+        fs << "detector_profile"      << cfg.detector_profile;
+        fs << "dnn_backend"           << cfg.dnn_backend;
+        fs << "dnn_target"            << cfg.dnn_target;
+        fs << "sface_fp32_threshold"  << cfg.sface_fp32_threshold;
+        fs << "sface_int8_threshold"  << cfg.sface_int8_threshold;
+        fs << "width"                 << cfg.width;
+        fs << "height"                << cfg.height;
+        fs << "frames"                << cfg.frames;
 
         fs << "embeddings" << "[";
         for (const auto &e : embeds)
@@ -469,7 +471,7 @@ static int parse_dnn_target(const std::string &t)
 }
 
 // ==========================================================
-// SFace model resolution helper
+// SFace ONNX model resolution
 // ==========================================================
 
 bool resolve_sface_model(
@@ -479,330 +481,39 @@ bool resolve_sface_model(
     std::string &out_resolved_profile
 )
 {
-    out_model_file.clear();
-    out_resolved_profile.clear();
+    std::string p = profile.empty() ? cfg.recognizer_profile : profile;
+    if (p.empty()) {
+        p = "sface_fp32";
+    }
 
-    // Decide which profile to use
-    std::string p = profile;
-    if (p.empty())
-        p = cfg.recognizer_profile;
-    if (p.empty())
-        p = "sface_fp32";  // sane default
-
-        std::string low = p;
+    std::string low = p;
     std::transform(low.begin(), low.end(), low.begin(),
                    [](unsigned char c){ return std::tolower(c); });
 
-    auto get_model_from_maps = [&](const std::string &key) -> std::string {
-        auto it = cfg.recognizer_models.find(key);
-        if (it != cfg.recognizer_models.end() && !it->second.empty())
-            return it->second;
-        return std::string();
-    };
+    bool use_int8 = (low.find("int8") != std::string::npos);
 
-    // Normalize names
-    if (low == "auto") {
-        // Prefer INT8 if configured, otherwise FP32
-        std::string m_int8  = get_model_from_maps("sface_int8");
-        std::string m_fp32  = get_model_from_maps("sface_fp32");
-        std::string f_int8  = cfg.sface_model_int8;
-        std::string f_fp32  = cfg.sface_model;
+    std::string key = use_int8 ? "sface_int8" : "sface_fp32";
+    std::string path;
 
-        if (!m_int8.empty()) {
-            out_model_file      = m_int8;
-            out_resolved_profile = "sface_int8";
-        } else if (!f_int8.empty()) {
-            out_model_file      = f_int8;
-            out_resolved_profile = "sface_int8";
-        } else if (!m_fp32.empty()) {
-            out_model_file      = m_fp32;
-            out_resolved_profile = "sface_fp32";
-        } else if (!f_fp32.empty()) {
-            out_model_file      = f_fp32;
-            out_resolved_profile = "sface_fp32";
-        } else {
-            return false;
-        }
-        return true;
+    auto it = cfg.recognizer_models.find(key);
+    if (it != cfg.recognizer_models.end())
+        path = it->second;
+    else {
+        if (use_int8)
+            path = cfg.sface_model_int8;
+        else
+            path = cfg.sface_model;
     }
 
-    bool want_int8 = (low.find("int8") != std::string::npos);
-    if (!want_int8 && low.find("fp32") == std::string::npos &&
-        low.find("sface") == std::string::npos)
-    {
-        // If user just wrote "int8" or "fp32" or something short
-        if (low == "int8")
-            want_int8 = true;
-    }
-
-    if (want_int8) {
-        std::string m_int8 = get_model_from_maps("sface_int8");
-        if (!m_int8.empty()) {
-            out_model_file       = m_int8;
-            out_resolved_profile = "sface_int8";
-            return true;
-        }
-        if (!cfg.sface_model_int8.empty()) {
-            out_model_file       = cfg.sface_model_int8;
-            out_resolved_profile = "sface_int8";
-            return true;
-        }
-        return false;
-    } else {
-        std::string m_fp32 = get_model_from_maps("sface_fp32");
-        if (!m_fp32.empty()) {
-            out_model_file       = m_fp32;
-            out_resolved_profile = "sface_fp32";
-            return true;
-        }
-        if (!cfg.sface_model.empty()) {
-            out_model_file       = cfg.sface_model;
-            out_resolved_profile = "sface_fp32";
-            return true;
-        }
+    if (path.empty()) {
+        out_model_file.clear();
+        out_resolved_profile.clear();
         return false;
     }
-}
 
-// ==========================================================
-// DetectorWrapper::detect (HAAR / YuNet)
-// Level 2 – aggressive filtering
-// ==========================================================
-
-bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face)
-{
-    face = cv::Rect();
-
-    if (frame.empty())
-        return false;
-
-    int W = frame.cols;
-    int H = frame.rows;
-
-    if (debug)
-        std::cout << "[DEBUG] DetectorWrapper::detect(): frame=" << W << "x" << H << "\n";
-
-    // ------------------------------------------------------
-    // HAAR
-    // ------------------------------------------------------
-    if (type == DET_HAAR)
-    {
-        cv::Mat gray;
-        cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
-
-        std::vector<cv::Rect> faces;
-        haar.detectMultiScale(
-            gray,
-            faces,
-            1.1,
-            3,
-            0,
-            cv::Size(30, 30)
-        );
-
-        if (faces.empty()) {
-            if (debug)
-                std::cout << "[DEBUG] HAAR: no face detected.\n";
-            return false;
-        }
-
-        face = faces[0];
-
-        if (debug) {
-            std::cout << "[DEBUG] HAAR: detected face "
-            << face.x << "," << face.y << " "
-            << face.width << "x" << face.height << "\n";
-        }
-
-        return true;
-    }
-
-    // ------------------------------------------------------
-    // YuNet + Level 2 aggressive filtering
-    // ------------------------------------------------------
-    if (type == DET_YUNET && yunet)
-    {
-        // Central 4:3 crop from the frame
-        int crop_h = H;
-        int crop_w = (H * 4) / 3;
-        int cx     = (W - crop_w) / 2;
-        if (cx < 0) cx = 0;
-        if (crop_w > W) crop_w = W;
-
-        cv::Rect crop(cx, 0, crop_w, crop_h);
-        cv::Mat roi = frame(crop).clone();
-
-        if (debug)
-            std::cout << "[DEBUG] YuNet: 4:3 crop=" << roi.cols << "x" << roi.rows
-            << " @" << cx << ",0\n";
-
-        // Quick brightness/contrast check on the ROI (Level 2)
-        // Reject almost-uniform / very dark frames (covered camera, etc.)
-        {
-            cv::Mat gray;
-            cv::cvtColor(roi, gray, cv::COLOR_BGR2GRAY);
-            cv::Scalar meanScalar, stdScalar;
-            cv::meanStdDev(gray, meanScalar, stdScalar);
-            double mean = meanScalar[0];
-            double stdv = stdScalar[0];
-
-            if (debug) {
-                std::cout << "[DEBUG] YuNet ROI mean=" << mean
-                << " stddev=" << stdv << "\n";
-            }
-
-            // Level 2 aggressive thresholds:
-            // - mean < 18 → too dark
-            // - stddev < 8 → very low contrast → likely flat / useless
-            if (mean < 18.0 || stdv < 8.0) {
-                if (debug)
-                    std::cout << "[DEBUG] YuNet: ROI rejected due to low brightness/contrast\n";
-                return false;
-            }
-        }
-
-        // Resize to square input (YuNet requirement)
-        cv::Mat resized;
-        const int net_w = 640;
-        const int net_h = 640;
-        cv::resize(roi, resized, cv::Size(net_w, net_h));
-
-        if (debug)
-            std::cout << "[DEBUG] YuNet: input square=" << net_w << "x" << net_h << "\n";
-
-        try {
-            yunet->setInput(cv::dnn::blobFromImage(resized));
-            cv::Mat out = yunet->forward();
-
-            if (out.empty()) {
-                if (debug)
-                    std::cout << "[DEBUG] YuNet: empty network output.\n";
-                return false;
-            }
-
-            const int num = out.size[2];
-            if (num <= 0) {
-                if (debug)
-                    std::cout << "[DEBUG] YuNet: no detections.\n";
-                return false;
-            }
-
-            if (debug)
-                std::cout << "[DEBUG] YuNet: " << num << " raw detections.\n";
-
-            float best_score = 0.0f;
-            cv::Rect best_rect;
-
-            for (int i = 0; i < num; ++i) {
-                float *data = (float *)out.ptr(0, 0, i);
-
-                float score = data[14];  // confidence score
-
-                // Main detection threshold
-                if (score < 0.60f)   // slightly higher than 0.55 for Level 2
-                    continue;
-
-                float x = data[0] * net_w;
-                float y = data[1] * net_h;
-                float w = data[2] * net_w;
-                float h = data[3] * net_h;
-
-                cv::Rect r((int)x, (int)y, (int)w, (int)h);
-
-                // Reject too small faces in network-space
-                int minFace = std::min(net_w, net_h) / 7; // a bit stricter than /8
-                if (r.width < minFace || r.height < minFace) {
-                    if (debug)
-                        std::cout << "[DEBUG] YuNet: detection rejected (too small in net space)\n";
-                    continue;
-                }
-
-                if (score > best_score) {
-                    best_score = score;
-                    best_rect  = r;
-                }
-            }
-
-            if (best_score < 0.60f) {
-                if (debug)
-                    std::cout << "[DEBUG] YuNet: no detection passed score/size filters.\n";
-                return false;
-            }
-
-            // Map back to original ROI and then to the full frame
-            float sx = (float)roi.cols / net_w;
-            float sy = (float)roi.rows / net_h;
-
-            cv::Rect mapped(
-                crop.x + (int)(best_rect.x * sx),
-                            crop.y + (int)(best_rect.y * sy),
-                            (int)(best_rect.width  * sx),
-                            (int)(best_rect.height * sy)
-            );
-
-            // Safety checks on mapped bounding box
-            if (mapped.x < 0 || mapped.y < 0 ||
-                mapped.x + mapped.width  > W ||
-                mapped.y + mapped.height > H)
-            {
-                if (debug)
-                    std::cout << "[DEBUG] YuNet: mapped bounding box out of frame → rejected\n";
-                return false;
-            }
-
-            int minFaceOriginal = std::min(W, H) / 7; // match stricter threshold
-            if (mapped.width < minFaceOriginal || mapped.height < minFaceOriginal) {
-                if (debug)
-                    std::cout << "[DEBUG] YuNet: mapped face too small ("
-                    << mapped.width << "x" << mapped.height
-                    << ") → rejected\n";
-                return false;
-            }
-
-            // Additional Level 2 contrast check on the final face crop
-            {
-                cv::Mat faceROI = frame(mapped).clone();
-                cv::Mat gray;
-                cv::cvtColor(faceROI, gray, cv::COLOR_BGR2GRAY);
-                cv::Scalar meanScalar, stdScalar;
-                cv::meanStdDev(gray, meanScalar, stdScalar);
-                double mean = meanScalar[0];
-                double stdv = stdScalar[0];
-
-                if (debug) {
-                    std::cout << "[DEBUG] YuNet face ROI mean=" << mean
-                    << " stddev=" << stdv << "\n";
-                }
-
-                // Slightly higher stddev requirement for the *face* region
-                if (mean < 20.0 || stdv < 10.0) {
-                    if (debug)
-                        std::cout << "[DEBUG] YuNet: face ROI rejected due to low brightness/contrast\n";
-                    return false;
-                }
-            }
-
-            if (debug) {
-                std::cout << "[DEBUG] YuNet: valid face "
-                << mapped.x << "," << mapped.y << " "
-                << mapped.width << "x" << mapped.height
-                << " (score=" << best_score << ")\n";
-            }
-
-            face = mapped;
-            return true;
-        }
-        catch (const cv::Exception &e) {
-            if (debug)
-                std::cout << "[DEBUG] YuNet OpenCV exception: " << e.what() << "\n";
-            return false;
-        }
-    }
-
-    if (debug)
-        std::cout << "[DEBUG] DetectorWrapper: no active detector.\n";
-
-    return false;
+    out_model_file       = path;
+    out_resolved_profile = key;
+    return true;
 }
 
 // ==========================================================
@@ -826,7 +537,7 @@ bool compute_sface_embedding(
     }
 
     if (!file_exists(model_path)) {
-        log += "SFace model file not found: " + model_path + "\n";
+        log += "SFace ONNX model file not found: " + model_path + "\n";
         return false;
     }
 
@@ -848,8 +559,8 @@ bool compute_sface_embedding(
             1.0 / 255.0,
             cv::Size(112, 112),
                                               cv::Scalar(0, 0, 0),
-                                              true,
-                                              false
+                                              true,   // swapRB
+                                              false   // crop
         );
 
         net.setInput(blob);
@@ -885,7 +596,188 @@ bool compute_sface_embedding(
 }
 
 // ==========================================================
-// Detector init helper
+// DetectorWrapper::detect (HAAR / YuNet)
+// ==========================================================
+
+bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face)
+{
+    face = cv::Rect();
+
+    if (frame.empty())
+        return false;
+
+    int W = frame.cols;
+    int H = frame.rows;
+
+    if (debug)
+        std::cout << "[DEBUG] DetectorWrapper::detect(): frame=" << W << "x" << H << "\n";
+
+    // ----------------- HAAR -----------------
+    if (type == DET_HAAR)
+    {
+        cv::Mat gray;
+        cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
+
+        std::vector<cv::Rect> faces;
+        haar.detectMultiScale(
+            gray,
+            faces,
+            1.1,
+            3,
+            0,
+            cv::Size(30, 30)
+        );
+
+        if (faces.empty()) {
+            if (debug)
+                std::cout << "[DEBUG] HAAR: no face detected.\n";
+            return false;
+        }
+
+        face = faces[0];
+
+        if (debug) {
+            std::cout << "[DEBUG] HAAR: face detected at "
+            << face.x << "," << face.y << " "
+            << face.width << "x" << face.height << "\n";
+        }
+
+        return true;
+    }
+
+    // ----------------- YuNet -----------------
+    if (type == DET_YUNET && yunet)
+    {
+        int crop_h = H;
+        int crop_w = (H * 4) / 3;
+        int cx     = (W - crop_w) / 2;
+        if (cx < 0) cx = 0;
+        if (crop_w > W) crop_w = W;
+
+        cv::Rect crop(cx, 0, crop_w, crop_h);
+        cv::Mat roi = frame(crop).clone();
+
+        if (debug)
+            std::cout << "[DEBUG] YuNet: crop4:3=" << roi.cols << "x" << roi.rows
+            << " @" << cx << ",0\n";
+
+        cv::Mat resized;
+        const int net_w = 640;
+        const int net_h = 640;
+        cv::resize(roi, resized, cv::Size(net_w, net_h));
+
+        if (debug)
+            std::cout << "[DEBUG] YuNet: input square=" << net_w << "x" << net_h << "\n";
+
+        try {
+            yunet->setInput(cv::dnn::blobFromImage(resized));
+            cv::Mat out = yunet->forward();
+
+            if (out.empty()) {
+                if (debug)
+                    std::cout << "[DEBUG] YuNet: empty output.\n";
+                return false;
+            }
+
+            const int num = out.size[2];
+
+            if (num <= 0) {
+                if (debug)
+                    std::cout << "[DEBUG] YuNet: no faces detected.\n";
+                return false;
+            }
+
+            if (debug)
+                std::cout << "[DEBUG] YuNet: " << num << " faces found.\n";
+
+            float best_score = 0.0f;
+            cv::Rect best_rect;
+
+            for (int i = 0; i < num; i++) {
+                float *data = (float *)out.ptr(0, 0, i);
+
+                float score = data[14];  // confidence score
+
+                if (score < 0.55f)
+                    continue;
+
+                float x = data[0] * net_w;
+                float y = data[1] * net_h;
+                float w = data[2] * net_w;
+                float h = data[3] * net_h;
+
+                cv::Rect r((int)x, (int)y, (int)w, (int)h);
+
+                int minFace = std::min(net_w, net_h) / 8;
+                if (r.width < minFace || r.height < minFace) {
+                    if (debug)
+                        std::cout << "[DEBUG] YuNet: face discarded as too small.\n";
+                    continue;
+                }
+
+                if (score > best_score) {
+                    best_score = score;
+                    best_rect  = r;
+                }
+            }
+
+            if (best_score < 0.55f) {
+                if (debug)
+                    std::cout << "[DEBUG] YuNet: no valid face above threshold.\n";
+                return false;
+            }
+
+            float sx = (float)roi.cols / net_w;
+            float sy = (float)roi.rows / net_h;
+
+            cv::Rect mapped(
+                crop.x + (int)(best_rect.x * sx),
+                            crop.y + (int)(best_rect.y * sy),
+                            (int)(best_rect.width  * sx),
+                            (int)(best_rect.height * sy)
+            );
+
+            if (mapped.x < 0 || mapped.y < 0 ||
+                mapped.x + mapped.width  > W ||
+                mapped.y + mapped.height > H)
+            {
+                if (debug)
+                    std::cout << "[DEBUG] YuNet: mapped bounding box out of frame, discarded.\n";
+                return false;
+            }
+
+            int minFaceOriginal = std::min(W, H) / 8;
+            if (mapped.width < minFaceOriginal || mapped.height < minFaceOriginal) {
+                if (debug)
+                    std::cout << "[DEBUG] YuNet: face too small in original frame, discarded.\n";
+                return false;
+            }
+
+            if (debug) {
+                std::cout << "[DEBUG] YuNet: valid face "
+                << mapped.x << "," << mapped.y << " "
+                << mapped.width << "x" << mapped.height
+                << " (score=" << best_score << ")\n";
+            }
+
+            face = mapped;
+            return true;
+        }
+        catch (const cv::Exception &e) {
+            if (debug)
+                std::cout << "[DEBUG] YuNet: OpenCV exception: " << e.what() << "\n";
+            return false;
+        }
+    }
+
+    if (debug)
+        std::cout << "[DEBUG] DetectorWrapper: no detector initialized.\n";
+
+    return false;
+}
+
+// ==========================================================
+// init_detector: choose and initialize detector backend
 // ==========================================================
 
 static bool init_detector(const FacialAuthConfig &cfg,
@@ -904,7 +796,7 @@ static bool init_detector(const FacialAuthConfig &cfg,
                    [](unsigned char c){ return std::tolower(c); });
 
     if (low == "auto") {
-        // Try YuNet FP32
+        // Prefer YuNet FP32, then YuNet INT8, then Haar.
         if (cfg.detector_models.count("yunet_fp32") &&
             file_exists(cfg.detector_models.at("yunet_fp32")))
         {
@@ -928,7 +820,6 @@ static bool init_detector(const FacialAuthConfig &cfg,
             }
         }
 
-        // Try YuNet INT8
         if (cfg.detector_models.count("yunet_int8") &&
             file_exists(cfg.detector_models.at("yunet_int8")))
         {
@@ -952,7 +843,6 @@ static bool init_detector(const FacialAuthConfig &cfg,
             }
         }
 
-        // Fallback to Haar
         if (cfg.detector_models.count("haar") &&
             file_exists(cfg.detector_models.at("haar")))
         {
@@ -982,7 +872,7 @@ static bool init_detector(const FacialAuthConfig &cfg,
             path = cfg.haar_cascade_path;
 
         if (path.empty()) {
-            log += "Haar detector requested but haar model path is empty.\n";
+            log += "Haar detector requested but model path is empty.\n";
             return false;
         }
         if (!file_exists(path)) {
@@ -1070,103 +960,41 @@ static bool init_detector(const FacialAuthConfig &cfg,
 }
 
 // ==========================================================
-// Classic training helpers (LBPH/Eigen/Fisher)
+// Classic recognizer creation helpers (LBPH / Eigen / Fisher)
 // ==========================================================
 
-static bool train_classic(
-    const std::string &user,
-    const FacialAuthConfig &cfg,
+static cv::Ptr<cv::face::FaceRecognizer> create_classic_recognizer(
     const std::string &method,
-    const std::string &imgdir,
-    const std::string &model_path,
-    bool force_overwrite,
-    std::string &log
+    const FacialAuthConfig &cfg,
+    std::string &err
 )
 {
-    if (!is_dir(imgdir)) {
-        log += "Image directory does not exist: " + imgdir + "\n";
-        return false;
-    }
+    std::string low = method;
+    std::transform(low.begin(), low.end(), low.begin(),
+                   [](unsigned char c){ return std::tolower(c); });
 
-    std::vector<cv::String> files;
-    cv::glob(imgdir + "/*.jpg", files, false);
-    cv::glob(imgdir + "/*.png", files, false);
-
-    if (files.empty()) {
-        log += "No images found in: " + imgdir + "\n";
-        return false;
-    }
-
-    std::vector<cv::Mat> faces;
-    std::vector<int> labels;
-
-    DetectorWrapper det;
-    {
-        FacialAuthConfig tmp = cfg;
-        tmp.detector_profile = "haar";
-        if (!init_detector(tmp, det, log)) {
-            log += "Failed to initialize Haar detector for classic training.\n";
-            return false;
+    try {
+        if (low == "lbph") {
+            // radius, neighbors, grid_x, grid_y, threshold
+            return cv::face::LBPHFaceRecognizer::create(
+                1, 8, 8, 8, cfg.lbph_threshold
+            );
+        } else if (low == "eigen" || low == "eigenfaces") {
+            return cv::face::EigenFaceRecognizer::create(
+                cfg.eigen_components, cfg.eigen_threshold
+            );
+        } else if (low == "fisher" || low == "fisherfaces") {
+            return cv::face::FisherFaceRecognizer::create(
+                cfg.fisher_components, cfg.fisher_threshold
+            );
         }
+    } catch (const std::exception &e) {
+        err = e.what();
+        return cv::Ptr<cv::face::FaceRecognizer>();
     }
 
-    for (const auto &fn : files) {
-        cv::Mat img = cv::imread(fn);
-        if (img.empty()) {
-            log += "Cannot read image: " + fn + "\n";
-            continue;
-        }
-
-        cv::Rect face_rect;
-        if (!det.detect(img, face_rect)) {
-            log += "No face detected in image: " + fn + "\n";
-            continue;
-        }
-
-        cv::Mat face = img(face_rect).clone();
-        cv::Mat gray;
-        cv::cvtColor(face, gray, cv::COLOR_BGR2GRAY);
-        cv::resize(gray, gray, cv::Size(92, 112));
-
-        faces.push_back(gray);
-        labels.push_back(0);
-    }
-
-    if (faces.empty()) {
-        log += "No valid faces found for classic training.\n";
-        return false;
-    }
-
-    FaceRecWrapper rec;
-    if (!rec.Create(method,
-        cfg.lbph_threshold,
-        cfg.eigen_threshold,
-        cfg.fisher_threshold,
-        cfg.eigen_components,
-        cfg.fisher_components))
-    {
-        log += "Unsupported training method: " + method + "\n";
-        return false;
-    }
-
-    std::string err;
-    if (!rec.Train(faces, labels, err)) {
-        log += "Training failed (classic): " + err;
-        return false;
-    }
-
-    if (file_exists(model_path) && !force_overwrite) {
-        log += "Model file already exists (use --force to overwrite): " + model_path + "\n";
-        return false;
-    }
-
-    if (!rec.Save(model_path, err)) {
-        log += "Failed to save model: " + err;
-        return false;
-    }
-
-    log += "Classic model saved to: " + model_path + "\n";
-    return true;
+    err = "Unsupported method '" + method + "'";
+    return cv::Ptr<cv::face::FaceRecognizer>();
 }
 
 // ==========================================================
@@ -1196,6 +1024,8 @@ static int fa_find_next_image_index(const std::string &dir, const std::string &f
     for (auto &p : fs::directory_iterator(dir)) {
         if (!p.is_regular_file()) continue;
 
+        auto name = p.path().filename().string();
+
         if (p.path().extension() == "." + format) {
             try {
                 int idx = std::stoi(p.path().stem().string());
@@ -1219,27 +1049,31 @@ bool fa_capture_images(const std::string &user,
     : format;
 
     std::string imgdir = fa_user_image_dir(cfg, user);
-    ensure_dirs(imgdir);
+    if (!fa_ensure_directory(imgdir, log)) {
+        log += "[ERROR] Cannot ensure image directory: " + imgdir + "\n";
+        return false;
+    }
+
     if (!is_dir(imgdir)) {
-        log += "[ERROR] Cannot create image directory: " + imgdir + "\n";
+        log += "[ERROR] Image directory is not a directory: " + imgdir + "\n";
         return false;
     }
 
     int start_index = fa_find_next_image_index(imgdir, img_format);
     if (cfg.debug) {
-        std::cout << "[DEBUG] Images will be saved to: " << imgdir << "\n";
+        std::cout << "[DEBUG] Will save images into: " << imgdir << "\n";
         std::cout << "[DEBUG] Next available index: " << start_index << "\n";
     }
 
     cv::VideoCapture cap;
     if (!open_camera(cap, cfg, log)) {
-        log += "[ERROR] Cannot open camera device.\n";
+        log += "[ERROR] Cannot open camera.\n";
         return false;
     }
 
     if (cfg.debug) {
         std::cout << "[DEBUG] Camera opened\n";
-        std::cout << "[DEBUG] Setting resolution to "
+        std::cout << "[DEBUG] Setting resolution "
         << cfg.width << "x" << cfg.height << "\n";
     }
 
@@ -1249,15 +1083,13 @@ bool fa_capture_images(const std::string &user,
     DetectorWrapper detector;
     if (!init_detector(cfg, detector, log)) {
         log += "[ERROR] Cannot initialize detector (profile=" +
-        (cfg.detector_profile.empty() ? "auto" : cfg.detector_profile) +
-        ").\n";
-    return false;
+        cfg.detector_profile + ").\n";
+        return false;
     }
-
     if (cfg.debug) {
-        std::cout << "[DEBUG] Detector initialized (profile="
+        std::cout << "[DEBUG] Detector initialized: "
         << (cfg.detector_profile.empty() ? "auto" : cfg.detector_profile)
-        << ")\n";
+        << "\n";
     }
 
     int saved = 0;
@@ -1283,13 +1115,13 @@ bool fa_capture_images(const std::string &user,
 
         if (face.width <= 0 || face.height <= 0) {
             if (cfg.verbose) {
-                std::cout << "[VERBOSE] Degenerate bounding box → frame discarded\n";
+                std::cout << "[VERBOSE] Invalid bounding box → frame discarded\n";
             }
             continue;
         }
 
         if (cfg.debug) {
-            std::cout << "[DEBUG] Detected face: x=" << face.x
+            std::cout << "[DEBUG] Face detected: x=" << face.x
             << " y=" << face.y
             << " w=" << face.width
             << " h=" << face.height << "\n";
@@ -1317,8 +1149,107 @@ bool fa_capture_images(const std::string &user,
         return false;
     }
 
-    log += "[INFO] Capture completed. Saved images: " +
+    log += "[INFO] Capture completed. Images saved: " +
     std::to_string(saved) + "\n";
+    return true;
+}
+
+// ==========================================================
+// Training helpers (classic LBPH/Eigen/Fisher)
+// ==========================================================
+
+static bool train_classic(
+    const std::string &user,
+    const FacialAuthConfig &cfg,
+    const std::string &method,
+    const std::string &imgdir,
+    const std::string &model_path,
+    bool force_overwrite,
+    std::string &log
+)
+{
+    if (!is_dir(imgdir)) {
+        log += "Image directory does not exist: " + imgdir + "\n";
+        return false;
+    }
+
+    std::vector<cv::String> files;
+    cv::glob(imgdir + "/*.jpg", files, false);
+    cv::glob(imgdir + "/*.png", files, false);
+
+    if (files.empty()) {
+        log += "No images found in: " + imgdir + "\n";
+        return false;
+    }
+
+    std::vector<cv::Mat> faces;
+    std::vector<int> labels;
+
+    // Use unified detector (but force Haar for classic training to be consistent)
+    DetectorWrapper det;
+    FacialAuthConfig tmp = cfg;
+    tmp.detector_profile = "haar";
+    if (!init_detector(tmp, det, log)) {
+        log += "Failed to initialize Haar detector for classic training.\n";
+        return false;
+    }
+
+    for (const auto &fn : files) {
+        cv::Mat img = cv::imread(fn);
+        if (img.empty()) {
+            log += "Cannot read image: " + fn + "\n";
+            continue;
+        }
+
+        cv::Rect face_rect;
+        if (!det.detect(img, face_rect)) {
+            log += "No face detected in image: " + fn + "\n";
+            continue;
+        }
+
+        cv::Mat face = img(face_rect).clone();
+        cv::Mat gray;
+        cv::cvtColor(face, gray, cv::COLOR_BGR2GRAY);
+        cv::resize(gray, gray, cv::Size(92, 112));
+
+        faces.push_back(gray);
+        labels.push_back(0);
+    }
+
+    if (faces.empty()) {
+        log += "No valid faces found for classic training.\n";
+        return false;
+    }
+
+    std::string err;
+    cv::Ptr<cv::face::FaceRecognizer> rec =
+    create_classic_recognizer(method, cfg, err);
+
+    if (!rec) {
+        log += "Failed to create classic recognizer: " + err + "\n";
+        return false;
+    }
+
+    try {
+        rec->train(faces, labels);
+    } catch (const std::exception &e) {
+        log += std::string("Training failed (classic): ") + e.what() + "\n";
+        return false;
+    }
+
+    if (file_exists(model_path) && !force_overwrite) {
+        log += "Model file already exists (use --force to overwrite): " + model_path + "\n";
+        return false;
+    }
+
+    try {
+        rec->save(model_path);
+    } catch (const std::exception &e) {
+        log += std::string("Failed to save model: ") + e.what() + "\n";
+        return false;
+    }
+
+    log += "Classic model saved to: " + model_path + "\n";
     return true;
 }
 
@@ -1347,6 +1278,7 @@ bool fa_train_user(
     std::transform(method_low.begin(), method_low.end(), method_low.begin(),
                    [](unsigned char c){ return std::tolower(c); });
 
+    // Automatic choice based on recognizer_profile
     if (method_low == "auto") {
         std::string rp_low = rp;
         std::transform(rp_low.begin(), rp_low.end(), rp_low.begin(),
@@ -1460,6 +1392,8 @@ bool fa_test_user(
     double threshold_override
 )
 {
+    (void)user; // currently unused, but kept for API symmetry
+
     best_conf  = 0.0;
     best_label = -1;
 
@@ -1539,7 +1473,7 @@ bool fa_test_user(
         }
 
         double best_sim = -1.0;
-        int best_idx = -1;
+        int best_idx    = -1;
 
         for (size_t i = 0; i < gallery.size(); ++i) {
             double sim = cosine_similarity(emb, gallery[i]);
@@ -1576,10 +1510,19 @@ bool fa_test_user(
             return false;
         }
     } else {
-        FaceRecWrapper rec;
-        std::string err;
-        if (!rec.Load(modelPath, err)) {
-            log += "Failed to load classic model: " + err;
+        // Classic LBPH/Eigen/Fisher branch
+        cv::Ptr<cv::face::FaceRecognizer> rec;
+        try {
+            rec = cv::Algorithm::load<cv::face::FaceRecognizer>(modelPath);
+        } catch (const cv::Exception &e) {
+            log += "Failed to load classic model: ";
+            log += e.what();
+            log += "\n";
+            return false;
+        }
+
+        if (!rec) {
+            log += "Failed to load classic model: Algorithm::load returned null.\n";
             return false;
         }
 
@@ -1600,10 +1543,14 @@ bool fa_test_user(
         cv::cvtColor(face, gray, cv::COLOR_BGR2GRAY);
         cv::resize(gray, gray, cv::Size(92, 112));
 
-        int label = -1;
+        int label  = -1;
         double conf = 0.0;
-        if (!rec.Predict(gray, label, conf, err)) {
-            log += "Classic predict failed: " + err;
+        try {
+            rec->predict(gray, label, conf);
+        } catch (const std::exception &e) {
+            log += "Classic predict failed: ";
+            log += e.what();
+            log += "\n";
             return false;
         }
 
