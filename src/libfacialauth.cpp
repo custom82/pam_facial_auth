@@ -294,31 +294,63 @@ bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face)
     if (type == DET_YUNET && yunet)
     {
         cv::Mat resized;
-        cv::resize(frame, resized, cv::Size(640,640));
+        cv::resize(frame, resized, cv::Size(640, 640));
 
         try {
-            yunet->setInput(cv::dnn::blobFromImage(resized));
+            cv::Mat blob = cv::dnn::blobFromImage(resized);
+            yunet->setInput(blob);
+
             cv::Mat out = yunet->forward();
-            if (out.empty()) return false;
+            if (out.empty())
+                return false;
+
+            // Output YuNet tipico: [1, 1, num, dims]
+            const int dims = out.dims;
+            if (dims < 3)
+                return false;
 
             int num = out.size[2];
-            float best_score=0.0f;
+            int desc_len = (dims >= 4 ? out.size[3] : 15); // fallback a 15
+
+            if (debug) {
+                std::cout << "[DEBUG] YuNet: out.dims=" << dims
+                << " num=" << num
+                << " desc_len=" << desc_len << "\n";
+            }
+
+            if (num <= 0 || desc_len <= 0)
+                return false;
+
+            float best_score = 0.0f;
             cv::Rect best;
 
-            for (int i=0;i<num;i++) {
-                float *d = (float*)out.ptr(0,0,i);
-                float score = d[14];
-                if (score < 0.55f) continue;
+            for (int i = 0; i < num; ++i) {
+                float *d = reinterpret_cast<float*>(out.ptr(0, 0, i));
+
+                // PUNTO CHIAVE:
+                // usa SEMPRE l’ultima voce come score, così supporti
+                // sia i modelli 15D che quelli 16D.
+                float score = d[desc_len - 1];
+                if (score < 0.55f)
+                    continue;
 
                 cv::Rect r(
-                    int(d[0]*W),
-                           int(d[1]*H),
-                           int(d[2]*W),
-                           int(d[3]*H)
+                    int(d[0] * W),
+                           int(d[1] * H),
+                           int(d[2] * W),
+                           int(d[3] * H)
                 );
 
-                int minFace = std::min(W,H)/8;
-                if (r.width < minFace || r.height < minFace) continue;
+                int minFace = std::min(W, H) / 8;
+                if (r.width < minFace || r.height < minFace)
+                    continue;
+
+                if (debug) {
+                    std::cout << "[DEBUG] YuNet candidate face @ "
+                    << r.x << "," << r.y << " "
+                    << r.width << "x" << r.height
+                    << " score=" << score << "\n";
+                }
 
                 if (score > best_score) {
                     best_score = score;
@@ -326,7 +358,16 @@ bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face)
                 }
             }
 
-            if (best_score <= 0.0f) return false;
+            if (best_score <= 0.0f)
+                return false;
+
+            if (debug) {
+                std::cout << "[DEBUG] YuNet best face @ "
+                << best.x << "," << best.y << " "
+                << best.width << "x" << best.height
+                << " score=" << best_score << "\n";
+            }
+
             face = best;
             return true;
         }
@@ -336,7 +377,6 @@ bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face)
     }
 
     return false;
-}
 
 
 // ==========================================================
