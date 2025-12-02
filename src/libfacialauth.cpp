@@ -908,7 +908,7 @@ static bool train_classic(
 
     if (file_exists(model_path) && !force_overwrite) {
         log += "Model file already exists (use --force to overwrite): " +
-        model_path + "\n";
+               model_path + "\n";
         return false;
     }
 
@@ -923,7 +923,7 @@ static bool train_classic(
     log += "Classic model saved to: " + model_path + "\n";
     return true;
 }
-double dot = a.dot(b);
+    double dot = a.dot(b);
     double na  = cv::norm(a);
     double nb  = cv::norm(b);
     if (na <= 0.0 || nb <= 0.0) return 0.0;
@@ -1131,4 +1131,22 @@ bool fa_test_user(
     " confidence=" + std::to_string(conf) + "\n";
 
     return true;
+}
+
+// ==========================================================
+// Cosine similarity helper for SFace embedding comparison
+// ==========================================================
+static double cosine_similarity(const cv::Mat &a, const cv::Mat &b)
+{
+    if (a.empty() || b.empty())
+        return 0.0;
+
+    double dot = a.dot(b);
+    double na  = cv::norm(a);
+    double nb  = cv::norm(b);
+
+    if (na <= 0.0 || nb <= 0.0)
+        return 0.0;
+
+    return dot / (na * nb);
 }
