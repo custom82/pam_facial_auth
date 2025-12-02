@@ -378,7 +378,7 @@ bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face)
         }
     }
 
-
+}
 // ==========================================================
 // Detector initialization
 // ==========================================================
