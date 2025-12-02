@@ -406,9 +406,7 @@ static bool init_detector(
     std::string low = profile;
     std::transform(low.begin(), low.end(), low.begin(), ::tolower);
 
-    // =======================================================
-    // HAAR CASCADE
-    // =======================================================
+    // ===== HAAR =====
     if (low == "haar")
     {
         if (cfg.haar_cascade_path.empty() || !fa_file_exists(cfg.haar_cascade_path)) {
@@ -429,12 +427,10 @@ static bool init_detector(
         return true;
     }
 
-    // =======================================================
-    // YUNET (FP32) via FaceDetectorYN API
-    // =======================================================
+    // ===== YuNet FP32 =====
     if (low == "yunet" || low == "yunet_fp32")
     {
-        if (cfg.yunet_model.empty() || !fa_file_exists(cfg.yunet_model)) {
+        if (!fa_file_exists(cfg.yunet_model)) {
             log += "Missing YuNet FP32 model\n";
             return false;
         }
@@ -450,11 +446,6 @@ static bool init_detector(
                 cv::Size(cfg.width, cfg.height)
             );
 
-            if (!det.yunet_detector) {
-                log += "Failed to init YuNet FP32 FaceDetectorYN\n";
-                return false;
-            }
-
             log += "Initialized YuNet FP32 detector\n";
             return true;
         }
@@ -464,12 +455,10 @@ static bool init_detector(
         }
     }
 
-    // =======================================================
-    // YUNET INT8 (quantized ONNX) via FaceDetectorYN
-    // =======================================================
+    // ===== YuNet INT8 =====
     if (low == "yunet_int8")
     {
-        if (cfg.yunet_model_int8.empty() || !fa_file_exists(cfg.yunet_model_int8)) {
+        if (!fa_file_exists(cfg.yunet_model_int8)) {
             log += "Missing YuNet INT8 model\n";
             return false;
         }
@@ -482,15 +471,16 @@ static bool init_detector(
             det.yunet_detector = cv::FaceDetectorYN::create(
                 cfg.yunet_model_int8,
                 "",
-                cv::Size(cfg.width, cfg.height)
+                cv::Size(cfg.width, cfg.height),
+                                                            0.9f,                 // score
+                                                            0.3f,                 // NMS
+                                                            5000,                 // topK
+                                                            cv::Mat(),            // anchors auto
+                                                            cv::Scalar(0,0,0),    // mean
+                                                            cv::Scalar(255,255,255)  // std INT8
             );
 
-            if (!det.yunet_detector) {
-                log += "Failed to init YuNet INT8 FaceDetectorYN\n";
-                return false;
-            }
-
-            log += "Initialized YuNet INT8 detector\n";
+            log += "Initialized YuNet INT8 detector with quant settings\n";
             return true;
         }
         catch (...) {
@@ -499,12 +489,10 @@ static bool init_detector(
         }
     }
 
-    // =======================================================
-    // Unknown detector
-    // =======================================================
-    log += "Unknown detector_profile `" + low + "`\n";
+    log += "Unknown detector profile\n";
     return false;
 }
+
 
 
 // ==========================================================
