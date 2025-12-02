@@ -823,9 +823,11 @@ static bool train_classic(
     std::vector<cv::Mat> faces;
     std::vector<int> labels;
 
+    // Force Haar detection for classic model training
     DetectorWrapper det;
     FacialAuthConfig tmp = cfg;
-    tmp.detector_profile = "haar"; // for classic training we force Haar
+    tmp.detector_profile = "haar";
+
     if (!init_detector(tmp, det, log)) {
         log += "Failed to initialize Haar detector for classic training.\n";
         return false;
@@ -858,15 +860,44 @@ static bool train_classic(
         return false;
     }
 
-    std::string err;
-    cv::Ptr<cv::face::FaceRecognizer> rec =
-    create_classic_recognizer(method, cfg, err);
+    // ===============================
+    //  Create the classic recognizer
+    // ===============================
+    cv::Ptr<cv::face::FaceRecognizer> rec;
+
+    std::string mlow = method;
+    std::transform(mlow.begin(), mlow.end(), mlow.begin(),
+                   [](unsigned char c){ return std::tolower(c); });
+
+    if (mlow == "lbph") {
+        rec = cv::face::LBPHFaceRecognizer::create(
+            1, 8, 8, 8, cfg.lbph_threshold
+        );
+    }
+    else if (mlow == "eigen" || mlow == "eigenfaces") {
+        rec = cv::face::EigenFaceRecognizer::create(
+            cfg.eigen_components, cfg.eigen_threshold
+        );
+    }
+    else if (mlow == "fisher" || mlow == "fisherfaces") {
+        rec = cv::face::FisherFaceRecognizer::create(
+            cfg.fisher_components, cfg.fisher_threshold
+        );
+    }
+    else {
+        rec = cv::face::LBPHFaceRecognizer::create(
+            1, 8, 8, 8, cfg.lbph_threshold
+        );
+    }
 
     if (!rec) {
-        log += "Failed to create classic recognizer: " + err + "\n";
+        log += "Failed to create classic recognizer.\n";
         return false;
     }
 
+    // ===============================
+    // Train model
+    // ===============================
     try {
         rec->train(faces, labels);
     }
@@ -892,137 +923,7 @@ static bool train_classic(
     log += "Classic model saved to: " + model_path + "\n";
     return true;
 }
-
-
-// ==========================================================
-// Public API: train user
-// ==========================================================
-
-bool fa_train_user(
-    const std::string &user,
-    const FacialAuthConfig &cfg,
-    std::string &log
-)
-{
-    std::string imgdir     = fa_user_image_dir(cfg, user);
-    std::string model_path = fa_user_model_path(cfg, user);
-
-    if (!is_dir(imgdir)) {
-        log += "fa_train_user: image directory does not exist: " + imgdir + "\n";
-        return false;
-    }
-
-    std::string method = cfg.training_method;
-    std::string rp     = cfg.recognizer_profile;
-
-    std::string method_low = method;
-    std::transform(method_low.begin(), method_low.end(), method_low.begin(),
-                   [](unsigned char c){ return std::tolower(c); });
-
-    if (method_low == "auto") {
-        std::string rp_low = rp;
-        std::transform(rp_low.begin(), rp_low.end(), rp_low.begin(),
-                       [](unsigned char c){ return std::tolower(c); });
-        if (rp_low.rfind("sface", 0) == 0)
-            method = "sface";
-        else
-            method = "lbph";
-    }
-
-    std::string mlow = method;
-    std::transform(mlow.begin(), mlow.end(), mlow.begin(),
-                   [](unsigned char c){ return std::tolower(c); });
-
-    if (mlow == "sface") {
-        DetectorWrapper det;
-        if (!init_detector(cfg, det, log)) {
-            log += "fa_train_user: cannot initialize detector.\n";
-            return false;
-        }
-
-        std::vector<cv::String> files_jpg;
-        std::vector<cv::String> files_png;
-        cv::glob(imgdir + "/*.jpg", files_jpg, false);
-        cv::glob(imgdir + "/*.png", files_png, false);
-
-        std::vector<cv::String> files = files_jpg;
-        files.insert(files.end(), files_png.begin(), files_png.end());
-
-        if (files.empty()) {
-            log += "No images found for SFace training in: " + imgdir + "\n";
-            return false;
-        }
-
-        std::vector<cv::Mat> embeddings;
-
-        for (const auto &fn : files) {
-            cv::Mat img = cv::imread(fn);
-            if (img.empty()) {
-                log += "Cannot read image: " + fn + "\n";
-                continue;
-            }
-
-            cv::Rect face_rect;
-            if (!det.detect(img, face_rect)) {
-                log += "No face detected in: " + fn + "\n";
-                continue;
-            }
-
-            cv::Mat face = img(face_rect).clone();
-            cv::Mat resized;
-            cv::resize(face, resized, cv::Size(112, 112));
-
-            cv::Mat emb;
-            std::string log_emb;
-            if (!compute_sface_embedding(cfg, resized, rp, emb, log_emb)) {
-                log += "Failed to compute embedding for: " + fn + "\n";
-                log += log_emb;
-                continue;
-            }
-
-            embeddings.push_back(emb);
-        }
-
-        if (embeddings.empty()) {
-            log += "No embeddings computed for SFace training.\n";
-            return false;
-        }
-
-        if (file_exists(model_path) && !cfg.force_overwrite) {
-            log += "Model file already exists (use --force to overwrite): " +
-            model_path + "\n";
-            return false;
-        }
-
-        if (!fa_save_sface_model(cfg, rp, model_path, embeddings)) {
-            log += "Failed to save SFace model: " + model_path + "\n";
-            return false;
-        }
-
-        log += "SFace model saved to: " + model_path + "\n";
-        return true;
-    }
-    else {
-        return train_classic(
-            user,
-            cfg,
-            method,
-            imgdir,
-            model_path,
-            cfg.force_overwrite,
-            log
-        );
-    }
-}
-
-
-// ==========================================================
-// Public API: test user
-// ==========================================================
-
-static double cosine_similarity(const cv::Mat &a, const cv::Mat &b)
-{
-    double dot = a.dot(b);
+double dot = a.dot(b);
     double na  = cv::norm(a);
     double nb  = cv::norm(b);
     if (na <= 0.0 || nb <= 0.0) return 0.0;
