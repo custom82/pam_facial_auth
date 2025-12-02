@@ -422,14 +422,17 @@ static bool init_detector(
             det.yunet_detector = cv::FaceDetectorYN::create(
                 cfg.yunet_model_int8,
                 "",
-                cv::Size(cfg.width, cfg.height)
+                cv::Size(cfg.width, cfg.height),
+                                                            0.9f,   // score threshold
+                                                            0.3f,   // NMS threshold
+                                                            500    // max detections
             );
 
             det.type = DetectorWrapper::DET_YUNET;
             det.debug = cfg.debug;
             det.model_path = cfg.yunet_model_int8;
 
-            log += "Initialized YuNet INT8\n";
+            log += "Initialized YuNet INT8 via FaceDetectorYN\n";
             return true;
         }
         catch (...) {
@@ -438,9 +441,6 @@ static bool init_detector(
         }
     }
 
-    log += "Unknown detector_profile\n";
-    return false;
-}
 
 
 // ==========================================================
