@@ -304,51 +304,54 @@ bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face)
             if (out.empty())
                 return false;
 
-            // Output YuNet tipico: [1, 1, num, dims]
-            const int dims = out.dims;
-            if (dims < 3)
-                return false;
-
             int num = out.size[2];
-            int desc_len = (dims >= 4 ? out.size[3] : 15); // fallback a 15
+            int desc_len = out.size[3]; // usually 15
 
             if (debug) {
-                std::cout << "[DEBUG] YuNet: out.dims=" << dims
-                << " num=" << num
+                std::cout << "[DEBUG] YuNet: num=" << num
                 << " desc_len=" << desc_len << "\n";
             }
 
-            if (num <= 0 || desc_len <= 0)
-                return false;
+            float scaleX = (float)W / 640.0f;
+            float scaleY = (float)H / 640.0f;
 
             float best_score = 0.0f;
             cv::Rect best;
 
-            for (int i = 0; i < num; ++i) {
+            for (int i = 0; i < num; ++i)
+            {
                 float *d = reinterpret_cast<float*>(out.ptr(0, 0, i));
 
-                // PUNTO CHIAVE:
-                // usa SEMPRE l’ultima voce come score, così supporti
-                // sia i modelli 15D che quelli 16D.
-                float score = d[desc_len - 1];
-                if (score < 0.55f)
+                float score = d[4];
+
+                // Only allow valid 0..1 scores
+                if (score < 0.55f || score > 1.1f)
                     continue;
 
                 cv::Rect r(
-                    int(d[0] * W),
-                           int(d[1] * H),
-                           int(d[2] * W),
-                           int(d[3] * H)
+                    int(d[0] * scaleX),
+                           int(d[1] * scaleY),
+                           int(d[2] * scaleX),
+                           int(d[3] * scaleY)
                 );
 
+                // Reject impossible bounding boxes
+                if (r.x < 0 || r.y < 0 ||
+                    r.x + r.width  > W ||
+                    r.y + r.height > H)
+                {
+                    if(debug) std::cout << "[DEBUG] Reject box out of frame\n";
+                    continue;
+                }
+
+                // Minimum size threshold
                 int minFace = std::min(W, H) / 8;
                 if (r.width < minFace || r.height < minFace)
                     continue;
 
                 if (debug) {
-                    std::cout << "[DEBUG] YuNet candidate face @ "
-                    << r.x << "," << r.y << " "
-                    << r.width << "x" << r.height
+                    std::cout << "[DEBUG] candidate face @" << r.x << "," << r.y
+                    << " " << r.width << "x" << r.height
                     << " score=" << score << "\n";
                 }
 
@@ -362,9 +365,8 @@ bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face)
                 return false;
 
             if (debug) {
-                std::cout << "[DEBUG] YuNet best face @ "
-                << best.x << "," << best.y << " "
-                << best.width << "x" << best.height
+                std::cout << "[DEBUG] YuNet best @" << best.x << "," << best.y
+                << " " << best.width << "x" << best.height
                 << " score=" << best_score << "\n";
             }
 
@@ -376,8 +378,6 @@ bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face)
         }
     }
 
-    return false;
-}
 
 // ==========================================================
 // Detector initialization
