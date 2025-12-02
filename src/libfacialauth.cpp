@@ -1392,16 +1392,16 @@ bool fa_test_user(
     double threshold_override
 )
 {
-    (void)user; // currently unused, but kept for API symmetry
-
     best_conf  = 0.0;
     best_label = -1;
 
+    // Ensure model exists
     if (!file_exists(modelPath)) {
         log += "Model file not found: " + modelPath + "\n";
         return false;
     }
 
+    // Determine recognition method
     std::string method = cfg.training_method;
     std::string rp     = cfg.recognizer_profile;
 
@@ -1424,19 +1424,23 @@ bool fa_test_user(
     std::transform(mlow.begin(), mlow.end(), mlow.begin(),
                    [](unsigned char c){ return std::tolower(c); });
 
+    // Open the camera
     cv::VideoCapture cap;
     if (!open_camera(cap, cfg, log)) {
         log += "fa_test_user: cannot open camera.\n";
         return false;
     }
 
+    // Init detector
     DetectorWrapper det;
     if (!init_detector(cfg, det, log)) {
         log += "fa_test_user: cannot initialize detector.\n";
         return false;
     }
 
-    if (mlow == "sface") {
+    // -------------------- SFace branch --------------------
+    if (mlow == "sface")
+    {
         std::vector<cv::Mat> gallery;
         if (!fa_load_sface_model(modelPath, gallery)) {
             log += "Failed to load SFace model: " + modelPath + "\n";
@@ -1444,13 +1448,13 @@ bool fa_test_user(
         }
 
         if (gallery.empty()) {
-            log += "SFace model has empty gallery.\n";
+            log += "SFace model contains zero embeddings.\n";
             return false;
         }
 
         cv::Mat frame;
         if (!capture_frame(cap, frame, cfg, log)) {
-            log += "fa_test_user: cannot capture frame.\n";
+            log += "fa_test_user: failed to capture frame.\n";
             return false;
         }
 
@@ -1473,7 +1477,7 @@ bool fa_test_user(
         }
 
         double best_sim = -1.0;
-        int best_idx    = -1;
+        int best_idx = -1;
 
         for (size_t i = 0; i < gallery.size(); ++i) {
             double sim = cosine_similarity(emb, gallery[i]);
@@ -1493,11 +1497,9 @@ bool fa_test_user(
             std::string rp_low = rp;
             std::transform(rp_low.begin(), rp_low.end(), rp_low.begin(),
                            [](unsigned char c){ return std::tolower(c); });
-            if (rp_low.find("int8") != std::string::npos) {
-                thr = cfg.sface_int8_threshold;
-            } else {
-                thr = cfg.sface_fp32_threshold;
-            }
+            thr = (rp_low.find("int8") != std::string::npos)
+            ? cfg.sface_int8_threshold
+            : cfg.sface_fp32_threshold;
         }
 
         if (best_sim >= thr) {
@@ -1509,57 +1511,80 @@ bool fa_test_user(
             " < threshold " + std::to_string(thr) + " (rejected)\n";
             return false;
         }
-    } else {
-        // Classic LBPH/Eigen/Fisher branch
-        cv::Ptr<cv::face::FaceRecognizer> rec;
-        try {
-            rec = cv::Algorithm::load<cv::face::FaceRecognizer>(modelPath);
-        } catch (const cv::Exception &e) {
-            log += "Failed to load classic model: ";
-            log += e.what();
-            log += "\n";
-            return false;
-        }
-
-        if (!rec) {
-            log += "Failed to load classic model: Algorithm::load returned null.\n";
-            return false;
-        }
-
-        cv::Mat frame;
-        if (!capture_frame(cap, frame, cfg, log)) {
-            log += "fa_test_user: cannot capture frame.\n";
-            return false;
-        }
-
-        cv::Rect face_rect;
-        if (!det.detect(frame, face_rect)) {
-            log += "No face detected in test frame.\n";
-            return false;
-        }
-
-        cv::Mat face = frame(face_rect).clone();
-        cv::Mat gray;
-        cv::cvtColor(face, gray, cv::COLOR_BGR2GRAY);
-        cv::resize(gray, gray, cv::Size(92, 112));
-
-        int label  = -1;
-        double conf = 0.0;
-        try {
-            rec->predict(gray, label, conf);
-        } catch (const std::exception &e) {
-            log += "Classic predict failed: ";
-            log += e.what();
-            log += "\n";
-            return false;
-        }
-
-        best_label = label;
-        best_conf  = conf;
-
-        log += "Classic recognizer predicted label=" +
-        std::to_string(label) + " with confidence=" +
-        std::to_string(conf) + "\n";
-        return true;
     }
+
+    // -------------------- Classic recognizer branch --------------------
+    cv::Ptr<cv::face::FaceRecognizer> rec;
+    try {
+        std::string low = cfg.training_method;
+        std::transform(low.begin(), low.end(), low.begin(),
+                       [](unsigned char c){ return std::tolower(c); });
+
+        if (low == "lbph") {
+            rec = cv::face::LBPHFaceRecognizer::create(
+                1, 8, 8, 8, cfg.lbph_threshold
+            );
+        }
+        else if (low == "eigen" || low == "eigenfaces") {
+            rec = cv::face::EigenFaceRecognizer::create(
+                cfg.eigen_components, cfg.eigen_threshold
+            );
+        }
+        else if (low == "fisher" || low == "fisherfaces") {
+            rec = cv::face::FisherFaceRecognizer::create(
+                cfg.fisher_components, cfg.fisher_threshold
+            );
+        }
+        else {
+            rec = cv::face::LBPHFaceRecognizer::create(
+                1, 8, 8, 8, cfg.lbph_threshold
+            );
+        }
+
+        rec->read(modelPath);   // load learned model
+    }
+    catch (const cv::Exception &e) {
+        log += "Failed to load classic recognizer model: ";
+        log += e.what();
+        log += "\n";
+        return false;
+    }
+
+    cv::Mat frame;
+    if (!capture_frame(cap, frame, cfg, log)) {
+        log += "fa_test_user: cannot capture frame.\n";
+        return false;
+    }
+
+    cv::Rect face_rect;
+    if (!det.detect(frame, face_rect)) {
+        log += "No face detected in test frame.\n";
+        return false;
+    }
+
+    cv::Mat face = frame(face_rect).clone();
+    cv::Mat gray;
+    cv::cvtColor(face, gray, cv::COLOR_BGR2GRAY);
+    cv::resize(gray, gray, cv::Size(92, 112));
+
+    int label = -1;
+    double conf = 0.0;
+
+    try {
+        rec->predict(gray, label, conf);
+    } catch (const std::exception &e) {
+        log += "Classic recognizer predict failed: ";
+        log += e.what();
+        log += "\n";
+        return false;
+    }
+
+    best_label = label;
+    best_conf  = conf;
+
+    log += "Classic recognizer predicted label=" +
+    std::to_string(label) +
+    " confidence=" + std::to_string(conf) + "\n";
+
+    return true;
 }
