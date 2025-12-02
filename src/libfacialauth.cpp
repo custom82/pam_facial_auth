@@ -290,7 +290,6 @@ bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face)
         return true;
     }
 
-    // ===== YuNet =====
     // ===== YuNet detector via FaceDetectorYN API =====
     if (type == DET_YUNET && yunet_detector)
     {
