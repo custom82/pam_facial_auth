@@ -1141,5 +1141,12 @@ static double cosine_similarity(const cv::Mat &a, const cv::Mat &b)
     if (a.empty() || b.empty())
         return 0.0;
 
+    double dot = a.dot(b);
+    double na  = cv::norm(a);
+    double nb  = cv::norm(b);
 
+    if (na <= 0.0 || nb <= 0.0)
+        return 0.0;
+
+    return dot / (na * nb);
 }
