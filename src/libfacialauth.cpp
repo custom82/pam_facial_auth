@@ -541,9 +541,9 @@ bool fa_capture_images(
     }
 
     int start_index = fa_find_next_image_index(imgdir, img_format);
-    if (cfg.debug) {
-        std::cout << "[DEBUG] Will save images into: " << imgdir << "\n";
-        std::cout << "[DEBUG] Next available index: " << start_index << "\n";
+    if (cfg.debug || cfg.verbose) {
+        std::cout << "[INFO] Saving captured images into: " << imgdir << "\n";
+        std::cout << "[INFO] Starting index: " << start_index << "\n";
     }
 
     cv::VideoCapture cap;
@@ -554,13 +554,14 @@ bool fa_capture_images(
 
     DetectorWrapper detector;
     if (!init_detector(cfg, detector, log)) {
-        log += "[ERROR] Cannot initialize detector (profile=" +
-        cfg.detector_profile + ").\n";
+        log += "[ERROR] Cannot initialize detector (profile=" + cfg.detector_profile + ").\n";
         return false;
     }
 
     int saved = 0;
-    for (int i = 0; i < cfg.frames; ++i) {
+
+    for (int i = 0; i < cfg.frames; ++i)
+    {
         cv::Mat frame;
         if (!capture_frame(cap, frame, cfg, log)) {
             log += "[ERROR] Invalid frame from camera.\n";
@@ -575,9 +576,19 @@ bool fa_capture_images(
         std::string outfile = imgdir + "/" + std::to_string(idx) + "." + img_format;
 
         if (!cv::imwrite(outfile, frame))
+        {
             log += "[ERROR] Cannot save image: " + outfile + "\n";
+        }
         else
+        {
             ++saved;
+
+            if (cfg.debug || cfg.verbose)
+            {
+                std::cout << "[DEBUG] (" << saved << "/" << cfg.frames
+                << ") Saved image: " << outfile << "\n";
+            }
+        }
 
         if (cfg.sleep_ms > 0)
             sleep_ms_int(cfg.sleep_ms);
@@ -591,7 +602,6 @@ bool fa_capture_images(
     log += "[INFO] Capture completed. Images saved: " + std::to_string(saved) + "\n";
     return true;
 }
-
 
 // ==========================================================
 // Training helpers (classic LBPH/Eigen/Fisher)
