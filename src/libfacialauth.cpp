@@ -35,9 +35,10 @@ namespace fs = std::filesystem;
 // ==========================================================
 
 bool compute_sface_embedding(
-    const FacialAuthConfig &cfg,
+    const FacialAuthConfig &,
     const cv::Mat &face,
-    const std::string &profile,
+    const std::string &,
+
     cv::Mat &embedding,
     std::string &log
 );
@@ -48,7 +49,7 @@ bool fa_load_sface_model(
 );
 
 bool fa_save_sface_model(
-    const FacialAuthConfig &cfg,
+    const FacialAuthConfig &,
     const std::string &profile,
     const std::string &file,
     const std::vector<cv::Mat> &embeds
@@ -170,9 +171,9 @@ bool fa_load_config(
             else if (key == "fisher_threshold") cfg.fisher_threshold = std::stod(val);
             else if (key == "sface_model") cfg.sface_model = val;
             else if (key == "sface_model_int8") cfg.sface_model_int8 = val;
-            else if (key == "haar_model") cfg.haar_cascade_path = val;
-            else if (key == "yunet_model") cfg.yunet_model = val;
-            else if (key == "yunet_model_int8") cfg.yunet_model_int8 = val;
+            else if (key == "haar_model" || key == "detect_haar") cfg.haar_cascade_path = val;
+            else if (key == "yunet_model" || key == "detect_yunet_fp32") cfg.yunet_model = val;
+            else if (key == "yunet_model_int8" || key == "detect_yunet_int8") cfg.yunet_model_int8 = val;
             else logbuf += "Unknown param '" + key + "'\n";
         }
         catch (...) {
@@ -557,7 +558,7 @@ bool fa_capture_images(
 // ==========================================================
 
 static bool train_classic(
-    const std::string &user,
+    const std::string &,
     const FacialAuthConfig &cfg,
     const std::string &method,
     const std::string &imgdir,
@@ -786,7 +787,7 @@ bool fa_train_user(
 // Authentication Test Function
 // ==========================================================
 bool fa_test_user(
-    const std::string &user,
+    const std::string &,
     const FacialAuthConfig &cfg,
     const std::string &modelPath,
     double &best_conf,
@@ -1086,9 +1087,10 @@ void fa_dump_config(
 // ==========================================================
 
 bool compute_sface_embedding(
-    const FacialAuthConfig &cfg,
+    const FacialAuthConfig &,
     const cv::Mat &face,
-    const std::string &profile,
+    const std::string &,
+
     cv::Mat &embedding,
     std::string &log
 )
@@ -1119,7 +1121,7 @@ bool compute_sface_embedding(
 }
 
 bool fa_save_sface_model(
-    const FacialAuthConfig &cfg,
+    const FacialAuthConfig &,
     const std::string &profile,
     const std::string &file,
     const std::vector<cv::Mat> &embeds

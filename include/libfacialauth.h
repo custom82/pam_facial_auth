@@ -3,7 +3,9 @@
 #include <string>
 #include <vector>
 #include <map>
-#include <opencv2/opencv.hpp>
+#include <opencv2/core.hpp>
+#include <opencv2/imgproc.hpp>
+#include <opencv2/objdetect.hpp>
 #include <opencv2/dnn.hpp>
 #include <opencv2/face.hpp>
 
@@ -127,7 +129,7 @@ bool fa_delete_user(
 
 // Authentication test
 bool fa_test_user(
-    const std::string &user,
+    const std::string &,
     const FacialAuthConfig &cfg,
     const std::string &modelPath,
     double &best_conf,

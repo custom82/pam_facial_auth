@@ -202,8 +202,6 @@ int facial_capture_main(int argc, char **argv)
     cfg.debug |= debug;
     cfg.verbose |= verbose;
 
-    if (cfg.debug)
-        debug_dump(cfg);
 
     if (!device_override.empty()) cfg.device=device_override;
     if (width_override>0) cfg.width=width_override;
@@ -309,12 +307,15 @@ int facial_capture_main(int argc, char **argv)
         }
 
         cfg.detector_profile = low;
+        if (cfg.debug)
+            debug_dump(cfg);
+
     }
 
 
     std::string tool = "facial_capture";
     if (!fa_check_root(tool)) {
-            std::cerr<<"Devi essere root\n"; return 1;
+        std::cerr<<"Devi essere root\n"; return 1;
     }
 
     if (cfg.verbose)
