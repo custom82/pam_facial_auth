@@ -264,7 +264,8 @@ bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face)
 {
     face = cv::Rect();
 
-    if (frame.empty()) return false;
+    if (frame.empty())
+        return false;
 
     int W = frame.cols, H = frame.rows;
     if (debug)
@@ -279,7 +280,9 @@ bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face)
         std::vector<cv::Rect> faces;
         haar.detectMultiScale(gray, faces, 1.1, 3, 0, cv::Size(30,30));
 
-        if (faces.empty()) return false;
+        if (faces.empty())
+            return false;
+
         face = faces[0];
 
         if (debug) {
@@ -290,7 +293,7 @@ bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face)
         return true;
     }
 
-    // ===== YuNet detector via FaceDetectorYN API =====
+    // ===== YuNet via FaceDetectorYN API =====
     if (type == DET_YUNET && yunet_detector)
     {
         cv::Mat faces;
@@ -300,11 +303,9 @@ bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face)
         if (faces.empty())
             return false;
 
-        if (debug) {
+        if (debug)
             std::cout << "[DEBUG] YuNet found " << faces.rows << " candidate(s)\n";
-        }
 
-        // faces Nx15 matrix — take best score
         int bestIdx = -1;
         float bestScore = 0.0f;
 
@@ -341,7 +342,10 @@ bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face)
 
         return true;
     }
+
+    return false;
 }
+
 
 // ==========================================================
 // Detector initialization
@@ -375,6 +379,7 @@ static bool init_detector(
         det.type = DetectorWrapper::DET_HAAR;
         det.debug = cfg.debug;
         det.model_path = cfg.haar_cascade_path;
+
         log += "Initialized Haar detector\n";
         return true;
     }
@@ -387,22 +392,15 @@ static bool init_detector(
         }
 
         try {
-            det.yunet = cv::makePtr<cv::dnn::Net>(cv::dnn::readNetFromONNX(cfg.yunet_model));
+            det.yunet_detector = cv::FaceDetectorYN::create(
+                cfg.yunet_model,
+                "",
+                cv::Size(cfg.width, cfg.height)
+            );
+
             det.type = DetectorWrapper::DET_YUNET;
             det.debug = cfg.debug;
             det.model_path = cfg.yunet_model;
-
-            det.yunet->setPreferableBackend(
-                cfg.dnn_backend == "cuda"
-                ? cv::dnn::DNN_BACKEND_CUDA
-                : cv::dnn::DNN_BACKEND_OPENCV
-            );
-
-            det.yunet->setPreferableTarget(
-                cfg.dnn_backend == "cuda"
-                ? cv::dnn::DNN_TARGET_CUDA
-                : cv::dnn::DNN_TARGET_CPU
-            );
 
             log += "Initialized YuNet FP32\n";
             return true;
@@ -421,13 +419,15 @@ static bool init_detector(
         }
 
         try {
-            det.yunet = cv::makePtr<cv::dnn::Net>(cv::dnn::readNetFromONNX(cfg.yunet_model_int8));
+            det.yunet_detector = cv::FaceDetectorYN::create(
+                cfg.yunet_model_int8,
+                "",
+                cv::Size(cfg.width, cfg.height)
+            );
+
             det.type = DetectorWrapper::DET_YUNET;
             det.debug = cfg.debug;
             det.model_path = cfg.yunet_model_int8;
-
-            det.yunet->setPreferableBackend(cv::dnn::DNN_BACKEND_OPENCV);
-            det.yunet->setPreferableTarget(cv::dnn::DNN_TARGET_CPU);
 
             log += "Initialized YuNet INT8\n";
             return true;
@@ -441,6 +441,8 @@ static bool init_detector(
     log += "Unknown detector_profile\n";
     return false;
 }
+
+
 // ==========================================================
 // Public API: capture images
 // ==========================================================

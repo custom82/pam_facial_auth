@@ -71,8 +71,7 @@ struct FacialAuthConfig
 // ==========================================================
 // DetectorWrapper: uniform face detector abstraction
 // ==========================================================
-struct DetectorWrapper
-{
+struct DetectorWrapper {
     enum Type {
         DET_NONE = 0,
         DET_HAAR,
@@ -81,14 +80,14 @@ struct DetectorWrapper
 
     Type type = DET_NONE;
     bool debug = false;
-
     std::string model_path;
 
     cv::CascadeClassifier haar;
-    cv::Ptr<cv::dnn::Net> yunet;
+    cv::Ptr<cv::FaceDetectorYN> yunet_detector;
 
     bool detect(const cv::Mat &frame, cv::Rect &face);
 };
+
 
 // ==========================================================
 // Public API
