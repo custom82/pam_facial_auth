@@ -465,293 +465,187 @@ static int parse_dnn_target(const std::string &t)
 // DetectorWrapper::detect (Haar + YuNet con crop 4:3 + 1280x1280)
 // ==========================================================
 
-bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face)
+bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face) const
 {
     face = cv::Rect();
 
-    if (frame.empty()) {
-        if (debug) std::cout << "[DEBUG] Frame vuoto, nessun volto.\n";
+    if (frame.empty())
         return false;
+
+    int W = frame.cols;
+    int H = frame.rows;
+
+    //
+    // ----------- DEBUG INFO INPUT FRAME ----------
+    //
+    if (debug) {
+        std::cout << "[DEBUG] Detect(): frame=" << W << "x" << H << "\n";
     }
 
-    if (type == DET_HAAR) {
-        std::vector<cv::Rect> faces;
+    //
+    // ------------ HAAR CASCADE --------------------
+    //
+    if (type == DET_HAAR)
+    {
         cv::Mat gray;
         cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
+        std::vector<cv::Rect> faces;
 
-        haar.detectMultiScale(gray, faces, 1.1, 3, 0, cv::Size(30,30));
-        if (!faces.empty()) {
-            face = faces[0];
-            return true;
-        }
-        return false;
-    }
-
-    if (type == DET_YUNET && yunet) {
-
-        int src_w = frame.cols;
-        int src_h = frame.rows;
-
-        int crop_w, crop_h;
-        if (src_w * 3 <= src_h * 4) {
-            crop_w = src_w;
-            crop_h = (src_w * 3) / 4;
-        } else {
-            crop_h = src_h;
-            crop_w = (src_h * 4) / 3;
-        }
-
-        int x = (src_w - crop_w) / 2;
-        int y = (src_h - crop_h) / 2;
-
-        cv::Rect crop(x, y, crop_w, crop_h);
-        crop &= cv::Rect(0,0,src_w,src_h);
-        cv::Mat roi = frame(crop).clone();
-
-        int net_w = (crop_w >= 640 ? 960 : 640);
-        int net_h = (crop_w >= 640 ? 720 : 480);
-
-        if (debug) {
-            std::cout << "[DEBUG] YuNet adaptive crop=" << crop_w << "x" << crop_h
-            << " -> net=" << net_w << "x" << net_h << "\n";
-        }
-
-        cv::Mat blob = cv::dnn::blobFromImage(
-            roi, 1.0,
-            cv::Size(net_w, net_h),
-                                              cv::Scalar(0,0,0), // no mean for adaptive input
-                                              false, false
+        haar.detectMultiScale(
+            gray,
+            faces,
+            1.1,
+            3,
+            0,
+            cv::Size(30, 30)
         );
-        yunet->setInput(blob);
-        cv::Mat out = yunet->forward();
 
-        if (out.empty() || out.dims != 3) return false;
-
-        int num = out.size[1];
-        float *data = (float*) out.data;
-
-        float best_score = 0;
-        cv::Rect best_rect;
-
-        for (int i = 0; i < num; i++) {
-            float x_n = data[i * 15 + 0] * net_w;
-            float y_n = data[i * 15 + 1] * net_h;
-            float w_n = data[i * 15 + 2] * net_w;
-            float h_n = data[i * 15 + 3] * net_h;
-            float score = data[i * 15 + 4];
-
-            if (score < 0.60f) continue;
-            if (w_n < 40 || h_n < 40) continue;
-
-            if (score > best_score) {
-                best_score = score;
-                best_rect = cv::Rect((int)x_n, (int)y_n, (int)w_n, (int)h_n);
-            }
-        }
-
-        if (best_score == 0) {
-            if (debug) std::cout << "[DEBUG] YuNet: no valid face\n";
+        if (faces.empty()) {
+            if (debug)
+                std::cout << "[DEBUG] HAAR: nessun volto rilevato.\n";
             return false;
         }
 
-        float sx = (float)crop_w / net_w;
-        float sy = (float)crop_h / net_h;
-
-        cv::Rect out_rect(
-            crop.x + (int)(best_rect.x * sx),
-                          crop.y + (int)(best_rect.y * sy),
-                          (int)(best_rect.width * sx),
-                          (int)(best_rect.height * sy)
-        );
-
-        out_rect &= cv::Rect(0,0,src_w,src_h);
-        face = out_rect;
-
-        if (debug) std::cout << "[DEBUG] YuNet face mapped OK\n";
+        face = faces[0];
+        if (debug) {
+            std::cout << "[DEBUG] HAAR: volto rilevato "
+            << face.x << "," << face.y << " "
+            << face.width << "x" << face.height << "\n";
+        }
         return true;
     }
+
+    //
+    // ---------------- YUNET ------------------------
+    //
+    if (type == DET_YUNET && yunet)
+    {
+        //
+        // Step 1: crop 4:3 dal centro
+        //
+        int crop_h = H;
+        int crop_w = (H * 4) / 3;
+        int cx     = (W - crop_w) / 2;
+        if (cx < 0) cx = 0;
+        if (crop_w > W) crop_w = W;
+
+        cv::Rect crop(cx, 0, crop_w, crop_h);
+        cv::Mat roi = frame(crop).clone();
+
+        // Debug
+        if (debug) {
+            std::cout << "[DEBUG] YuNet: crop4:3=" << roi.cols << "x" << roi.rows
+            << " @" << cx << ",0\n";
+        }
+
+        //
+        // Step 2: resize in input *quadrato* per YuNet
+        //
+        int net_w = 640;
+        int net_h = 640;
+
+        cv::Mat resized;
+        cv::resize(roi, resized, cv::Size(net_w, net_h));
+
+        if (debug) {
+            std::cout << "[DEBUG] YuNet: input square=" << net_w << "x" << net_h << "\n";
+        }
+
+        //
+        // Step 3: run YuNet DNN
+        //
+        try {
+            yunet->setInput(cv::dnn::blobFromImage(resized));
+            cv::Mat out = yunet->forward();
+
+            if (out.empty()) {
+                if (debug)
+                    std::cout << "[DEBUG] YuNet: nessuna uscita valida.\n";
+                return false;
+            }
+
+            const int num = out.size[2];
+            if (num <= 0) {
+                if (debug)
+                    std::cout << "[DEBUG] YuNet: nessun volto rilevato.\n";
+                return false;
+            }
+
+            if (debug) {
+                std::cout << "[DEBUG] YuNet: " << num << " volti trovati.\n";
+            }
+
+            //
+            // Step 4: pick best confidence face
+            //
+            float best_score = 0.f;
+            cv::Rect best_rect;
+
+            for (int i = 0; i < num; i++) {
+                float *data = (float *)out.ptr(0, 0, i);
+
+                float score = data[14];
+                if (score < 0.6f)
+                    continue;
+
+                float x = data[0] * net_w;
+                float y = data[1] * net_h;
+                float w = data[2] * net_w;
+                float h = data[3] * net_h;
+
+                if (score > best_score) {
+                    best_score = score;
+                    best_rect = cv::Rect((int)x, (int)y, (int)w, (int)h);
+                }
+            }
+
+            if (best_score < 0.6f) {
+                if (debug)
+                    std::cout << "[DEBUG] YuNet: nessun volto valido.\n";
+                return false;
+            }
+
+            //
+            // Step 5: scala bounding box a coordinate originali
+            //
+            float sx = (float)roi.cols / net_w;
+            float sy = (float)roi.rows / net_h;
+
+            cv::Rect mapped(
+                crop.x + (int)(best_rect.x * sx),
+                            crop.y + (int)(best_rect.y * sy),
+                            (int)(best_rect.width * sx),
+                            (int)(best_rect.height * sy)
+            );
+
+            if (debug) {
+                std::cout << "[DEBUG] YuNet: volto mappato "
+                << mapped.x << "," << mapped.y << " "
+                << mapped.width << "x" << mapped.height
+                << " (score=" << best_score << ")\n";
+            }
+
+            face = mapped;
+            return true;
+        }
+        catch (const cv::Exception &e) {
+            if (debug) {
+                std::cout << "[DEBUG] YuNet eccezione OpenCV: "
+                << e.what() << "\n";
+            }
+            return false;
+        }
+    }
+
+    //
+    // ------------- FALLBACK ----------------
+    //
+    if (debug)
+        std::cout << "[DEBUG] DetectorWrapper: nessun detector inizializzato.\n";
 
     return false;
 }
-
-
-// ==========================================================
-// FaceRecWrapper (LBPH/Eigen/Fisher)
-// ==========================================================
-
-class FaceRecWrapper {
-public:
-    enum Type {
-        TYPE_NONE,
-        TYPE_LBPH,
-        TYPE_EIGEN,
-        TYPE_FISHER
-    };
-
-    FaceRecWrapper() : type_(TYPE_NONE) {}
-
-    bool Create(const std::string &method,
-                double lbph_threshold,
-                double eigen_threshold,
-                double fisher_threshold,
-                int eigen_components,
-                int fisher_components);
-
-    bool Train(const std::vector<cv::Mat> &faces,
-               const std::vector<int> &labels,
-               std::string &err);
-
-    bool Save(const std::string &file, std::string &err) const;
-
-    bool Load(const std::string &file, std::string &err);
-
-    bool Predict(const cv::Mat &face,
-                 int &label,
-                 double &confidence,
-                 std::string &err) const;
-
-                 Type type() const { return type_; }
-
-private:
-    Type type_;
-    cv::Ptr<cv::face::FaceRecognizer> recognizer_;
-    double lbph_threshold_;
-    double eigen_threshold_;
-    double fisher_threshold_;
-};
-
-bool FaceRecWrapper::Create(const std::string &method,
-                            double lbph_threshold,
-                            double eigen_threshold,
-                            double fisher_threshold,
-                            int eigen_components,
-                            int fisher_components)
-{
-    std::string m = method;
-    std::transform(m.begin(), m.end(), m.begin(),
-                   [](unsigned char c){ return std::tolower(c); });
-
-    if (m == "lbph") {
-        type_ = TYPE_LBPH;
-        recognizer_ = cv::face::LBPHFaceRecognizer::create();
-        lbph_threshold_ = lbph_threshold;
-        recognizer_->setThreshold(lbph_threshold_);
-        return true;
-    } else if (m == "eigen") {
-        type_ = TYPE_EIGEN;
-        recognizer_ = cv::face::EigenFaceRecognizer::create(eigen_components, eigen_threshold);
-        eigen_threshold_ = eigen_threshold;
-        return true;
-    } else if (m == "fisher") {
-        type_ = TYPE_FISHER;
-        recognizer_ = cv::face::FisherFaceRecognizer::create(fisher_components, fisher_threshold);
-        fisher_threshold_ = fisher_threshold;
-        return true;
-    }
-
-    type_ = TYPE_NONE;
-    return false;
-}
-
-bool FaceRecWrapper::Train(const std::vector<cv::Mat> &faces,
-                           const std::vector<int> &labels,
-                           std::string &err)
-{
-    if (!recognizer_) {
-        err = "FaceRecWrapper: recognizer not created.\n";
-        return false;
-    }
-    try {
-        recognizer_->train(faces, labels);
-        return true;
-    } catch (const std::exception &e) {
-        err = std::string("FaceRecWrapper::Train error: ") + e.what() + "\n";
-        return false;
-    }
-}
-
-bool FaceRecWrapper::Save(const std::string &file, std::string &err) const
-{
-    if (!recognizer_) {
-        err = "FaceRecWrapper: recognizer not created.\n";
-        return false;
-    }
-    try {
-        ensure_dirs(fs::path(file).parent_path().string());
-        recognizer_->write(file);
-        return true;
-    } catch (const std::exception &e) {
-        err = std::string("FaceRecWrapper::Save error: ") + e.what() + "\n";
-        return false;
-    }
-}
-
-bool FaceRecWrapper::Load(const std::string &file, std::string &err)
-{
-    try {
-        recognizer_ = cv::face::LBPHFaceRecognizer::create();
-        recognizer_->read(file);
-        type_ = TYPE_LBPH;
-        return true;
-    } catch (const std::exception &e) {
-        err = std::string("FaceRecWrapper::Load error: ") + e.what() + "\n";
-        return false;
-    }
-}
-
-bool FaceRecWrapper::Predict(const cv::Mat &face,
-                             int &label,
-                             double &confidence,
-                             std::string &err) const
-                             {
-                                 if (!recognizer_) {
-                                     err = "FaceRecWrapper: recognizer not created.\n";
-                                     return false;
-                                 }
-                                 try {
-                                     recognizer_->predict(face, label, confidence);
-                                     return true;
-                                 } catch (const std::exception &e) {
-                                     err = std::string("FaceRecWrapper::Predict error: ") + e.what() + "\n";
-                                     return false;
-                                 }
-                             }
-
-                             // ==========================================================
-                             // SFace embedding helpers
-                             // ==========================================================
-
-                             static bool resolve_sface_model(
-                                 const FacialAuthConfig &cfg,
-                                 const std::string &profile,
-                                 std::string &model_path,
-                                 std::string &used_profile
-                             )
-                             {
-                                 used_profile = profile;
-                                 std::string prof = profile;
-                                 if (prof.empty())
-                                     prof = cfg.recognizer_profile;
-
-                                 std::transform(prof.begin(), prof.end(), prof.begin(),
-                                                [](unsigned char c){ return std::tolower(c); });
-
-                                 auto it = cfg.recognizer_models.find(prof);
-                                 if (it != cfg.recognizer_models.end()) {
-                                     model_path = it->second;
-                                     used_profile = prof;
-                                     return true;
-                                 }
-
-                                 if (prof == "sface_fp32" || prof == "sface") {
-                                     if (!cfg.sface_model.empty()) {
-                                         model_path = cfg.sface_model;
-                                         used_profile = "sface_fp32";
-                                         return true;
-                                     }
-                                 } else if (prof == "sface_int8") {
-                                     if (!cfg.sface_model_int8.empty()) {
-                                         model_path = cfg.sface_model_int8;
+model_path = cfg.sface_model_int8;
                                          used_profile = "sface_int8";
                                          return true;
                                      }
