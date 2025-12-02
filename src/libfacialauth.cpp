@@ -612,7 +612,7 @@ bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face)
     if (debug)
         std::cout << "[DEBUG] DetectorWrapper::detect(): frame=" << W << "x" << H << "\n";
 
-    // ----------------- HAAR -----------------
+    // ----------------- HAAR DETECTOR -----------------
     if (type == DET_HAAR)
     {
         cv::Mat gray;
@@ -622,8 +622,8 @@ bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face)
         haar.detectMultiScale(
             gray,
             faces,
-            1.1,
-            3,
+            1.1,    // scale factor
+            3,      // min neighbors
             0,
             cv::Size(30, 30)
         );
@@ -637,7 +637,7 @@ bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face)
         face = faces[0];
 
         if (debug) {
-            std::cout << "[DEBUG] HAAR: face detected at "
+            std::cout << "[DEBUG] HAAR: face detected @ "
             << face.x << "," << face.y << " "
             << face.width << "x" << face.height << "\n";
         }
@@ -645,50 +645,35 @@ bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face)
         return true;
     }
 
-    // ----------------- YuNet -----------------
+
+    // ----------------- YUNET DETECTOR -----------------
     if (type == DET_YUNET && yunet)
     {
-        int crop_h = H;
-        int crop_w = (H * 4) / 3;
-        int cx     = (W - crop_w) / 2;
-        if (cx < 0) cx = 0;
-        if (crop_w > W) crop_w = W;
-
-        cv::Rect crop(cx, 0, crop_w, crop_h);
-        cv::Mat roi = frame(crop).clone();
-
         if (debug)
-            std::cout << "[DEBUG] YuNet: crop4:3=" << roi.cols << "x" << roi.rows
-            << " @" << cx << ",0\n";
+            std::cout << "[DEBUG] YuNet: running inference...\n";
 
+        // Resize input to 640x640 (YuNet expected size)
         cv::Mat resized;
-        const int net_w = 640;
-        const int net_h = 640;
-        cv::resize(roi, resized, cv::Size(net_w, net_h));
-
-        if (debug)
-            std::cout << "[DEBUG] YuNet: input square=" << net_w << "x" << net_h << "\n";
+        const int net_w = 640, net_h = 640;
+        cv::resize(frame, resized, cv::Size(net_w, net_h));
 
         try {
             yunet->setInput(cv::dnn::blobFromImage(resized));
             cv::Mat out = yunet->forward();
 
             if (out.empty()) {
-                if (debug)
-                    std::cout << "[DEBUG] YuNet: empty output.\n";
+                if (debug) std::cout << "[DEBUG] YuNet: empty output.\n";
                 return false;
             }
 
-            const int num = out.size[2];
+            int num = out.size[2];
 
-            if (num <= 0) {
-                if (debug)
-                    std::cout << "[DEBUG] YuNet: no faces detected.\n";
-                return false;
+            if (debug) {
+                std::cout << "[DEBUG] YuNet: detections=" << num << "\n";
             }
 
-            if (debug)
-                std::cout << "[DEBUG] YuNet: " << num << " faces found.\n";
+            if (num <= 0)
+                return false;
 
             float best_score = 0.0f;
             cv::Rect best_rect;
@@ -696,22 +681,23 @@ bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face)
             for (int i = 0; i < num; i++) {
                 float *data = (float *)out.ptr(0, 0, i);
 
-                float score = data[14];  // confidence score
-
+                float score = data[14];
                 if (score < 0.55f)
                     continue;
 
-                float x = data[0] * net_w;
-                float y = data[1] * net_h;
-                float w = data[2] * net_w;
-                float h = data[3] * net_h;
+                // YuNet returns normalized coordinates → remap relative to original frame
+                float x = data[0] * W;
+                float y = data[1] * H;
+                float w = data[2] * W;
+                float h = data[3] * H;
 
                 cv::Rect r((int)x, (int)y, (int)w, (int)h);
 
-                int minFace = std::min(net_w, net_h) / 8;
-                if (r.width < minFace || r.height < minFace) {
+                // Reject tiny detections (noise from padded boxes)
+                int minFaceOriginal = std::min(W, H) / 8;
+                if (r.width < minFaceOriginal || r.height < minFaceOriginal) {
                     if (debug)
-                        std::cout << "[DEBUG] YuNet: face discarded as too small.\n";
+                        std::cout << "[DEBUG] YuNet: detection too small.\n";
                     continue;
                 }
 
@@ -727,201 +713,40 @@ bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face)
                 return false;
             }
 
-            float sx = (float)roi.cols / net_w;
-            float sy = (float)roi.rows / net_h;
-
-            cv::Rect mapped(
-                crop.x + (int)(best_rect.x * sx),
-                            crop.y + (int)(best_rect.y * sy),
-                            (int)(best_rect.width  * sx),
-                            (int)(best_rect.height * sy)
-            );
-
-            if (mapped.x < 0 || mapped.y < 0 ||
-                mapped.x + mapped.width  > W ||
-                mapped.y + mapped.height > H)
+            // Ensure bounding box is valid
+            if (best_rect.x < 0 || best_rect.y < 0 ||
+                best_rect.x + best_rect.width  > W ||
+                best_rect.y + best_rect.height > H)
             {
                 if (debug)
-                    std::cout << "[DEBUG] YuNet: mapped bounding box out of frame, discarded.\n";
+                    std::cout << "[DEBUG] YuNet: bounding box out of frame.\n";
                 return false;
             }
 
-            int minFaceOriginal = std::min(W, H) / 8;
-            if (mapped.width < minFaceOriginal || mapped.height < minFaceOriginal) {
-                if (debug)
-                    std::cout << "[DEBUG] YuNet: face too small in original frame, discarded.\n";
-                return false;
-            }
+            face = best_rect;
 
             if (debug) {
-                std::cout << "[DEBUG] YuNet: valid face "
-                << mapped.x << "," << mapped.y << " "
-                << mapped.width << "x" << mapped.height
+                std::cout << "[DEBUG] YuNet: face detected @ "
+                << face.x << "," << face.y << " "
+                << face.width << "x" << face.height
                 << " (score=" << best_score << ")\n";
             }
 
-            face = mapped;
             return true;
         }
         catch (const cv::Exception &e) {
             if (debug)
-                std::cout << "[DEBUG] YuNet: OpenCV exception: " << e.what() << "\n";
+                std::cout << "[DEBUG] YuNet: exception: " << e.what() << "\n";
             return false;
         }
     }
 
+
     if (debug)
-        std::cout << "[DEBUG] DetectorWrapper: no detector initialized.\n";
+        std::cout << "[DEBUG] DetectorWrapper: no active detector engine.\n";
 
     return false;
 }
-
-// ==========================================================
-// init_detector: choose and initialize detector backend
-// ==========================================================
-
-static bool init_detector(const FacialAuthConfig &cfg,
-                          DetectorWrapper &det,
-                          std::string &log)
-{
-    det = DetectorWrapper();
-    det.debug = cfg.debug;
-
-    std::string profile = cfg.detector_profile;
-    if (profile.empty())
-        profile = "auto";
-
-    std::string low = profile;
-    std::transform(low.begin(), low.end(), low.begin(),
-                   [](unsigned char c){ return std::tolower(c); });
-
-    if (low == "auto") {
-        // Prefer YuNet FP32, then YuNet INT8, then Haar.
-        if (cfg.detector_models.count("yunet_fp32") &&
-            file_exists(cfg.detector_models.at("yunet_fp32")))
-        {
-            std::string path = cfg.detector_models.at("yunet_fp32");
-            try {
-                det.yunet = cv::makePtr<cv::dnn::Net>(cv::dnn::readNetFromONNX(path));
-                det.type = DetectorWrapper::DET_YUNET;
-                det.model_path = path;
-
-                int backend = parse_dnn_backend(cfg.dnn_backend);
-                int target  = parse_dnn_target(cfg.dnn_target);
-                det.yunet->setPreferableBackend(backend);
-                det.yunet->setPreferableTarget(target);
-
-                if (cfg.debug) {
-                    log += "Using YuNet FP32 detector: " + path + "\n";
-                }
-                return true;
-            } catch (const std::exception &e) {
-                log += std::string("Failed to init YuNet FP32: ") + e.what() + "\n";
-            }
-        }
-
-        if (cfg.detector_models.count("yunet_int8") &&
-            file_exists(cfg.detector_models.at("yunet_int8")))
-        {
-            std::string path = cfg.detector_models.at("yunet_int8");
-            try {
-                det.yunet = cv::makePtr<cv::dnn::Net>(cv::dnn::readNetFromONNX(path));
-                det.type = DetectorWrapper::DET_YUNET;
-                det.model_path = path;
-
-                int backend = parse_dnn_backend(cfg.dnn_backend);
-                int target  = parse_dnn_target(cfg.dnn_target);
-                det.yunet->setPreferableBackend(backend);
-                det.yunet->setPreferableTarget(target);
-
-                if (cfg.debug) {
-                    log += "Using YuNet INT8 detector: " + path + "\n";
-                }
-                return true;
-            } catch (const std::exception &e) {
-                log += std::string("Failed to init YuNet INT8: ") + e.what() + "\n";
-            }
-        }
-
-        if (cfg.detector_models.count("haar") &&
-            file_exists(cfg.detector_models.at("haar")))
-        {
-            std::string path = cfg.detector_models.at("haar");
-            if (det.haar.load(path)) {
-                det.type = DetectorWrapper::DET_HAAR;
-                det.model_path = path;
-                if (cfg.debug) {
-                    log += "Using Haar detector: " + path + "\n";
-                }
-                return true;
-            } else {
-                log += "Failed to load Haar cascade: " + path + "\n";
-            }
-        }
-
-        log += "No suitable detector found in auto mode.\n";
-        return false;
-    }
-
-    if (low == "haar") {
-        std::string path;
-        auto it = cfg.detector_models.find("haar");
-        if (it != cfg.detector_models.end())
-            path = it->second;
-        else
-            path = cfg.haar_cascade_path;
-
-        if (path.empty()) {
-            log += "Haar detector requested but model path is empty.\n";
-            return false;
-        }
-        if (!file_exists(path)) {
-            log += "Haar detector file not found: " + path + "\n";
-            return false;
-        }
-        if (!det.haar.load(path)) {
-            log += "Failed to load Haar cascade: " + path + "\n";
-            return false;
-        }
-        det.type = DetectorWrapper::DET_HAAR;
-        det.model_path = path;
-        if (cfg.debug) {
-            log += "Using Haar detector: " + path + "\n";
-        }
-        return true;
-    }
-
-    if (low == "yunet" || low == "yunet_fp32") {
-        std::string path;
-        auto it = cfg.detector_models.find("yunet_fp32");
-        if (it != cfg.detector_models.end())
-            path = it->second;
-        else
-            path = cfg.yunet_model;
-
-        if (path.empty() || !file_exists(path)) {
-            log += "YuNet FP32 file not found.\n";
-            return false;
-        }
-        try {
-            det.yunet = cv::makePtr<cv::dnn::Net>(cv::dnn::readNetFromONNX(path));
-            det.type = DetectorWrapper::DET_YUNET;
-            det.model_path = path;
-
-            int backend = parse_dnn_backend(cfg.dnn_backend);
-            int target  = parse_dnn_target(cfg.dnn_target);
-            det.yunet->setPreferableBackend(backend);
-            det.yunet->setPreferableTarget(target);
-
-            if (cfg.debug) {
-                log += "Using YuNet FP32 detector: " + path + "\n";
-            }
-            return true;
-        } catch (const std::exception &e) {
-            log += std::string("Failed to init YuNet FP32: ") + e.what() + "\n";
-            return false;
-        }
-    }
 
     if (low == "yunet_int8") {
         std::string path;
