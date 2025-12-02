@@ -10,14 +10,27 @@ static void print_test_help()
 {
     std::cout <<
     "Usage: facial_test -u <user> [options]\n\n"
+    "Test facial recognition accuracy for a specific user.\n"
+    "\n"
     "Options:\n"
-    "  -u, --user <name>      Nome utente da testare\n"
-    "  -c, --config <file>    File di configurazione\n"
-    "                         (default: /etc/pam_facial_auth/pam_facial.conf)\n"
-    "      --threshold <val>  Soglia di confronto (override opzionale)\n"
-    "  -v, --verbose          Output dettagliato\n"
-    "      --debug            Abilita debug\n"
-    "  -H, --help             Mostra questo messaggio\n";
+    "  -u, --user <name>\n"
+    "      Username to evaluate (required).\n"
+    "\n"
+    "  -c, --config <file>\n"
+    "      Path to configuration file.\n"
+    "      Default: " FACIALAUTH_DEFAULT_CONFIG "\n"
+    "\n"
+    "      --threshold <value>\n"
+    "      Override matching confidence threshold.\n"
+    "\n"
+    "  -v, --verbose\n"
+    "      Enable informational messages.\n"
+    "\n"
+    "      --debug\n"
+    "      Enable detailed debugging output.\n"
+    "\n"
+    "  -H, --help\n"
+    "      Show this help message and exit.\n";
 }
 
 int facial_test_cli_main(int argc, char **argv)

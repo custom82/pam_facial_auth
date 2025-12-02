@@ -10,15 +10,29 @@ static void print_training_help()
 {
     std::cout <<
     "Usage: facial_training -u <user> [options]\n\n"
+    "Train or update the facial recognition model for a specific user.\n"
+    "\n"
     "Options:\n"
-    "  -u, --user <name>      Nome utente da addestrare\n"
-    "  -c, --config <file>    File di configurazione\n"
-    "                         (default: /etc/pam_facial_auth/pam_facial.conf)\n"
-    "      --threshold <val>  Soglia opzionale per il training (override)\n"
-    "  -v, --verbose          Output dettagliato\n"
-    "      --debug            Abilita debug\n"
-    "  -H, --help             Mostra questo messaggio\n";
+    "  -u, --user <name>\n"
+    "      Username to train (required).\n"
+    "\n"
+    "  -c, --config <file>\n"
+    "      Path to configuration file.\n"
+    "      Default: " FACIALAUTH_DEFAULT_CONFIG "\n"
+    "\n"
+    "      --threshold <value>\n"
+    "      Override confidence threshold used during training.\n"
+    "\n"
+    "  -v, --verbose\n"
+    "      Enable informational output.\n"
+    "\n"
+    "      --debug\n"
+    "      Enable detailed debugging output.\n"
+    "\n"
+    "  -H, --help\n"
+    "      Show this help message and exit.\n";
 }
+
 
 int facial_training_cli_main(int argc, char **argv)
 {
