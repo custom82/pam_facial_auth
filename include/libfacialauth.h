@@ -127,6 +127,23 @@ struct DetectorWrapper
 };
 
 
+bool resolve_sface_model(
+    const FacialAuthConfig &cfg,
+    const std::string &profile,
+    std::string &out_model_file,
+    std::string &out_resolved_profile
+);
+
+bool compute_sface_embedding(
+    const FacialAuthConfig &cfg,
+    const cv::Mat &face,
+    const std::string &profile,
+    cv::Mat &embedding,
+    std::string &log
+);
+
+
+
 
 // --------- FUNZIONI DELLA LIBRERIA ---------
 
