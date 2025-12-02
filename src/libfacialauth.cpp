@@ -515,25 +515,19 @@ bool fa_capture_images(
         return false;
     }
 
-    // Calcolo index di partenza
+    // calcolo indice di partenza
     int start_index = 1;
-
     if (!cfg.force_overwrite) {
         start_index = fa_find_next_image_index(imgdir, img_format);
     } else {
-        if (cfg.debug || cfg.verbose) {
-            std::cout << "[INFO] Force mode enabled: starting index at 1\n";
-        }
+        if (cfg.debug || cfg.verbose)
+            std::cout << "[INFO] Force mode: starting index at 1\n";
     }
 
-    // Sempre mostrare almeno una info sui file salvati
     if (cfg.debug || cfg.verbose) {
-        std::cout << "[DEBUG] (" << saved << "/" << cfg.frames
-        << ") Saved: " << outfile << "\n";
-    } else {
-        std::cout << "[INFO] Saved: " << outfile << "\n";
+        std::cout << "[INFO] Saving captured images to: " << imgdir << "\n";
+        std::cout << "[INFO] Starting index: " << start_index << "\n";
     }
-
 
     cv::VideoCapture cap;
     if (!open_camera(cap, cfg, log)) {
@@ -559,9 +553,9 @@ bool fa_capture_images(
 
         cv::Rect face;
         if (!detector.detect(frame, face))
-            continue;
+            continue;   // salto se non c'è faccia
 
-        int idx = start_index + saved;
+            int idx = start_index + saved;
         std::string outfile = imgdir + "/img_" + std::to_string(idx) + "." + img_format;
 
         if (!cv::imwrite(outfile, frame))
@@ -577,6 +571,11 @@ bool fa_capture_images(
                 std::cout << "[DEBUG] (" << saved << "/" << cfg.frames
                 << ") Saved: " << outfile << "\n";
             }
+            else
+            {
+                // output minimo sempre visibile
+                std::cout << "[INFO] Saved: " << outfile << "\n";
+            }
         }
 
         if (cfg.sleep_ms > 0)
@@ -591,6 +590,7 @@ bool fa_capture_images(
     log += "[INFO] Capture complete. Images saved: " + std::to_string(saved) + "\n";
     return true;
 }
+
 
 
 // ==========================================================
