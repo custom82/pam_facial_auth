@@ -291,94 +291,59 @@ bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face)
     }
 
     // ===== YuNet =====
-    if (type == DET_YUNET && yunet)
+    // ===== YuNet detector via FaceDetectorYN API =====
+    if (type == DET_YUNET && yunet_detector)
     {
-        cv::Mat resized;
-        cv::resize(frame, resized, cv::Size(640, 640));
+        cv::Mat faces;
+        yunet_detector->setInputSize(frame.size());
+        yunet_detector->detect(frame, faces);
 
-        try {
-            cv::Mat blob = cv::dnn::blobFromImage(resized);
-            yunet->setInput(blob);
-
-            cv::Mat out = yunet->forward();
-            if (out.empty())
-                return false;
-
-            int num = out.size[2];
-            int desc_len = out.size[3]; // usually 15
-
-            if (debug) {
-                std::cout << "[DEBUG] YuNet: num=" << num
-                << " desc_len=" << desc_len << "\n";
-            }
-
-            float scaleX = (float)W / 640.0f;
-            float scaleY = (float)H / 640.0f;
-
-            float best_score = 0.0f;
-            cv::Rect best;
-
-            for (int i = 0; i < num; ++i)
-            {
-                float *d = reinterpret_cast<float*>(out.ptr(0, 0, i));
-
-                float score = d[4];
-
-                // Only allow valid 0..1 scores
-                if (score < 0.55f || score > 1.1f)
-                    continue;
-
-                cv::Rect r(
-                    int(d[0] * scaleX),
-                           int(d[1] * scaleY),
-                           int(d[2] * scaleX),
-                           int(d[3] * scaleY)
-                );
-
-                // Reject impossible bounding boxes
-                if (r.x < 0 || r.y < 0 ||
-                    r.x + r.width  > W ||
-                    r.y + r.height > H)
-                {
-                    if(debug) std::cout << "[DEBUG] Reject box out of frame\n";
-                    continue;
-                }
-
-                // Minimum size threshold
-                int minFace = std::min(W, H) / 8;
-                if (r.width < minFace || r.height < minFace)
-                    continue;
-
-                if (debug) {
-                    std::cout << "[DEBUG] candidate face @" << r.x << "," << r.y
-                    << " " << r.width << "x" << r.height
-                    << " score=" << score << "\n";
-                }
-
-                if (score > best_score) {
-                    best_score = score;
-                    best = r;
-                }
-            }
-
-            if (best_score <= 0.0f)
-                return false;
-
-            if (debug) {
-                std::cout << "[DEBUG] YuNet best @" << best.x << "," << best.y
-                << " " << best.width << "x" << best.height
-                << " score=" << best_score << "\n";
-            }
-
-            face = best;
-            return true;
-        }
-        catch (...) {
+        if (faces.empty())
             return false;
-        }
-    }
 
+        if (debug) {
+            std::cout << "[DEBUG] YuNet found " << faces.rows << " candidate(s)\n";
+        }
+
+        // faces Nx15 matrix — take best score
+        int bestIdx = -1;
+        float bestScore = 0.0f;
+
+        for (int i = 0; i < faces.rows; ++i)
+        {
+            float score = faces.at<float>(i, 4);
+            if (score < 0.6f)
+                continue;
+
+            if (bestIdx == -1 || score > bestScore) {
+                bestIdx = i;
+                bestScore = score;
+            }
+        }
+
+        if (bestIdx == -1)
+            return false;
+
+        cv::Rect r(
+            faces.at<float>(bestIdx, 0),
+                   faces.at<float>(bestIdx, 1),
+                   faces.at<float>(bestIdx, 2),
+                   faces.at<float>(bestIdx, 3)
+        );
+
+        face = r;
+
+        if (debug) {
+            std::cout << "[DEBUG] YuNet best face @ "
+            << r.x << "," << r.y
+            << " " << r.width << "x" << r.height
+            << " score=" << bestScore << "\n";
+        }
+
+        return true;
+    }
 }
+
 // ==========================================================
 // Detector initialization
 // ==========================================================
