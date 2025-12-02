@@ -526,10 +526,14 @@ bool fa_capture_images(
         }
     }
 
+    // Sempre mostrare almeno una info sui file salvati
     if (cfg.debug || cfg.verbose) {
-        std::cout << "[INFO] Saving captured images to: " << imgdir << "\n";
-        std::cout << "[INFO] Starting index: " << start_index << "\n";
+        std::cout << "[DEBUG] (" << saved << "/" << cfg.frames
+        << ") Saved: " << outfile << "\n";
+    } else {
+        std::cout << "[INFO] Saved: " << outfile << "\n";
     }
+
 
     cv::VideoCapture cap;
     if (!open_camera(cap, cfg, log)) {
