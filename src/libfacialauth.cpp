@@ -470,160 +470,110 @@ bool DetectorWrapper::detect(const cv::Mat &frame, cv::Rect &face)
     face = cv::Rect();
 
     if (frame.empty()) {
-        if (debug)
-            std::cout << "[DEBUG] Frame vuoto, nessun volto.\n";
+        if (debug) std::cout << "[DEBUG] Frame vuoto, nessun volto.\n";
         return false;
     }
 
-    // ---------------------------
-    // 1) HAAR CASCADE
-    // ---------------------------
     if (type == DET_HAAR) {
         std::vector<cv::Rect> faces;
         cv::Mat gray;
         cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
 
-        haar.detectMultiScale(
-            gray, faces,
-            1.1, 3, 0,
-            cv::Size(30, 30)
-        );
-
+        haar.detectMultiScale(gray, faces, 1.1, 3, 0, cv::Size(30,30));
         if (!faces.empty()) {
             face = faces[0];
-            if (debug)
-                std::cout << "[DEBUG] HAAR: volto rilevato.\n";
             return true;
         }
-
-        if (debug)
-            std::cout << "[DEBUG] HAAR: nessun volto.\n";
-
         return false;
     }
 
-    // ---------------------------
-    // 2) YUNET DNN con crop 4:3 e input 1280x1280
-    // ---------------------------
     if (type == DET_YUNET && yunet) {
-        const int net_w = 1280;
-        const int net_h = 1280;
 
         int src_w = frame.cols;
         int src_h = frame.rows;
 
-        // calcolo crop 4:3 INSIDE il frame
         int crop_w, crop_h;
         if (src_w * 3 <= src_h * 4) {
-            // frame "più alto" del 4:3 → limito l'altezza a 4:3 usando la larghezza
             crop_w = src_w;
             crop_h = (src_w * 3) / 4;
         } else {
-            // frame più largo del 4:3 → limito la larghezza usando l'altezza
             crop_h = src_h;
             crop_w = (src_h * 4) / 3;
         }
 
-        // centro il crop
-        int x_off = (src_w - crop_w) / 2;
-        int y_off = (src_h - crop_h) / 2;
-        cv::Rect crop_rect(x_off, y_off, crop_w, crop_h);
-        crop_rect &= cv::Rect(0, 0, src_w, src_h);
+        int x = (src_w - crop_w) / 2;
+        int y = (src_h - crop_h) / 2;
+
+        cv::Rect crop(x, y, crop_w, crop_h);
+        crop &= cv::Rect(0,0,src_w,src_h);
+        cv::Mat roi = frame(crop).clone();
+
+        int net_w = (crop_w >= 640 ? 960 : 640);
+        int net_h = (crop_w >= 640 ? 720 : 480);
 
         if (debug) {
-            std::cout << "[DEBUG] YuNet: frame="
-            << src_w << "x" << src_h
-            << " crop4:3=" << crop_w << "x" << crop_h
-            << " @" << x_off << "," << y_off
-            << " → net=" << net_w << "x" << net_h
-            << "\n";
+            std::cout << "[DEBUG] YuNet adaptive crop=" << crop_w << "x" << crop_h
+            << " -> net=" << net_w << "x" << net_h << "\n";
         }
 
-        cv::Mat roi = frame(crop_rect).clone();
-
         cv::Mat blob = cv::dnn::blobFromImage(
-            roi,
-            1.0,
+            roi, 1.0,
             cv::Size(net_w, net_h),
-                                              cv::Scalar(104, 117, 123),
-                                              true,
-                                              false
+                                              cv::Scalar(0,0,0), // no mean for adaptive input
+                                              false, false
         );
-
         yunet->setInput(blob);
         cv::Mat out = yunet->forward();
 
-        if (out.empty() || out.dims != 3) {
-            if (debug)
-                std::cout << "[DEBUG] YuNet: output non valido (dims="
-                << out.dims << ").\n";
-            return false;
-        }
+        if (out.empty() || out.dims != 3) return false;
 
-        // YuNet tipicamente: [1, N, 15]
-        int num_faces = out.size[1];
-        float *data = (float*)out.data;
+        int num = out.size[1];
+        float *data = (float*) out.data;
 
-        float best_score = 0.0f;
-        cv::Rect best_rect_net;
+        float best_score = 0;
+        cv::Rect best_rect;
 
-        for (int i = 0; i < num_faces; i++) {
-            float x = data[i * 15 + 0];
-            float y = data[i * 15 + 1];
-            float w = data[i * 15 + 2];
-            float h = data[i * 15 + 3];
+        for (int i = 0; i < num; i++) {
+            float x_n = data[i * 15 + 0] * net_w;
+            float y_n = data[i * 15 + 1] * net_h;
+            float w_n = data[i * 15 + 2] * net_w;
+            float h_n = data[i * 15 + 3] * net_h;
             float score = data[i * 15 + 4];
 
-            if (score < 0.70f) continue;     // soglia minima
-            if (w < 40 || h < 40) continue;  // dimensione minima
+            if (score < 0.60f) continue;
+            if (w_n < 40 || h_n < 40) continue;
 
             if (score > best_score) {
                 best_score = score;
-                best_rect_net = cv::Rect(
-                    (int)x, (int)y,
-                                         (int)w, (int)h
-                );
+                best_rect = cv::Rect((int)x_n, (int)y_n, (int)w_n, (int)h_n);
             }
         }
 
-        if (best_score == 0.0f) {
-            if (debug)
-                std::cout << "[DEBUG] YuNet: nessun volto valido.\n";
+        if (best_score == 0) {
+            if (debug) std::cout << "[DEBUG] YuNet: no valid face\n";
             return false;
         }
 
-        // mappo da spazio rete (1280x1280) → crop 4:3 → frame originale
-        float sx = static_cast<float>(crop_w) / static_cast<float>(net_w);
-        float sy = static_cast<float>(crop_h) / static_cast<float>(net_h);
+        float sx = (float)crop_w / net_w;
+        float sy = (float)crop_h / net_h;
 
-        cv::Rect face_in_crop(
-            crop_rect.x + (int)(best_rect_net.x * sx),
-                              crop_rect.y + (int)(best_rect_net.y * sy),
-                              (int)(best_rect_net.width  * sx),
-                              (int)(best_rect_net.height * sy)
+        cv::Rect out_rect(
+            crop.x + (int)(best_rect.x * sx),
+                          crop.y + (int)(best_rect.y * sy),
+                          (int)(best_rect.width * sx),
+                          (int)(best_rect.height * sy)
         );
 
-        face_in_crop &= cv::Rect(0, 0, src_w, src_h);
-        face = face_in_crop;
+        out_rect &= cv::Rect(0,0,src_w,src_h);
+        face = out_rect;
 
-        if (debug) {
-            std::cout << "[DEBUG] YuNet: volto rilevato "
-            << "net=("
-            << best_rect_net.x << "," << best_rect_net.y << " "
-            << best_rect_net.width << "x" << best_rect_net.height
-            << ") → orig=("
-            << face.x << "," << face.y << " "
-            << face.width << "x" << face.height << ")\n";
-        }
-
+        if (debug) std::cout << "[DEBUG] YuNet face mapped OK\n";
         return true;
     }
 
-    if (debug)
-        std::cout << "[DEBUG] Detector non inizializzato.\n";
-
     return false;
 }
+
 
 // ==========================================================
 // FaceRecWrapper (LBPH/Eigen/Fisher)
