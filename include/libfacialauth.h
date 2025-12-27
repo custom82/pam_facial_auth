@@ -6,9 +6,12 @@
 #include <opencv2/opencv.hpp>
 #include <opencv2/face.hpp>
 
-// L'unico path ammesso: il punto di ingresso della configurazione
+/**
+ * The only hardcoded path in the system.
+ * Follows the PAM standard by residing in /etc/security/
+ */
 #ifndef FACIALAUTH_DEFAULT_CONFIG
-#define FACIALAUTH_DEFAULT_CONFIG "/etc/pam_facial_auth.conf"
+#define FACIALAUTH_DEFAULT_CONFIG "/etc/security/pam_facial_auth.conf"
 #endif
 
 struct FacialAuthConfig {
@@ -26,7 +29,7 @@ struct FacialAuthConfig {
     std::string model_type = "lbph";
     std::string training_method = "lbph";
 
-    // Questi verranno popolati ESCLUSIVAMENTE dal file di config o defaults dinamici
+    // Dynamically loaded from the .conf file
     std::string basedir;
     std::string cascade_path;
 
@@ -35,7 +38,7 @@ struct FacialAuthConfig {
     double sface_threshold = 0.36;
 };
 
-// API
+// Library API (GPL-3.0)
 bool fa_check_root(const std::string& tool_name);
 bool fa_file_exists(const std::string& path);
 bool fa_load_config(FacialAuthConfig& cfg, std::string& log, const std::string& path);
