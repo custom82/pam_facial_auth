@@ -10,14 +10,10 @@
 #include <filesystem>
 #include <sstream>
 #include <unistd.h>
-#include <thread>
-#include <chrono>
 
 namespace fs = std::filesystem;
 
-// ==========================================================
-// PLUGIN CLASSICO (LBPH, EIGEN, FISHER)
-// ==========================================================
+// --- Plugin LBPH / Eigen / Fisher ---
 class ClassicPlugin : public RecognizerPlugin {
     cv::Ptr<cv::face::FaceRecognizer> model;
     std::string type;
@@ -39,7 +35,6 @@ public:
     bool load(const std::string& path) override {
         if (!fs::exists(path)) return false;
         try {
-            // Importante: i modelli classici usano .read(), non Algorithm::load
             model->read(path);
             return true;
         } catch (...) { return false; }
@@ -67,9 +62,7 @@ public:
     std::string get_name() const override { return type; }
 };
 
-// ==========================================================
-// PLUGIN SFACE (DNN)
-// ==========================================================
+// --- Plugin SFace (DNN) ---
 class SFacePlugin : public RecognizerPlugin {
     cv::Ptr<cv::FaceRecognizerSF> sface;
     std::vector<cv::Mat> target_embeddings;
@@ -85,7 +78,7 @@ public:
         std::ifstream in(path, std::ios::binary);
         if (!in) return false;
         int count = 0;
-        if (!in.read((char*)&count, sizeof(count))) return false;
+        in.read((char*)&count, sizeof(count));
         for (int i = 0; i < count; ++i) {
             int r, c, t;
             in.read((char*)&r, sizeof(r)); in.read((char*)&c, sizeof(c)); in.read((char*)&t, sizeof(t));
@@ -99,8 +92,7 @@ public:
     bool train(const std::vector<cv::Mat>& faces, const std::vector<int>& labels, const std::string& save_path) override {
         std::vector<cv::Mat> embeds;
         for (const auto& f : faces) {
-            cv::Mat aligned, em;
-            // SFace richiede che il volto sia allineato (qui assumiamo crop già pronti)
+            cv::Mat em;
             sface->feature(f, em);
             embeds.push_back(em.clone());
         }
@@ -130,38 +122,31 @@ public:
     std::string get_name() const override { return "sface"; }
 };
 
-// ==========================================================
-// CORE FUNCTIONS
-// ==========================================================
+// --- API Implementation ---
 
 std::unique_ptr<RecognizerPlugin> fa_create_plugin(const FacialAuthConfig& cfg) {
     std::string method = cfg.training_method;
-    if (method == "auto") {
-        method = fs::exists(cfg.recognize_sface) ? "sface" : "lbph";
-    }
+    if (method == "auto") method = fs::exists(cfg.recognize_sface) ? "sface" : "lbph";
     if (method == "sface") return std::make_unique<SFacePlugin>(cfg);
     return std::make_unique<ClassicPlugin>(method, cfg);
 }
 
 bool fa_load_config(FacialAuthConfig &cfg, std::string &log, const std::string &path) {
     std::ifstream file(path);
-    if (!file.is_open()) { log = "Config not found: " + path; return false; }
+    if (!file.is_open()) return false;
     std::string line;
     while (std::getline(file, line)) {
         if (line.empty() || line[0] == '#') continue;
         std::istringstream is_line(line);
         std::string key, value;
         if (std::getline(is_line, key, '=') && std::getline(is_line, value)) {
-            key.erase(key.find_last_not_of(" \t\r\n") + 1);
-            value.erase(0, value.find_first_not_of(" \t\r\n"));
+            key.erase(key.find_last_not_of(" \t\n\r") + 1);
+            value.erase(0, value.find_first_not_of(" \t\n\r"));
             if (key == "basedir") cfg.basedir = value;
             else if (key == "device") cfg.device = value;
-            else if (key == "frames") cfg.frames = std::stoi(value);
             else if (key == "training_method") cfg.training_method = value;
-            else if (key == "debug") cfg.debug = (value == "yes" || value == "true");
-            else if (key == "ignore_failure") cfg.ignore_failure = (value == "yes" || value == "true");
-            else if (key == "sface_threshold") cfg.sface_threshold = std::stod(value);
-            else if (key == "lbph_threshold") cfg.lbph_threshold = std::stod(value);
+            else if (key == "debug") cfg.debug = (value == "yes");
+            else if (key == "ignore_failure") cfg.ignore_failure = (value == "yes");
         }
     }
     return true;
@@ -185,11 +170,7 @@ bool fa_test_user(const std::string &user, const FacialAuthConfig &cfg, const st
     auto plugin = fa_create_plugin(cfg);
     if (!plugin->load(modelPath)) return false;
     cv::VideoCapture cap;
-    try {
-        cap.open(std::stoi(cfg.device));
-    } catch (...) {
-        cap.open(cfg.device);
-    }
+    try { cap.open(std::stoi(cfg.device)); } catch(...) { cap.open(cfg.device); }
     if (!cap.isOpened()) return false;
     cv::Mat frame; cap >> frame;
     if (frame.empty()) return false;
@@ -197,9 +178,8 @@ bool fa_test_user(const std::string &user, const FacialAuthConfig &cfg, const st
                   }
 
                   std::string fa_user_model_path(const FacialAuthConfig &cfg, const std::string &user) {
-                      std::string ext = (cfg.training_method == "sface") ? ".bin" : ".xml";
-                      return cfg.basedir + "/" + user + "/model" + ext;
+                      return cfg.basedir + "/" + user + "/model" + (cfg.training_method == "sface" ? ".bin" : ".xml");
                   }
 
                   bool fa_file_exists(const std::string &path) { return fs::exists(path); }
-                  bool fa_check_root(const std::string &tool) { return getuid() == 0; }
+                  bool fa_check_root(const std::string &t) { return getuid() == 0; }
