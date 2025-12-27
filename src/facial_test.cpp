@@ -1,88 +1,50 @@
-#include "../include/libfacialauth.h"
-#include <iostream>
-#include <getopt.h>
-#include <iomanip>
+/*
+ * Project: pam_facial_auth
+ * License: GPL-3.0
+ */
 
-void print_usage(const char* prog) {
-    std::cout << "Facial Auth Diagnostic Tool\n"
-    << "Usage: " << prog << " -u <username> [OPTIONS]\n\n"
-    << "Options:\n"
-    << "  -u, --user <name>       User to test against (required)\n"
-    << "  -c, --config <path>     Path to config file\n"
-    << "  -g, --gui               Enable live camera preview\n"
-    << "  -d, --debug             Enable verbose debug logs\n"
-    << "  -h, --help              Show this help menu\n\n"
-    << "This tool captures a frame and compares it with the stored model,\n"
-    << "reporting the confidence score and the final decision.\n";
-}
+#include "libfacialauth.h"
+#include <iostream>
+#include <vector>
+#include <string>
 
 int main(int argc, char** argv) {
-    FacialAuthConfig cfg;
-    std::string user, log, config_path = FACIALAUTH_DEFAULT_CONFIG;
+    if (!fa_check_root("facial_test")) return 1;
 
-    // Default: caricamento config
-    fa_load_config(cfg, log, config_path);
+    std::string user;
+    std::vector<std::string> args(argv + 1, argv + argc);
 
-    static struct option long_opts[] = {
-        {"user",   required_argument, 0, 'u'},
-        {"config", required_argument, 0, 'c'},
-        {"gui",    no_argument,       0, 'g'},
-        {"debug",  no_argument,       0, 'd'},
-        {"help",   no_argument,       0, 'h'},
-        {0, 0, 0, 0}
-    };
-
-    int opt;
-    while ((opt = getopt_long(argc, argv, "u:c:gdh", long_opts, NULL)) != -1) {
-        switch (opt) {
-            case 'u': user = optarg; break;
-            case 'c': config_path = optarg; break;
-            case 'g': cfg.nogui = false; break;
-            case 'd': cfg.debug = true; break;
-            case 'h': print_usage(argv[0]); return 0;
-            default: return 1;
+    for (size_t i = 0; i < args.size(); ++i) {
+        if (args[i] == "-u" && i + 1 < args.size()) {
+            user = args[++i];
         }
     }
 
     if (user.empty()) {
-        std::cerr << "Error: User (-u) is required.\n";
+        std::cout << "Uso: facial_test -u <utente>" << std::endl;
         return 1;
     }
 
-    std::string model_path = fa_user_model_path(cfg, user);
-    if (!fa_file_exists(model_path)) {
-        std::cerr << "[ERROR] Model not found: " << model_path << "\n"
-        << "Run 'facial_training -u " << user << "' first.\n";
-        return 1;
-    }
-
-    std::cout << "[*] Testing recognition for user: " << user << "\n"
-    << "[*] Using model: " << model_path << "\n"
-    << "[*] Method: " << cfg.training_method << "\n";
+    FacialAuthConfig cfg;
+    std::string log;
+    fa_load_config(cfg, log);
 
     double confidence = 0.0;
     int label = -1;
+    std::string model = fa_user_model_path(cfg, user);
 
-    // Esecuzione del test (chiama la funzione nel .cpp che abbiamo aggiornato prima)
-    if (fa_test_user(user, cfg, model_path, confidence, label, log)) {
-        bool authenticated = false;
-
-        // Logica di soglia (Threshold)
-        if (cfg.training_method == "sface") {
-            authenticated = (confidence >= cfg.sface_threshold);
-        } else {
-            authenticated = (confidence <= cfg.lbph_threshold);
-        }
-
-        std::cout << "\n--- Results ---\n"
-        << "Score:      " << std::fixed << std::setprecision(4) << confidence << "\n"
-        << "Threshold:  " << (cfg.training_method == "sface" ? cfg.sface_threshold : cfg.lbph_threshold) << "\n"
-        << "Status:     " << (authenticated ? "\033[1;32mMATCHED\033[0m" : "\033[1;31mREJECTED\033[0m") << "\n"
-        << "---------------\n";
-    } else {
-        std::cerr << "[FATAL] Test failed: " << log << "\n";
+    std::cout << "[*] Test riconoscimento per utente: " << user << std::endl;
+    if (!fa_test_user(user, cfg, model, confidence, label, log)) {
+        std::cerr << "ERRORE: " << log << std::endl;
         return 1;
     }
 
-    return 0;
+    bool ok = (confidence <= cfg.threshold);
+    std::cout << "-----------------------------------" << std::endl;
+    std::cout << "Risultato:   " << (ok ? "AUTENTICATO" : "FALLITO") << std::endl;
+    std::cout << "Confidence:  " << confidence << " (Soglia: " << cfg.threshold << ")" << std::endl;
+    std::cout << "Label:       " << label << std::endl;
+    std::cout << "-----------------------------------" << std::endl;
+
+    return ok ? 0 : 1;
 }
