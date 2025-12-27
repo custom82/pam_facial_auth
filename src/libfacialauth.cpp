@@ -13,7 +13,7 @@
 
 namespace fs = std::filesystem;
 
-// Modern C++20 string utility
+// Utility C++20
 std::string trim(std::string_view s) {
     auto first = s.find_first_not_of(" \t\r\n");
     if (std::string::npos == first) return "";
@@ -21,7 +21,7 @@ std::string trim(std::string_view s) {
     return std::string(s.substr(first, (last - first + 1)));
 }
 
-// FIX: Implementation of missing function
+// FIX: Implementazione della funzione mancante
 bool fa_file_exists(std::string_view path) {
     if (path.empty()) return false;
     return fs::exists(path);
@@ -64,8 +64,7 @@ public:
             double s = face_recon->match(query, registered_embeddings.row(i), cv::FaceRecognizerSF::FR_COSINE);
             if (s > max_s) max_s = s;
         }
-        confidence = max_s; label = 0;
-        return true;
+        confidence = max_s; label = 0; return true;
     }
 };
 
@@ -86,8 +85,7 @@ public:
         model->read(p); return true;
     }
     bool predict(const cv::Mat& f, int& l, double& c) override {
-        cv::Mat gray;
-        if (f.channels() == 3) cv::cvtColor(f, gray, cv::COLOR_BGR2GRAY); else gray = f;
+        cv::Mat gray; if (f.channels() == 3) cv::cvtColor(f, gray, cv::COLOR_BGR2GRAY); else gray = f;
         model->predict(gray, l, c); return true;
     }
 };
@@ -102,15 +100,10 @@ bool fa_load_config(FacialAuthConfig &cfg, std::string &log, const std::string &
     if (!file.is_open()) { log = "Config not found"; return false; }
     std::string line;
     while (std::getline(file, line)) {
-        std::string_view sv = line;
-        auto trimmed = trim(sv);
+        std::string_view sv = line; auto trimmed = trim(sv);
         if (trimmed.empty() || trimmed[0] == '#') continue;
-        auto sep = trimmed.find('=');
-        if (sep == std::string::npos) continue;
-
-        std::string k = trim(trimmed.substr(0, sep));
-        std::string v = trim(trimmed.substr(sep + 1));
-
+        auto sep = trimmed.find('='); if (sep == std::string::npos) continue;
+        std::string k = trim(trimmed.substr(0, sep)), v = trim(trimmed.substr(sep + 1));
         if (k == "basedir") cfg.basedir = v;
         else if (k == "device") cfg.device = v;
         else if (k == "training_method") cfg.training_method = v;
@@ -176,6 +169,7 @@ bool fa_capture_user(std::string_view u, const FacialAuthConfig &cfg, std::strin
             std::cout << "Saved: " << p << std::endl;
             count++;
         }
+        if (!cfg.nogui) { cv::imshow("Capture", frame); if (cv::waitKey(1) == 'q') break; }
     }
     return count >= cfg.frames;
 }

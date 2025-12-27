@@ -35,7 +35,6 @@ public:
     virtual bool predict(const cv::Mat& face, int& label, double& confidence) = 0;
 };
 
-// C++20 Interface
 bool fa_load_config(FacialAuthConfig &cfg, std::string &log, const std::string &path);
 bool fa_check_root(std::string_view tool_name);
 bool fa_file_exists(std::string_view path);
