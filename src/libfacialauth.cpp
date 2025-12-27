@@ -9,10 +9,12 @@
 #include <filesystem>
 #include <iostream>
 #include <fstream>
-#include <unistd.h>
+#include <thread>
+#include <chrono>
 
 namespace fs = std::filesystem;
 
+/* Helper per la pulizia delle stringhe di configurazione */
 static std::string trim(std::string_view s) {
     auto first = s.find_first_not_of(" \t\r\n");
     if (std::string::npos == first) return "";
@@ -24,6 +26,7 @@ bool fa_file_exists(std::string_view path) {
     return !path.empty() && fs::exists(path);
 }
 
+/* Configurazione OpenCL / DNN Backend */
 void get_best_dnn_backend(bool use_accel, int &backend, int &target) {
     backend = cv::dnn::DNN_BACKEND_DEFAULT;
     target = cv::dnn::DNN_TARGET_CPU;
@@ -34,6 +37,7 @@ void get_best_dnn_backend(bool use_accel, int &backend, int &target) {
     }
 }
 
+/* Plugin per SFace (Deep Learning) */
 class SFacePlugin : public RecognizerPlugin {
     cv::Ptr<cv::FaceRecognizerSF> face_recon;
     cv::Mat registered_embeddings;
@@ -76,6 +80,7 @@ public:
     }
 };
 
+/* Plugin per Algoritmi Classici (LBPH/Eigen/Fisher) */
 class ClassicPlugin : public RecognizerPlugin {
     cv::Ptr<cv::face::FaceRecognizer> model;
 public:
@@ -84,16 +89,27 @@ public:
         else if (m == "fisher") model = cv::face::FisherFaceRecognizer::create();
         else model = cv::face::LBPHFaceRecognizer::create();
     }
-    bool load(const std::string& p) override { return fa_file_exists(p) && (model->read(p), true); }
+    bool load(const std::string& p) override {
+        if (!fa_file_exists(p)) return false;
+        model->read(p);
+        return true;
+    }
     bool train(const std::vector<cv::Mat>& f, const std::vector<int>& l, const std::string& s) override {
-        if (f.empty()) return false; model->train(f, l); model->save(s); return true;
+        if (f.empty()) return false;
+        model->train(f, l);
+        model->save(s);
+        return true;
     }
     bool predict(const cv::Mat& f, int& l, double& c) override {
-        cv::Mat gray; if (f.channels() == 3) cv::cvtColor(f, gray, cv::COLOR_BGR2GRAY); else gray = f;
-        model->predict(gray, l, c); return true;
+        cv::Mat gray;
+        if (f.channels() == 3) cv::cvtColor(f, gray, cv::COLOR_BGR2GRAY);
+        else gray = f;
+        model->predict(gray, l, c);
+        return true;
     }
 };
 
+/* Caricamento Configurazione */
 bool fa_load_config(FacialAuthConfig &cfg, std::string &log, const std::string &path) {
     std::ifstream file(path);
     if (!file.is_open()) { log = "Config not found: " + path; return false; }
@@ -117,6 +133,53 @@ bool fa_load_config(FacialAuthConfig &cfg, std::string &log, const std::string &
     return true;
 }
 
+/* Funzione di Cattura Dataset (Corretta) */
+bool fa_capture_dataset(const FacialAuthConfig &cfg, std::string &log, const std::string &imgdir, int start_index) {
+    cv::VideoCapture cap;
+    try { cap.open(std::stoi(cfg.device)); } catch(...) { cap.open(cfg.device.c_str()); }
+    if (!cap.isOpened()) { log = "Camera error"; return false; }
+
+    cv::Ptr<cv::FaceDetectorYN> detector;
+    int b, t; get_best_dnn_backend(cfg.use_accel, b, t);
+    detector = cv::FaceDetectorYN::create(cfg.detect_model_path, "", cv::Size(cfg.width, cfg.height), 0.9f, 0.3f, 5000, b, t);
+
+    int saved = 0;
+    std::string img_format = "jpg";
+    cv::Mat frame;
+
+    for (int i = 0; i < 200 && saved < cfg.frames; i++) {
+        cap >> frame;
+        if (frame.empty()) continue;
+
+        detector->setInputSize(frame.size());
+        cv::Mat faces;
+        detector->detect(frame, faces);
+
+        if (faces.rows > 0) {
+            if (cfg.debug) {
+                std::cout << "[DEBUG] Face detected, saving frame " << (saved + 1) << std::endl;
+            }
+            int idx = start_index + saved;
+            std::string outfile = imgdir + "/" + std::to_string(idx) + "." + img_format;
+            if (cv::imwrite(outfile, frame)) {
+                saved++;
+            }
+        }
+
+        if (cfg.sleep_ms > 0) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(cfg.sleep_ms));
+        }
+    }
+
+    if (saved == 0) {
+        log = "No faces captured.";
+        return false;
+    }
+    log = "Successfully captured " + std::to_string(saved) + " images.";
+    return true;
+}
+
+/* Test Utente (Modulo PAM) */
 bool fa_test_user(std::string_view u, const FacialAuthConfig &cfg, const std::string &m_path, double &conf, int &label, std::string &log) {
     std::unique_ptr<RecognizerPlugin> plugin;
     if (cfg.training_method == "sface") plugin = std::make_unique<SFacePlugin>(cfg.rec_model_path, cfg.use_accel);
@@ -141,14 +204,9 @@ bool fa_test_user(std::string_view u, const FacialAuthConfig &cfg, const std::st
             cv::Mat faces; detector->setInputSize(frame.size()); detector->detect(frame, faces);
             if (faces.rows > 0) { face_ok = true; break; }
         } else { face_ok = true; break; }
-
-        if (!cfg.nogui && getenv("DISPLAY")) {
-            cv::imshow("Auth", frame); if (cv::waitKey(1) == 'q') break;
-        }
     }
-    if (!cfg.nogui && getenv("DISPLAY")) try { cv::destroyAllWindows(); } catch(...) {}
 
-    if (!face_ok) { log = "No face detected (covered camera?)"; conf = 0.0; return false; }
+    if (!face_ok) { log = "No face detected"; conf = 0.0; return false; }
     return plugin->predict(frame, label, conf);
 }
 
