@@ -33,7 +33,4 @@ target_link_libraries(facial_training PRIVATE facialauth ${OpenCV_LIBS})
 add_executable(facial_test src/facial_test.cpp)
 target_link_libraries(facial_test PRIVATE facialauth ${OpenCV_LIBS})
 
-# Installazione
-install(TARGETS pam_facial_auth DESTINATION /usr/lib64/security)
-install(TARGETS facial_capture facial_training facial_test DESTINATION /usr/bin)
-install(FILES pam_facial.conf DESTINATION /etc/security)
+
