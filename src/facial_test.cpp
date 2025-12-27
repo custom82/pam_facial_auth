@@ -1,34 +1,43 @@
 #include "../include/libfacialauth.h"
 #include <iostream>
 #include <getopt.h>
+#include <iomanip>
 
-/**
- * Display help message for the testing tool
- */
-void print_usage(const char* p) {
-    std::cout << "Usage: " << p << " [OPTIONS]\n"
-    << "  -u, --user <name>      Target username to test against (required)\n"
-    << "  -d, --debug            Enable verbose debug logging\n"
-    << "  -h, --help             Show this help message\n\n"
-    << "Example:\n"
-    << "  " << p << " --user phoenix\n";
+void print_usage(const char* prog) {
+    std::cout << "Facial Auth Diagnostic Tool\n"
+    << "Usage: " << prog << " -u <username> [OPTIONS]\n\n"
+    << "Options:\n"
+    << "  -u, --user <name>       User to test against (required)\n"
+    << "  -c, --config <path>     Path to config file\n"
+    << "  -g, --gui               Enable live camera preview\n"
+    << "  -d, --debug             Enable verbose debug logs\n"
+    << "  -h, --help              Show this help menu\n\n"
+    << "This tool captures a frame and compares it with the stored model,\n"
+    << "reporting the confidence score and the final decision.\n";
 }
 
 int main(int argc, char** argv) {
     FacialAuthConfig cfg;
-    std::string user, log;
+    std::string user, log, config_path = FACIALAUTH_DEFAULT_CONFIG;
+
+    // Default: caricamento config
+    fa_load_config(cfg, log, config_path);
 
     static struct option long_opts[] = {
-        {"user",  required_argument, 0, 'u'},
-        {"debug", no_argument,       0, 'd'},
-        {"help",  no_argument,       0, 'h'},
+        {"user",   required_argument, 0, 'u'},
+        {"config", required_argument, 0, 'c'},
+        {"gui",    no_argument,       0, 'g'},
+        {"debug",  no_argument,       0, 'd'},
+        {"help",   no_argument,       0, 'h'},
         {0, 0, 0, 0}
     };
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "u:dh", long_opts, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "u:c:gdh", long_opts, NULL)) != -1) {
         switch (opt) {
             case 'u': user = optarg; break;
+            case 'c': config_path = optarg; break;
+            case 'g': cfg.nogui = false; break;
             case 'd': cfg.debug = true; break;
             case 'h': print_usage(argv[0]); return 0;
             default: return 1;
@@ -36,40 +45,44 @@ int main(int argc, char** argv) {
     }
 
     if (user.empty()) {
-        std::cerr << "Error: --user is required.\n";
-        print_usage(argv[0]);
+        std::cerr << "Error: User (-u) is required.\n";
         return 1;
     }
-
-    // Load configuration for threshold settings
-    fa_load_config(cfg, log, FACIALAUTH_DEFAULT_CONFIG);
 
     std::string model_path = fa_user_model_path(cfg, user);
     if (!fa_file_exists(model_path)) {
-        std::cerr << "Error: Model file not found for user " << user << ".\n"
-        << "Run facial_training first.\n";
+        std::cerr << "[ERROR] Model not found: " << model_path << "\n"
+        << "Run 'facial_training -u " << user << "' first.\n";
         return 1;
     }
 
-    double confidence = 0;
+    std::cout << "[*] Testing recognition for user: " << user << "\n"
+    << "[*] Using model: " << model_path << "\n"
+    << "[*] Method: " << cfg.training_method << "\n";
+
+    double confidence = 0.0;
     int label = -1;
 
-    std::cout << "Starting recognition test for user: " << user << "\n";
-    std::cout << "Look at the camera...\n";
-
+    // Esecuzione del test (chiama la funzione nel .cpp che abbiamo aggiornato prima)
     if (fa_test_user(user, cfg, model_path, confidence, label, log)) {
-        // Label 0 is the current user. Higher confidence values mean lower accuracy in LBPH.
-        bool is_match = (label == 0 && confidence <= cfg.lbph_threshold);
+        bool authenticated = false;
 
-        std::cout << "-----------------------------\n";
-        std::cout << "Result: " << (is_match ? "SUCCESS (MATCH)" : "FAILED (NO MATCH)") << "\n";
-        std::cout << "Label: " << label << "\n";
-        std::cout << "Confidence: " << confidence << " (Threshold: " << cfg.lbph_threshold << ")\n";
-        std::cout << "-----------------------------\n";
+        // Logica di soglia (Threshold)
+        if (cfg.training_method == "sface") {
+            authenticated = (confidence >= cfg.sface_threshold);
+        } else {
+            authenticated = (confidence <= cfg.lbph_threshold);
+        }
 
-        return is_match ? 0 : 1;
+        std::cout << "\n--- Results ---\n"
+        << "Score:      " << std::fixed << std::setprecision(4) << confidence << "\n"
+        << "Threshold:  " << (cfg.training_method == "sface" ? cfg.sface_threshold : cfg.lbph_threshold) << "\n"
+        << "Status:     " << (authenticated ? "\033[1;32mMATCHED\033[0m" : "\033[1;31mREJECTED\033[0m") << "\n"
+        << "---------------\n";
     } else {
-        std::cerr << "Test error: " << log << "\n";
+        std::cerr << "[FATAL] Test failed: " << log << "\n";
         return 1;
     }
+
+    return 0;
 }
