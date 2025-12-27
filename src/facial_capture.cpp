@@ -1,32 +1,50 @@
-#include "libfacialauth.h"
-#include <opencv2/highgui.hpp>
-#include <opencv2/videoio.hpp>
+#include "../include/libfacialauth.h"
 #include <iostream>
 #include <filesystem>
+#include <opencv2/highgui.hpp>
 
 namespace fs = std::filesystem;
 
 int main(int argc, char** argv) {
-    if (argc < 2) { std::cerr << "Usage: facial_capture <user>\n"; return 1; }
-    std::string user = argv[1];
+    if (argc < 2) {
+        std::cerr << "Uso: " << argv[0] << " <username>\n";
+        return 1;
+    }
 
+    std::string user = argv[1];
     FacialAuthConfig cfg;
     std::string log;
     fa_load_config(cfg, log, FACIALAUTH_DEFAULT_CONFIG);
 
-    cv::VideoCapture cap(0);
-    if (!cap.isOpened()) return 1;
+    std::string user_dir = cfg.basedir + "/" + user + "/captures";
+    fs::create_directories(user_dir);
 
-    std::string path = cfg.basedir + "/" + user + "/captures";
-    fs::create_directories(path);
+    cv::VideoCapture cap;
+    try { cap.open(std::stoi(cfg.device)); } catch(...) { cap.open(cfg.device); }
 
-    for (int i = 0; i < cfg.frames; ++i) {
+    if (!cap.isOpened()) {
+        std::cerr << "Errore: Impossibile aprire la camera " << cfg.device << "\n";
+        return 1;
+    }
+
+    std::cout << "Cattura di " << cfg.frames << " frame per l'utente " << user << "...\n";
+    std::cout << "Premi 'q' per interrompere.\n";
+
+    int count = 0;
+    while (count < cfg.frames) {
         cv::Mat frame;
         cap >> frame;
         if (frame.empty()) break;
-        cv::imwrite(path + "/img_" + std::to_string(i) + ".jpg", frame);
-        cv::imshow("Cattura", frame);
-        cv::waitKey(100);
+
+        cv::imshow("Cattura Volto - " + user, frame);
+
+        std::string filename = user_dir + "/img_" + std::to_string(count) + "." + cfg.image_format;
+        cv::imwrite(filename, frame);
+
+        count++;
+        if (cv::waitKey(cfg.sleep_ms) == 'q') break;
     }
+
+    std::cout << "Cattura completata in: " << user_dir << "\n";
     return 0;
 }
