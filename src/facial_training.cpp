@@ -2,9 +2,11 @@
 #include <iostream>
 
 int main(int argc, char** argv) {
+    // Controllo permessi root (necessari per scrivere in /var/lib/...)
     if (!fa_check_root("facial_training")) return 1;
+
     if (argc < 2) {
-        std::cerr << "Uso: " << argv[0] << " <username>\n";
+        std::cerr << "Uso: facial_training <username>\n";
         return 1;
     }
 
@@ -12,16 +14,15 @@ int main(int argc, char** argv) {
     FacialAuthConfig cfg;
     std::string log;
 
-    if (!fa_load_config(cfg, log, FACIALAUTH_DEFAULT_CONFIG)) {
-        std::cout << "[INFO] Usando parametri di default (config non trovata).\n";
-    }
+    // Carica la configurazione globale
+    fa_load_config(cfg, log, FACIALAUTH_DEFAULT_CONFIG);
 
-    std::cout << "Inizio addestramento per: " << user << " (Metodo: " << cfg.training_method << ")\n";
+    std::cout << "[INFO] Inizio addestramento per l'utente: " << user << "\n";
 
     if (fa_train_user(user, cfg, log)) {
-        std::cout << "Modello salvato con successo in: " << fa_user_model_path(cfg, user) << "\n";
+        std::cout << "[SUCCESS] Modello generato correttamente.\n";
     } else {
-        std::cerr << "Errore durante l'addestramento: " << log << "\n";
+        std::cerr << "[ERROR] Addestramento fallito: " << log << "\n";
         return 1;
     }
 
