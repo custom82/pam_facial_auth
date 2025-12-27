@@ -2,17 +2,22 @@
 #include <iostream>
 #include <getopt.h>
 #include <filesystem>
+#include <vector>
+#include <string>
 
 namespace fs = std::filesystem;
 
 /**
- * Display help message for the training tool
+ * Display an improved, professional help message
  */
 void print_usage(const char* p) {
-    std::cout << "Usage: " << p << " [OPTIONS]\n"
-    << "  -u, --user <name>      Target username to train (required)\n"
-    << "  -m, --method <type>    Training method: lbph, eigen, fisher (default: lbph)\n"
-    << "  -d, --debug            Enable verbose debug logging\n"
+    std::cout << "Facial Authentication Training Tool\n"
+    << "Usage: " << p << " [OPTIONS]\n\n"
+    << "Options:\n"
+    << "  -u, --user <name>      Target username (must have captured images)\n"
+    << "  -m, --method <type>    Recognition algorithm: lbph, eigen, fisher\n"
+    << "                         (default: lbph - recommended for lighting stability)\n"
+    << "  -d, --debug            Show detailed processing information\n"
     << "  -h, --help             Show this help message\n\n"
     << "Example:\n"
     << "  " << p << " --user phoenix --method lbph\n";
@@ -42,35 +47,57 @@ int main(int argc, char** argv) {
     }
 
     if (user.empty()) {
-        std::cerr << "Error: --user is required.\n";
-        print_usage(argv[0]);
+        std::cerr << "[ERROR] Target user is mandatory. Use -u <username>.\n";
         return 1;
     }
 
-    // Ensure tool is run with necessary privileges
     if (!fa_check_root(argv[0])) return 1;
 
-    // Load configuration for paths and defaults
     fa_load_config(cfg, log, FACIALAUTH_DEFAULT_CONFIG);
 
-    std::string captures_path = cfg.basedir + "/" + user + "/captures";
-
-    if (!fs::exists(captures_path) || fs::is_empty(captures_path)) {
-        std::cerr << "[ERROR] No images found in " << captures_path << "\n"
-        << "Please run facial_capture first.\n";
+    // 1. Validate training method
+    std::string m = cfg.training_method;
+    if (m != "lbph" && m != "eigen" && m != "fisher") {
+        std::cerr << "[ERROR] Invalid method: '" << m << "'. Supported: lbph, eigen, fisher.\n";
         return 1;
     }
 
-    std::cout << "[INFO] Starting training for user: " << user << "\n";
-    std::cout << "[INFO] Using method: " << cfg.training_method << "\n";
+    // 2. Dataset Pre-check
+    fs::path captures_path = fs::path(cfg.basedir) / user / "captures";
+    if (!fs::exists(captures_path)) {
+        std::cerr << "[ERROR] Captures directory not found: " << captures_path << "\n";
+        return 1;
+    }
 
-    // fa_train_user handles the internal OpenCV model creation and saving
+    std::vector<std::string> image_files;
+    for (const auto& entry : fs::directory_iterator(captures_path)) {
+        if (entry.is_regular_file()) image_files.push_back(entry.path().string());
+    }
+
+    if (image_files.empty()) {
+        std::cerr << "[ERROR] No images found for user '" << user << "'. Capture some faces first.\n";
+        return 1;
+    }
+
+    // 3. Informative Output
+    std::cout << "--------------------------------------------------\n";
+    std::cout << " Training Profile for: " << user << "\n";
+    std::cout << "--------------------------------------------------\n";
+    std::cout << " > Method:      " << cfg.training_method << "\n";
+    std::cout << " > Dataset:    " << image_files.size() << " images found\n";
+    std::cout << " > Source:     " << captures_path << "\n";
+    std::cout << "--------------------------------------------------\n";
+
+    std::cout << "[WAIT] Training the mathematical model... " << std::flush;
+
     if (!fa_train_user(user, cfg, log)) {
-        std::cerr << "[ERROR] Training failed: " << log << "\n";
+        std::cout << "FAILED\n";
+        std::cerr << "[ERROR] " << log << "\n";
         return 1;
     }
 
-    std::cout << "[SUCCESS] Model trained and saved at: " << fa_user_model_path(cfg, user) << "\n";
+    std::cout << "DONE\n";
+    std::cout << "[SUCCESS] Model generated: " << fa_user_model_path(cfg, user) << "\n";
 
     return 0;
 }
