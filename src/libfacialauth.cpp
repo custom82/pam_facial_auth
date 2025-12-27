@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <iostream>
 #include <unistd.h>
+#include <cstdlib>
 
 namespace fs = std::filesystem;
 
@@ -64,6 +65,10 @@ bool fa_capture_user(const std::string &user, const FacialAuthConfig &cfg, const
     if (cfg.force) fs::remove_all(user_dir);
     fs::create_directories(user_dir);
 
+    // Check if a display is available to avoid Wayland/X11 crashes
+    bool display_available = (std::getenv("DISPLAY") != NULL || std::getenv("WAYLAND_DISPLAY") != NULL);
+    bool should_show_gui = (!cfg.nogui && display_available);
+
     cv::Ptr<cv::FaceDetectorYN> yunet;
     cv::CascadeClassifier haar;
 
@@ -118,20 +123,23 @@ bool fa_capture_user(const std::string &user, const FacialAuthConfig &cfg, const
                 std::cout << "[DEBUG] [" << count << "/" << cfg.frames << "] Saved: "
                 << fs::absolute(full_path).string() << std::endl;
             }
-        } else if (cfg.debug) {
-            std::cout << "[DEBUG] Face detection active (" << det_type << "): No face found in current frame, skipping..." << std::endl;
         }
 
-        if (!cfg.nogui) {
-            cv::imshow("Capturing - Press 'q' to stop", frame);
-            if (cv::waitKey(1) == 'q') break;
+        if (should_show_gui) {
+            try {
+                cv::imshow("Capturing - Press 'q' to stop", frame);
+                if (cv::waitKey(1) == 'q') break;
+            } catch (...) {
+                // If GUI fails unexpectedly, continue in headless mode
+                display_available = false;
+                should_show_gui = false;
+            }
         }
     }
-    cv::destroyAllWindows();
+    if (should_show_gui) cv::destroyAllWindows();
     return (count >= cfg.frames);
 }
 
-// ... Rest of the functions (fa_train_user, fa_test_user) stay the same ...
 bool fa_train_user(const std::string &user, const FacialAuthConfig &cfg, std::string &log) {
     std::string user_dir = cfg.basedir + "/" + user + "/captures";
     std::vector<cv::Mat> faces; std::vector<int> labels;
