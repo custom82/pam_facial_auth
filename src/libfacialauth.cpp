@@ -6,7 +6,6 @@
 #include <opencv2/face.hpp>
 #include <opencv2/dnn.hpp>
 #include <filesystem>
-#include <fstream>
 #include <iostream>
 #include <unistd.h>
 
@@ -52,6 +51,12 @@ bool fa_check_root(const std::string &tool_name) {
     return true;
 }
 
+bool fa_delete_user_data(const std::string &user, const FacialAuthConfig &cfg) {
+    std::string path = cfg.basedir + "/" + user;
+    if (fs::exists(path)) { fs::remove_all(path); return true; }
+    return false;
+}
+
 std::string fa_user_model_path(const FacialAuthConfig &cfg, const std::string &user) {
     return cfg.basedir + "/" + user + "/model.xml";
 }
@@ -61,26 +66,56 @@ bool fa_capture_user(const std::string &user, const FacialAuthConfig &cfg, const
     if (cfg.force) fs::remove_all(user_dir);
     fs::create_directories(user_dir);
 
-    cv::Ptr<cv::FaceDetectorYN> detector;
-    if (det_type == "yunet") detector = cv::FaceDetectorYN::create(cfg.detect_model_path, "", cv::Size(320, 320));
+    cv::Ptr<cv::FaceDetectorYN> yunet;
+    cv::CascadeClassifier haar;
+    if (det_type == "yunet") {
+        yunet = cv::FaceDetectorYN::create(cfg.detect_model_path, "", cv::Size(cfg.width, cfg.height));
+    } else if (det_type == "haar") {
+        if (!haar.load(cfg.haar_path)) { log = "Haar XML non trovato in " + cfg.haar_path; return false; }
+    }
 
     cv::VideoCapture cap;
     try { cap.open(std::stoi(cfg.device)); } catch(...) { cap.open(cfg.device); }
     if (!cap.isOpened()) { log = "Camera error"; return false; }
 
+    cap.set(cv::CAP_PROP_FRAME_WIDTH, cfg.width);
+    cap.set(cv::CAP_PROP_FRAME_HEIGHT, cfg.height);
+
     int count = 0;
     while (count < cfg.frames) {
         cv::Mat frame; cap >> frame;
         if (frame.empty()) break;
-        if (detector) {
-            cv::Mat faces; detector->setInputSize(frame.size()); detector->detect(frame, faces);
-            if (faces.rows == 0) continue;
+
+        bool face_found = (det_type == "none");
+
+        if (det_type == "yunet") {
+            cv::Mat faces;
+            yunet->setInputSize(frame.size());
+            yunet->detect(frame, faces);
+            face_found = (faces.rows > 0);
+        } else if (det_type == "haar") {
+            cv::Mat gray;
+            cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
+            std::vector<cv::Rect> faces;
+            haar.detectMultiScale(gray, faces, 1.1, 3);
+            face_found = !faces.empty();
         }
-        cv::imwrite(user_dir + "/img_" + std::to_string(count++) + "." + cfg.image_format, frame);
-        if (!cfg.nogui) { cv::imshow("Capture", frame); if(cv::waitKey(1) == 'q') break; }
+
+        if (face_found) {
+            std::string filename = user_dir + "/img_" + std::to_string(count++) + "." + cfg.image_format;
+            cv::imwrite(filename, frame);
+            if (cfg.debug) std::cout << "[DEBUG] " << count << "/" << cfg.frames << " salvato.\n";
+        } else if (cfg.debug) {
+            std::cout << "[DEBUG] Volto non rilevato, frame saltato.\n";
+        }
+
+        if (!cfg.nogui) {
+            cv::imshow("Capture", frame);
+            if (cv::waitKey(1) == 'q') break;
+        }
     }
     cv::destroyAllWindows();
-    return true;
+    return (count >= cfg.frames);
 }
 
 bool fa_train_user(const std::string &user, const FacialAuthConfig &cfg, std::string &log) {
