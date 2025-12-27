@@ -29,10 +29,12 @@ struct FacialAuthConfig {
     double sface_threshold = 0.36;
 };
 
-// API per i Wrapper
+// API CORE
 bool fa_load_config(FacialAuthConfig &cfg, std::string &log, const std::string &path);
 bool fa_capture_user(const std::string &user, const FacialAuthConfig &cfg, const std::string &detector_type, std::string &log);
 bool fa_train_user(const std::string &user, const FacialAuthConfig &cfg, std::string &log);
+bool fa_test_user(const std::string &user, const FacialAuthConfig &cfg, const std::string &modelPath,
+                  double &best_conf, int &best_label, std::string &log);
 bool fa_test_user_interactive(const std::string &user, const FacialAuthConfig &cfg, std::string &log);
 
 // Utility
