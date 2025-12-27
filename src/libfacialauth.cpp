@@ -1,148 +1,163 @@
-#include "../include/libfacialauth.h"
+/*
+ * Project: pam_facial_auth
+ * License: GPL-3.0
+ */
+
+#include "libfacialauth.h"
 #include <iostream>
 #include <fstream>
+#include <sstream>
 #include <filesystem>
-#include <thread>
-#include <chrono>
-#include <unistd.h>
+#include <algorithm>
 
 namespace fs = std::filesystem;
 
-// Verify root privileges for system tools
-bool fa_check_root(const std::string& tool_name) {
-    if (geteuid() != 0) {
-        std::cerr << "[ERROR] " << tool_name << " must be run as root.\n";
-        return false;
-    }
-    return true;
+/**
+ * Helper per rimuovere spazi bianchi all'inizio e alla fine di una stringa
+ */
+static std::string trim(const std::string& s) {
+    auto start = s.begin();
+    while (start != s.end() && std::isspace(*start)) start++;
+    auto end = s.end();
+    do { end--; } while (std::distance(start, end) > 0 && std::isspace(*end));
+    return std::string(start, end + 1);
 }
 
-// Helper to check file existence
 bool fa_file_exists(const std::string& path) {
-    if (path.empty()) return false;
     return fs::exists(path);
 }
 
-// Load configuration from file or apply dynamic defaults
 bool fa_load_config(FacialAuthConfig& cfg, std::string& log, const std::string& path) {
-    // Dynamic fallback values if config is missing or incomplete
-    if (cfg.basedir.empty()) cfg.basedir = "/var/lib/pam_facial_auth";
-    if (cfg.cascade_path.empty()) cfg.cascade_path = "/usr/share/opencv4/haarcascades/haarcascade_frontalface_default.xml";
-
-    if (!fs::exists(path)) {
-        log = "Info: " + path + " not found. Using system defaults.";
-        return true;
-    }
-
-    // Config parser logic will be implemented here to override cfg members
-    log = "Configuration loaded from " + path;
-    return true;
-}
-
-// Construct user model path based on loaded basedir
-std::string fa_user_model_path(const FacialAuthConfig& cfg, const std::string& user) {
-    return (fs::path(cfg.basedir) / "models" / (user + ".xml")).string();
-}
-
-// Capture face dataset for a specific user
-bool fa_capture_user(const std::string& user, const FacialAuthConfig& cfg, const std::string& detector, std::string& log) {
-    cv::VideoCapture cap(0);
-    if (!cap.isOpened()) {
-        log = "Error: Camera not accessible.";
+    std::ifstream file(path);
+    if (!file.is_open()) {
+        log = "Could not open config file: " + path;
         return false;
     }
 
-    // Dynamic data path derived from basedir
-    fs::path user_dir = fs::path(cfg.basedir) / "data" / user;
-    try {
-        fs::create_directories(user_dir);
-    } catch (const fs::filesystem_error& e) {
-        log = "Filesystem error: " + std::string(e.what());
+    std::string line;
+    while (std::getline(file, line)) {
+        line = trim(line);
+        if (line.empty() || line[0] == '#') continue;
+
+        std::size_t sep = line.find('=');
+        if (sep == std::string::npos) continue;
+
+        std::string key = trim(line.substr(0, sep));
+        std::string val = trim(line.substr(sep + 1));
+
+        if (key == "basedir") cfg.basedir = val;
+        else if (key == "cascade_path") cfg.cascade_path = val;
+        else if (key == "threshold") cfg.threshold = std::stod(val);
+        else if (key == "frames") cfg.frames = std::stoi(val);
+        else if (key == "width") cfg.width = std::stoi(val);
+        else if (key == "height") cfg.height = std::stoi(val);
+        else if (key == "debug") cfg.debug = (val == "true" || val == "1");
+        else if (key == "verbose") cfg.verbose = (val == "true" || val == "1");
+    }
+    return true;
+}
+
+std::string fa_user_model_path(const FacialAuthConfig& cfg, const std::string& user) {
+    return cfg.basedir + "/" + user + ".xml";
+}
+
+bool fa_capture_user(const std::string& user, const FacialAuthConfig& cfg, const std::string& detector, std::string& log) {
+    #ifdef HAVE_OPENCV
+    cv::VideoCapture cap(0);
+    if (!cap.isOpened()) {
+        log = "Errore: Impossibile aprire la fotocamera.";
         return false;
     }
 
     cv::CascadeClassifier face_cascade(cfg.cascade_path);
     if (face_cascade.empty()) {
-        log = "Error: Haar classifier not found at " + cfg.cascade_path;
+        log = "Errore: Impossibile caricare il file cascade: " + cfg.cascade_path;
         return false;
     }
 
-    int saved = 0;
-    cv::Mat frame, gray;
-    while (saved < cfg.frames) {
+    std::string user_dir = cfg.basedir + "/captures/" + user;
+    fs::create_directories(user_dir);
+
+    int count = 0;
+    while (count < cfg.frames) {
+        cv::Mat frame, gray;
         cap >> frame;
         if (frame.empty()) break;
-        cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
 
+        cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
         std::vector<cv::Rect> faces;
         face_cascade.detectMultiScale(gray, faces, 1.1, 4);
 
         for (const auto& area : faces) {
             cv::Mat face_roi = gray(area);
             cv::resize(face_roi, face_roi, cv::Size(cfg.width, cfg.height));
-            std::string filename = (user_dir / (std::to_string(saved) + "." + cfg.image_format)).string();
+            std::string filename = user_dir + "/" + std::to_string(count) + ".jpg";
             cv::imwrite(filename, face_roi);
-            saved++;
+            count++;
+            if (count >= cfg.frames) break;
         }
-        if (cfg.sleep_ms > 0) std::this_thread::sleep_for(std::chrono::milliseconds(cfg.sleep_ms));
     }
     return true;
+    #else
+    log = "OpenCV support not enabled at compile time.";
+    return false;
+    #endif
 }
 
-// Train the LBPH model for a user
 bool fa_train_user(const std::string& user, const FacialAuthConfig& cfg, std::string& log) {
-    fs::path user_dir = fs::path(cfg.basedir) / "data" / user;
-    fs::path model_dir = fs::path(cfg.basedir) / "models";
-    std::string model_full_path = fa_user_model_path(cfg, user);
-
-    if (!fs::exists(user_dir)) {
-        log = "Error: Data directory not found: " + user_dir.string();
-        return false;
-    }
-
+    #ifdef HAVE_OPENCV
+    std::string user_dir = cfg.basedir + "/captures/" + user;
     std::vector<cv::Mat> images;
     std::vector<int> labels;
+
     for (const auto& entry : fs::directory_iterator(user_dir)) {
         cv::Mat img = cv::imread(entry.path().string(), cv::IMREAD_GRAYSCALE);
         if (!img.empty()) {
             images.push_back(img);
-            labels.push_back(0); // All images belong to the same user
+            labels.push_back(0); // Singolo utente, label fissa
         }
     }
 
     if (images.empty()) {
-        log = "Error: No data available for training.";
+        log = "Nessuna immagine trovata per il training in: " + user_dir;
         return false;
     }
 
-    cv::Ptr<cv::face::FaceRecognizer> model = cv::face::LBPHFaceRecognizer::create();
+    auto model = cv::face::LBPHFaceRecognizer::create();
     model->train(images, labels);
-
-    fs::create_directories(model_dir);
-    model->save(model_full_path);
-    log = "Model saved to " + model_full_path;
+    model->write(fa_user_model_path(cfg, user));
     return true;
+    #else
+    log = "OpenCV support not enabled.";
+    return false;
+    #endif
 }
 
-// Test face recognition against a trained model
 bool fa_test_user(const std::string& user, const FacialAuthConfig& cfg, const std::string& model_path, double& confidence, int& label, std::string& log) {
+    #ifdef HAVE_OPENCV
     if (!fa_file_exists(model_path)) {
-        log = "Error: Model does not exist at " + model_path;
+        log = "Modello non trovato per l'utente: " + user;
         return false;
     }
 
-    cv::Ptr<cv::face::FaceRecognizer> model = cv::face::LBPHFaceRecognizer::create();
+    auto model = cv::face::LBPHFaceRecognizer::create();
     model->read(model_path);
 
     cv::VideoCapture cap(0);
     cv::Mat frame, gray;
     cap >> frame;
     if (frame.empty()) {
-        log = "Error: Camera failure during test.";
+        log = "Errore cattura fotocamera.";
         return false;
     }
 
     cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
+    // Nota: Qui potresti voler aggiungere la detezione del volto prima del predict
     model->predict(gray, label, confidence);
+
     return true;
+    #else
+    log = "OpenCV support not enabled.";
+    return false;
+    #endif
 }
