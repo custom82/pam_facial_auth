@@ -9,8 +9,20 @@
 #include <sstream>
 #include <filesystem>
 #include <algorithm>
+#include <unistd.h> // Necessario per getuid()
 
 namespace fs = std::filesystem;
+
+/**
+ * Verifica se l'utente corrente ha i permessi di root.
+ */
+bool fa_check_root(const std::string& tool_name) {
+    if (getuid() != 0) {
+        std::cerr << "ERRORE [" << tool_name << "]: Questo tool deve essere eseguito come root (sudo)." << std::endl;
+        return false;
+    }
+    return true;
+}
 
 /**
  * Helper per rimuovere spazi bianchi all'inizio e alla fine di una stringa
@@ -19,6 +31,7 @@ static std::string trim(const std::string& s) {
     auto start = s.begin();
     while (start != s.end() && std::isspace(*start)) start++;
     auto end = s.end();
+    if (start == s.end()) return "";
     do { end--; } while (std::distance(start, end) > 0 && std::isspace(*end));
     return std::string(start, end + 1);
 }
@@ -94,12 +107,14 @@ bool fa_capture_user(const std::string& user, const FacialAuthConfig& cfg, const
             std::string filename = user_dir + "/" + std::to_string(count) + ".jpg";
             cv::imwrite(filename, face_roi);
             count++;
+            std::cout << "\rCattura frame: " << count << "/" << cfg.frames << std::flush;
             if (count >= cfg.frames) break;
         }
     }
+    std::cout << std::endl;
     return true;
     #else
-    log = "OpenCV support not enabled at compile time.";
+    log = "OpenCV support not enabled.";
     return false;
     #endif
 }
@@ -107,6 +122,11 @@ bool fa_capture_user(const std::string& user, const FacialAuthConfig& cfg, const
 bool fa_train_user(const std::string& user, const FacialAuthConfig& cfg, std::string& log) {
     #ifdef HAVE_OPENCV
     std::string user_dir = cfg.basedir + "/captures/" + user;
+    if (!fs::exists(user_dir)) {
+        log = "Directory catture non trovata: " + user_dir;
+        return false;
+    }
+
     std::vector<cv::Mat> images;
     std::vector<int> labels;
 
@@ -114,12 +134,12 @@ bool fa_train_user(const std::string& user, const FacialAuthConfig& cfg, std::st
         cv::Mat img = cv::imread(entry.path().string(), cv::IMREAD_GRAYSCALE);
         if (!img.empty()) {
             images.push_back(img);
-            labels.push_back(0); // Singolo utente, label fissa
+            labels.push_back(0);
         }
     }
 
     if (images.empty()) {
-        log = "Nessuna immagine trovata per il training in: " + user_dir;
+        log = "Nessuna immagine valida trovata per il training.";
         return false;
     }
 
@@ -136,7 +156,7 @@ bool fa_train_user(const std::string& user, const FacialAuthConfig& cfg, std::st
 bool fa_test_user(const std::string& user, const FacialAuthConfig& cfg, const std::string& model_path, double& confidence, int& label, std::string& log) {
     #ifdef HAVE_OPENCV
     if (!fa_file_exists(model_path)) {
-        log = "Modello non trovato per l'utente: " + user;
+        log = "Modello non trovato: " + model_path;
         return false;
     }
 
@@ -144,15 +164,19 @@ bool fa_test_user(const std::string& user, const FacialAuthConfig& cfg, const st
     model->read(model_path);
 
     cv::VideoCapture cap(0);
+    if (!cap.isOpened()) {
+        log = "Fotocamera non accessibile.";
+        return false;
+    }
+
     cv::Mat frame, gray;
     cap >> frame;
     if (frame.empty()) {
-        log = "Errore cattura fotocamera.";
+        log = "Frame vuoto.";
         return false;
     }
 
     cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
-    // Nota: Qui potresti voler aggiungere la detezione del volto prima del predict
     model->predict(gray, label, confidence);
 
     return true;
