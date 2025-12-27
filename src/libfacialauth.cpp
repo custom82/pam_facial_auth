@@ -4,18 +4,18 @@
 #include <opencv2/objdetect.hpp>
 #include <opencv2/videoio.hpp>
 #include <opencv2/face.hpp>
+#include <opencv2/imgcodecs.hpp>
 #include <fstream>
 #include <filesystem>
 #include <iostream>
 #include <thread>
-#include <unistd.h> // PER GETUID()
+#include <unistd.h>
 
 namespace fs = std::filesystem;
 
-// Helper per il caricamento configurazione
 bool fa_load_config(FacialAuthConfig &cfg, std::string &log, const std::string &path) {
     std::ifstream file(path);
-    if (!file.is_open()) return false;
+    if (!file.is_open()) { log = "Config not found"; return false; }
     std::string line;
     while (std::getline(file, line)) {
         if (line.empty() || line[0] == '#') continue;
@@ -33,67 +33,76 @@ bool fa_load_config(FacialAuthConfig &cfg, std::string &log, const std::string &
     return true;
 }
 
-// Logica di cattura (centralizzata)
 bool fa_capture_user(const std::string &user, const FacialAuthConfig &cfg, const std::string &detector_type, std::string &log) {
     std::string user_dir = cfg.basedir + "/" + user + "/captures";
     if (cfg.force) fs::remove_all(user_dir);
     fs::create_directories(user_dir);
-
     cv::VideoCapture cap;
     try { cap.open(std::stoi(cfg.device)); } catch(...) { cap.open(cfg.device); }
-    if (!cap.isOpened()) { log = "Camera non accessibile"; return false; }
-
+    if (!cap.isOpened()) { log = "Camera error"; return false; }
     int count = 0;
     while (count < cfg.frames) {
         cv::Mat frame; cap >> frame;
         if (frame.empty()) break;
-        // Salva sempre o aggiungi logica detector qui
         cv::imwrite(user_dir + "/img_" + std::to_string(count++) + "." + cfg.image_format, frame);
         if (!cfg.nogui) {
-            cv::imshow("Cattura", frame);
+            cv::imshow("Capture", frame);
             if (cv::waitKey(1) == 'q') break;
         }
     }
     return true;
 }
 
-// Logica di test (silenziosa per PAM)
-bool fa_test_user(const std::string &user, const FacialAuthConfig &cfg, const std::string &modelPath,
-                  double &best_conf, int &best_label, std::string &log) {
-    if (!fs::exists(modelPath)) { log = "Modello non trovato"; return false; }
+// IMPLEMENTAZIONE MANCANTE CHE CAUSAVA L'ERRORE
+bool fa_train_user(const std::string &user, const FacialAuthConfig &cfg, std::string &log) {
+    std::string user_dir = cfg.basedir + "/" + user + "/captures";
+    std::vector<cv::Mat> faces;
+    std::vector<int> labels;
+
+    for (const auto& entry : fs::directory_iterator(user_dir)) {
+        cv::Mat img = cv::imread(entry.path().string(), cv::IMREAD_GRAYSCALE);
+        if (!img.empty()) {
+            faces.push_back(img);
+            labels.push_back(0); // Label fissa per singolo utente
+        }
+    }
+
+    if (faces.empty()) { log = "No images found in " + user_dir; return false; }
 
     cv::Ptr<cv::face::LBPHFaceRecognizer> model = cv::face::LBPHFaceRecognizer::create();
-    model->read(modelPath);
+    model->train(faces, labels);
+    model->save(fa_user_model_path(cfg, user));
+    return true;
+}
 
+bool fa_test_user(const std::string &user, const FacialAuthConfig &cfg, const std::string &modelPath,
+                  double &best_conf, int &best_label, std::string &log) {
+    if (!fs::exists(modelPath)) { log = "Model missing"; return false; }
+    cv::Ptr<cv::face::LBPHFaceRecognizer> model = cv::face::LBPHFaceRecognizer::create();
+    model->read(modelPath);
     cv::VideoCapture cap;
     try { cap.open(std::stoi(cfg.device)); } catch(...) { cap.open(cfg.device); }
-    if (!cap.isOpened()) { log = "Camera offline"; return false; }
-
-    cv::Mat frame; cap >> frame;
+    if (!cap.isOpened()) return false;
+    cv::Mat frame, gray; cap >> frame;
     if (frame.empty()) return false;
-
-    cv::Mat gray; cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
+    cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
     model->predict(gray, best_label, best_conf);
-
     return (best_conf < cfg.lbph_threshold);
                   }
 
-                  // Logica di test (interattiva per CLI)
                   bool fa_test_user_interactive(const std::string &user, const FacialAuthConfig &cfg, std::string &log) {
                       double conf = 0; int label = -1;
                       bool res = fa_test_user(user, cfg, fa_user_model_path(cfg, user), conf, label, log);
-                      std::cout << "Utente: " << user << " | Riconosciuto: " << (res ? "SI" : "NO") << " | Confidenza: " << conf << "\n";
+                      std::cout << "Test for " << user << ": " << (res ? "OK" : "FAILED") << " (Conf: " << conf << ")\n";
                       return res;
                   }
-
-                  // Implementazione fa_train_user omessa per brevità ma necessaria nel file...
 
                   std::string fa_user_model_path(const FacialAuthConfig &cfg, const std::string &user) {
                       return cfg.basedir + "/" + user + "/model.xml";
                   }
 
                   bool fa_check_root(const std::string &t) {
-                      if (getuid() != 0) { std::cerr << t << " richiede root.\n"; return false; }
+                      if (getuid() != 0) { std::cerr << t << " requires root.\n"; return false; }
                       return true;
                   }
 
