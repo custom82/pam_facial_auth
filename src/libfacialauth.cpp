@@ -14,7 +14,6 @@
 
 namespace fs = std::filesystem;
 
-// Helper per la gestione delle stringhe
 static std::string trim(std::string_view s) {
     auto first = s.find_first_not_of(" \t\r\n");
     if (std::string::npos == first) return "";
@@ -26,7 +25,6 @@ bool fa_file_exists(std::string_view path) {
     return !path.empty() && fs::exists(path);
 }
 
-// Configurazione accelerazione hardware
 void get_best_dnn_backend(bool use_accel, int &backend, int &target) {
     backend = cv::dnn::DNN_BACKEND_DEFAULT;
     target = cv::dnn::DNN_TARGET_CPU;
@@ -37,7 +35,7 @@ void get_best_dnn_backend(bool use_accel, int &backend, int &target) {
     }
 }
 
-/* --- Plugin System per i Riconoscitori --- */
+/* --- PLUGINS --- */
 
 class SFacePlugin : public RecognizerPlugin {
     cv::Ptr<cv::FaceRecognizerSF> face_recon;
@@ -92,7 +90,7 @@ public:
     bool load(const std::string& p) override {
         if (!fa_file_exists(p)) return false;
         try {
-            model->read(p); // Corretto: uso di read() invece di Algorithm::load
+            model->read(p); // FIX: riga 1405 del tuo log
             return true;
         } catch (...) { return false; }
     }
@@ -111,7 +109,7 @@ public:
     }
 };
 
-/* --- Funzioni Core --- */
+/* --- CORE FUNCTIONS --- */
 
 bool fa_load_config(FacialAuthConfig &cfg, std::string &log, const std::string &path) {
     std::ifstream file(path);
@@ -136,7 +134,7 @@ bool fa_load_config(FacialAuthConfig &cfg, std::string &log, const std::string &
     return true;
 }
 
-// Funzione di cattura (Corretta la chiusura delle parentesi)
+// FIX: Qui c'era lo sbilanciamento di graffe (riga 1106)
 bool fa_capture_dataset(const FacialAuthConfig &cfg, std::string &log, const std::string &imgdir, int start_index) {
     cv::VideoCapture cap;
     try { cap.open(std::stoi(cfg.device)); } catch(...) { cap.open(cfg.device.c_str()); }
@@ -163,10 +161,12 @@ bool fa_capture_dataset(const FacialAuthConfig &cfg, std::string &log, const std
             std::string outfile = imgdir + "/" + std::to_string(idx) + "." + img_format;
             if (cv::imwrite(outfile, frame)) {
                 saved++;
-                if (cfg.debug) std::cout << "[DEBUG] Saved frame " << saved << std::endl;
+                if (cfg.debug) std::cout << "[DEBUG] Saved " << saved << std::endl;
             }
         }
-        if (cfg.sleep_ms > 0) std::this_thread::sleep_for(std::chrono::milliseconds(cfg.sleep_ms));
+        if (cfg.sleep_ms > 0) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(cfg.sleep_ms));
+        }
     }
 
     if (saved == 0) {
@@ -182,7 +182,7 @@ bool fa_test_user(std::string_view u, const FacialAuthConfig &cfg, const std::st
     if (cfg.training_method == "sface") plugin = std::make_unique<SFacePlugin>(cfg.rec_model_path, cfg.use_accel);
     else plugin = std::make_unique<ClassicPlugin>(cfg.training_method);
 
-    if (!plugin->load(m_path)) { log = "Model missing: " + m_path; return false; }
+    if (!plugin->load(m_path)) { log = "Model missing"; return false; }
 
     cv::VideoCapture cap;
     try { cap.open(std::stoi(cfg.device)); } catch(...) { cap.open(cfg.device.c_str()); }
@@ -203,7 +203,7 @@ bool fa_test_user(std::string_view u, const FacialAuthConfig &cfg, const std::st
         } else { face_ok = true; break; }
     }
 
-    if (!face_ok) { log = "No face detected"; conf = 0.0; return false; }
+    if (!face_ok) { log = "No face"; return false; }
     return plugin->predict(frame, label, conf);
 }
 
