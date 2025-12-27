@@ -1,5 +1,5 @@
-#ifndef LIBFACIALAUTH_H
-#define LIBFACIALAUTH_H
+#ifndef LIB_FACIALAUTH_H
+#define LIB_FACIALAUTH_H
 
 #include <string>
 #include <vector>
@@ -7,24 +7,25 @@
 
 #define FACIALAUTH_DEFAULT_CONFIG "/etc/security/pam_facial.conf"
 
-/**
- * Global configuration structure for facial authentication
- */
 struct FacialAuthConfig {
-    std::string basedir = "/var/lib/pam_facial_auth";
-    std::string device = "0";
-    std::string training_method = "lbph";
-    std::string image_format = "jpg"; // Default image format
-    std::string detect_model_path = "/usr/share/opencv4/dnn/models/face_detection_yunet_2023mar.onnx";
-    std::string haar_path = "/usr/share/opencv4/haarcascades/haarcascade_frontalface_default.xml";
+    std::string basedir;
+    std::string device;
+    std::string training_method;
+    std::string image_format;
 
-    int frames = 50;
-    int width = 640;
-    int height = 480;
+    // Paths populated ONLY via config file
+    std::string detect_model_path;
+    std::string rec_model_path;
+
+    int frames = 30;
+    int width = 1280;
+    int height = 720;
     bool force = false;
-    bool nogui = false;
+    bool nogui = true;
     bool debug = false;
-    double lbph_threshold = 80.0;
+
+    double sface_threshold = 0.36;
+    double lbph_threshold = 60.0;
 };
 
 class RecognizerPlugin {
@@ -37,7 +38,6 @@ public:
 
 bool fa_load_config(FacialAuthConfig &cfg, std::string &log, const std::string &path);
 bool fa_check_root(const std::string &tool_name);
-bool fa_file_exists(const std::string &path);
 bool fa_delete_user_data(const std::string &user, const FacialAuthConfig &cfg);
 std::string fa_user_model_path(const FacialAuthConfig &cfg, const std::string &user);
 bool fa_capture_user(const std::string &user, const FacialAuthConfig &cfg, const std::string &det_type, std::string &log);
