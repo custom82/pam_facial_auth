@@ -1,25 +1,26 @@
 #include "../include/libfacialauth.h"
 #include <iostream>
+#include <getopt.h>
 
 int main(int argc, char** argv) {
-    if (argc < 2) {
-        std::cerr << "Uso: facial_test <username>\n";
-        return 1;
-    }
-
-    std::string user = argv[1];
     FacialAuthConfig cfg;
-    std::string log;
+    std::string user, log;
+    static struct option long_opts[] = {
+        {"user", 1, 0, 'u'}, {"help", 0, 0, 'h'}, {0,0,0,0}
+    };
 
-    fa_load_config(cfg, log, FACIALAUTH_DEFAULT_CONFIG);
-
-    std::cout << "[INFO] Avvio test interattivo per: " << user << "\n";
-    std::cout << "[INFO] Assicurati di essere davanti alla camera.\n";
-
-    if (!fa_test_user_interactive(user, cfg, log)) {
-        std::cerr << "[FAIL] Riconoscimento fallito o errore: " << log << "\n";
-        return 1;
+    int opt;
+    while ((opt = getopt_long(argc, argv, "u:h", long_opts, NULL)) != -1) {
+        if (opt == 'u') user = optarg;
+        else { std::cout << "Usage: " << argv[0] << " -u <user>\n"; return 0; }
     }
 
-    return 0;
+    if (user.empty()) return 1;
+    fa_load_config(cfg, log, FACIALAUTH_DEFAULT_CONFIG);
+    double conf = 0; int label = -1;
+    if (fa_test_user(user, cfg, fa_user_model_path(cfg, user), conf, label, log)) {
+        std::cout << "Risultato: " << (label == 0 ? "MATCH" : "NO MATCH") << " (Conf: " << conf << ")\n";
+        return 0;
+    }
+    return 1;
 }

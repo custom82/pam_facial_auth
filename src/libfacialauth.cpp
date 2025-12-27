@@ -12,7 +12,6 @@
 
 namespace fs = std::filesystem;
 
-// --- IMPLEMENTAZIONE PLUGIN ---
 class ClassicPlugin : public RecognizerPlugin {
     cv::Ptr<cv::face::FaceRecognizer> model;
 public:
@@ -21,27 +20,35 @@ public:
         else if (method == "fisher") model = cv::face::FisherFaceRecognizer::create();
         else model = cv::face::LBPHFaceRecognizer::create();
     }
-    bool load(const std::string& path) override { return fs::exists(path) && (model->read(path), true); }
-    bool train(const std::vector<cv::Mat>& f, const std::vector<int>& l, const std::string& p) override {
-        model->train(f, l); model->save(p); return true;
+    bool load(const std::string& path) override {
+        if (!fs::exists(path)) return false;
+        model->read(path);
+        return true;
     }
-    bool predict(const cv::Mat& face, int& label, double& conf) override {
+    bool train(const std::vector<cv::Mat>& faces, const std::vector<int>& labels, const std::string& save_path) override {
+        if (faces.empty()) return false;
+        model->train(faces, labels);
+        model->save(save_path);
+        return true;
+    }
+    bool predict(const cv::Mat& face, int& label, double& confidence) override {
         cv::Mat gray;
-        if(face.channels() == 3) cv::cvtColor(face, gray, cv::COLOR_BGR2GRAY); else gray = face;
-        model->predict(gray, label, conf); return true;
+        if (face.channels() == 3) cv::cvtColor(face, gray, cv::COLOR_BGR2GRAY);
+        else gray = face;
+        model->predict(gray, label, confidence);
+        return true;
     }
 };
 
-// --- API FUNCTIONS ---
 bool fa_file_exists(const std::string &path) { return fs::exists(path); }
 
 bool fa_load_config(FacialAuthConfig &cfg, std::string &log, const std::string &path) {
-    if (!fs::exists(path)) { log = "Config file missing"; return false; }
+    if (!fs::exists(path)) { log = "Config non trovata, uso default."; return false; }
     return true;
 }
 
 bool fa_check_root(const std::string &tool_name) {
-    if (getuid() != 0) { std::cerr << tool_name << " must be run as root\n"; return false; }
+    if (getuid() != 0) { std::cerr << "Errore: " << tool_name << " deve essere root.\n"; return false; }
     return true;
 }
 
@@ -72,7 +79,20 @@ bool fa_capture_user(const std::string &user, const FacialAuthConfig &cfg, const
         cv::imwrite(user_dir + "/img_" + std::to_string(count++) + "." + cfg.image_format, frame);
         if (!cfg.nogui) { cv::imshow("Capture", frame); if(cv::waitKey(1) == 'q') break; }
     }
+    cv::destroyAllWindows();
     return true;
+}
+
+bool fa_train_user(const std::string &user, const FacialAuthConfig &cfg, std::string &log) {
+    std::string user_dir = cfg.basedir + "/" + user + "/captures";
+    std::vector<cv::Mat> faces; std::vector<int> labels;
+    if (!fs::exists(user_dir)) return false;
+    for (const auto& entry : fs::directory_iterator(user_dir)) {
+        cv::Mat img = cv::imread(entry.path().string(), cv::IMREAD_GRAYSCALE);
+        if (!img.empty()) { faces.push_back(img); labels.push_back(0); }
+    }
+    ClassicPlugin plugin(cfg.training_method);
+    return plugin.train(faces, labels, fa_user_model_path(cfg, user));
 }
 
 bool fa_test_user(const std::string &user, const FacialAuthConfig &cfg, const std::string &model_path, double &conf, int &label, std::string &log) {
@@ -82,15 +102,4 @@ bool fa_test_user(const std::string &user, const FacialAuthConfig &cfg, const st
     try { cap.open(std::stoi(cfg.device)); } catch(...) { cap.open(cfg.device); }
     cv::Mat frame; cap >> frame;
     return !frame.empty() && plugin.predict(frame, label, conf);
-}
-
-bool fa_train_user(const std::string &user, const FacialAuthConfig &cfg, std::string &log) {
-    std::string user_dir = cfg.basedir + "/" + user + "/captures";
-    std::vector<cv::Mat> faces; std::vector<int> labels;
-    for (const auto& entry : fs::directory_iterator(user_dir)) {
-        cv::Mat img = cv::imread(entry.path().string(), cv::IMREAD_GRAYSCALE);
-        if (!img.empty()) { faces.push_back(img); labels.push_back(0); }
-    }
-    ClassicPlugin plugin(cfg.training_method);
-    return plugin.train(faces, labels, fa_user_model_path(cfg, user));
 }
