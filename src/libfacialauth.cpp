@@ -14,7 +14,7 @@
 
 namespace fs = std::filesystem;
 
-/* Helper per la pulizia delle stringhe di configurazione */
+/* Helper per pulire stringhe di configurazione */
 static std::string trim(std::string_view s) {
     auto first = s.find_first_not_of(" \t\r\n");
     if (std::string::npos == first) return "";
@@ -26,7 +26,7 @@ bool fa_file_exists(std::string_view path) {
     return !path.empty() && fs::exists(path);
 }
 
-/* Configurazione OpenCL / DNN Backend */
+/* Gestione accelerazione OpenCL */
 void get_best_dnn_backend(bool use_accel, int &backend, int &target) {
     backend = cv::dnn::DNN_BACKEND_DEFAULT;
     target = cv::dnn::DNN_TARGET_CPU;
@@ -37,7 +37,7 @@ void get_best_dnn_backend(bool use_accel, int &backend, int &target) {
     }
 }
 
-/* Plugin per SFace (Deep Learning) */
+/* Plugin SFace (DNN) */
 class SFacePlugin : public RecognizerPlugin {
     cv::Ptr<cv::FaceRecognizerSF> face_recon;
     cv::Mat registered_embeddings;
@@ -80,7 +80,7 @@ public:
     }
 };
 
-/* Plugin per Algoritmi Classici (LBPH/Eigen/Fisher) */
+/* Plugin Classico (LBPH/Eigen/Fisher) */
 class ClassicPlugin : public RecognizerPlugin {
     cv::Ptr<cv::face::FaceRecognizer> model;
 public:
@@ -91,6 +91,7 @@ public:
     }
     bool load(const std::string& p) override {
         if (!fa_file_exists(p)) return false;
+        // CORREZIONE: Usiamo read() invece di Algorithm::load che falliva
         model->read(p);
         return true;
     }
@@ -133,7 +134,7 @@ bool fa_load_config(FacialAuthConfig &cfg, std::string &log, const std::string &
     return true;
 }
 
-/* Funzione di Cattura Dataset (Corretta) */
+/* Funzione di Cattura Dataset (CORRETTA) */
 bool fa_capture_dataset(const FacialAuthConfig &cfg, std::string &log, const std::string &imgdir, int start_index) {
     cv::VideoCapture cap;
     try { cap.open(std::stoi(cfg.device)); } catch(...) { cap.open(cfg.device.c_str()); }
@@ -147,6 +148,7 @@ bool fa_capture_dataset(const FacialAuthConfig &cfg, std::string &log, const std
     std::string img_format = "jpg";
     cv::Mat frame;
 
+    // Inizio loop di cattura
     for (int i = 0; i < 200 && saved < cfg.frames; i++) {
         cap >> frame;
         if (frame.empty()) continue;
@@ -156,6 +158,7 @@ bool fa_capture_dataset(const FacialAuthConfig &cfg, std::string &log, const std
         detector->detect(frame, faces);
 
         if (faces.rows > 0) {
+            // Logica verbose/debug spostata correttamente dentro lo scope
             if (cfg.debug) {
                 std::cout << "[DEBUG] Face detected, saving frame " << (saved + 1) << std::endl;
             }
@@ -169,7 +172,7 @@ bool fa_capture_dataset(const FacialAuthConfig &cfg, std::string &log, const std
         if (cfg.sleep_ms > 0) {
             std::this_thread::sleep_for(std::chrono::milliseconds(cfg.sleep_ms));
         }
-    }
+    } // Fine loop di cattura
 
     if (saved == 0) {
         log = "No faces captured.";
@@ -179,7 +182,7 @@ bool fa_capture_dataset(const FacialAuthConfig &cfg, std::string &log, const std
     return true;
 }
 
-/* Test Utente (Modulo PAM) */
+/* Funzione Test Utente per PAM */
 bool fa_test_user(std::string_view u, const FacialAuthConfig &cfg, const std::string &m_path, double &conf, int &label, std::string &log) {
     std::unique_ptr<RecognizerPlugin> plugin;
     if (cfg.training_method == "sface") plugin = std::make_unique<SFacePlugin>(cfg.rec_model_path, cfg.use_accel);
