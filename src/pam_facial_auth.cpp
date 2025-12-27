@@ -5,6 +5,7 @@
 
 #include <security/pam_modules.h>
 #include <security/pam_ext.h>
+#include <syslog.h>      // <--- Aggiunto per LOG_ERR
 #include "libfacialauth.h"
 
 PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, const char **argv) {
@@ -20,11 +21,10 @@ PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, cons
     std::string model_path = fa_user_model_path(cfg, user);
 
     if (!fa_test_user(user, cfg, model_path, confidence, label, log)) {
-        pam_syslog(pamh, LOG_ERR, "Facial Auth fallito: %s", log.c_str());
+        pam_syslog(pamh, LOG_ERR, "Facial Auth fallito per %s: %s", user, log.c_str());
         return PAM_AUTH_ERR;
     }
 
-    // Usiamo il 'threshold' generico definito nella struct
     if (confidence <= cfg.threshold) {
         return PAM_SUCCESS;
     }
