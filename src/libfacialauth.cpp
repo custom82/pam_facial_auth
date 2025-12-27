@@ -211,7 +211,6 @@ bool fa_test_user(std::string_view user, const FacialAuthConfig &cfg, const std:
     try { cap.open(std::stoi(cfg.device)); } catch(...) { cap.open(cfg.device.c_str()); }
     if (!cap.isOpened()) { log = "Camera error"; return false; }
 
-    // Inizializziamo YuNet per la validazione "Liveness/Presence"
     cv::Ptr<cv::FaceDetectorYN> detector;
     if (fa_file_exists(cfg.detect_model_path)) {
         detector = cv::FaceDetectorYN::create(cfg.detect_model_path, "", cv::Size(cfg.width, cfg.height));
@@ -220,8 +219,8 @@ bool fa_test_user(std::string_view user, const FacialAuthConfig &cfg, const std:
     cv::Mat frame;
     bool face_detected = false;
 
-    // Tentiamo di catturare un volto valido per un breve periodo (es. 3 secondi)
-    for(int i = 0; i < 10; i++) {
+    // Cerchiamo un volto per max 30 frame (~1-2 secondi)
+    for(int i = 0; i < 30; i++) {
         cap >> frame;
         if (frame.empty()) continue;
 
@@ -231,23 +230,29 @@ bool fa_test_user(std::string_view user, const FacialAuthConfig &cfg, const std:
             detector->detect(frame, faces);
             if (faces.rows > 0) {
                 face_detected = true;
-                break; // Volto trovato, procediamo al riconoscimento
+                break;
             }
         } else {
-            // Se YuNet non è configurato, non possiamo validare la presenza
             face_detected = true;
             break;
         }
-        cv::waitKey(100);
+        // Evitiamo waitKey se siamo in ambiente PAM o senza display
+        if (!cfg.nogui && getenv("DISPLAY")) {
+            cv::imshow("Test", frame);
+            if (cv::waitKey(1) == 'q') break;
+        }
+    }
+
+    // PULIZIA: Se avevamo aperto una finestra, chiudiamola con cautela
+    if (!cfg.nogui && getenv("DISPLAY")) {
+        try { cv::destroyAllWindows(); } catch(...) {}
     }
 
     if (!face_detected) {
-        log = "No face detected (Webcam covered?)";
+        log = "Security Alert: No face detected. Check camera or lighting.";
         conf = 0.0;
-        label = -1;
-        return false; // Ritorna falso così il modulo PAM fallisce immediatamente
+        return false;
     }
 
-    // Solo se il volto esiste, chiamiamo il recognizer (SFace/LBPH)
     return plugin->predict(frame, label, conf);
 }
