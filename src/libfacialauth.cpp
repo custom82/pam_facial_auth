@@ -205,23 +205,49 @@ bool fa_train_user(std::string_view u, const FacialAuthConfig &cfg, std::string 
 // FIX: Implementazione fa_test_user (per risolvere errore linker)
 bool fa_test_user(std::string_view user, const FacialAuthConfig &cfg, const std::string &model_path, double &conf, int &label, std::string &log) {
     auto plugin = get_plugin(cfg);
-    if (!plugin->load(model_path)) { log = "Model load failed: " + model_path; return false; }
+    if (!plugin->load(model_path)) { log = "Model load failed"; return false; }
 
     cv::VideoCapture cap;
     try { cap.open(std::stoi(cfg.device)); } catch(...) { cap.open(cfg.device.c_str()); }
     if (!cap.isOpened()) { log = "Camera error"; return false; }
 
-    cv::Mat frame;
-    cap >> frame; // Cattura un singolo frame per il test
-    if (frame.empty()) { log = "Empty frame captured"; return false; }
-
-    bool res = plugin->predict(frame, label, conf);
-
-    if (!cfg.nogui) {
-        cv::putText(frame, "Conf: " + std::to_string(conf), cv::Point(30,30), 1, 1.5, cv::Scalar(0,255,0), 2);
-        cv::imshow("Verification Test", frame);
-        cv::waitKey(2000); // Mostra per 2 secondi
-        cv::destroyAllWindows();
+    // Inizializziamo YuNet per la validazione "Liveness/Presence"
+    cv::Ptr<cv::FaceDetectorYN> detector;
+    if (fa_file_exists(cfg.detect_model_path)) {
+        detector = cv::FaceDetectorYN::create(cfg.detect_model_path, "", cv::Size(cfg.width, cfg.height));
     }
-    return res;
+
+    cv::Mat frame;
+    bool face_detected = false;
+
+    // Tentiamo di catturare un volto valido per un breve periodo (es. 3 secondi)
+    for(int i = 0; i < 10; i++) {
+        cap >> frame;
+        if (frame.empty()) continue;
+
+        if (detector) {
+            cv::Mat faces;
+            detector->setInputSize(frame.size());
+            detector->detect(frame, faces);
+            if (faces.rows > 0) {
+                face_detected = true;
+                break; // Volto trovato, procediamo al riconoscimento
+            }
+        } else {
+            // Se YuNet non è configurato, non possiamo validare la presenza
+            face_detected = true;
+            break;
+        }
+        cv::waitKey(100);
+    }
+
+    if (!face_detected) {
+        log = "No face detected (Webcam covered?)";
+        conf = 0.0;
+        label = -1;
+        return false; // Ritorna falso così il modulo PAM fallisce immediatamente
+    }
+
+    // Solo se il volto esiste, chiamiamo il recognizer (SFace/LBPH)
+    return plugin->predict(frame, label, conf);
 }
