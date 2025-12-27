@@ -2,18 +2,21 @@
 #include <iostream>
 #include <getopt.h>
 
+/**
+ * Display help message in English
+ */
 void print_usage(const char* p) {
-    std::cout << "Utilizzo: " << p << " [OPZIONI]\n"
-    << "  -u, --user <nome>      Utente target\n"
-    << "  -D, --detector <tipo>  Detector: yunet, haar, none (default: none)\n"
-    << "  -n, --number <num>     Numero di frame (default: 50)\n"
-    << "  -w, --width <px>       Larghezza (default: 640)\n"
-    << "  -H, --height <px>      Altezza (default: 480)\n"
-    << "  -c, --clean            Cancella dati utente\n"
-    << "  -f, --force            Svuota captures prima\n"
-    << "  -g, --nogui            Nasconde finestra video\n"
-    << "  -d, --debug            Messaggi di log estesi\n"
-    << "  -h, --help             Aiuto\n";
+    std::cout << "Usage: " << p << " [OPTIONS]\n"
+    << "  -u, --user <name>      Target username (required)\n"
+    << "  -D, --detector <type>  Face detector: yunet, haar, none (default: none)\n"
+    << "  -n, --number <num>     Number of frames to capture (default: 50)\n"
+    << "  -w, --width <px>       Capture width (default: 640)\n"
+    << "  -H, --height <px>      Capture height (default: 480)\n"
+    << "  -c, --clean            Delete all user data and exit\n"
+    << "  -f, --force            Clear capture directory before starting\n"
+    << "  -g, --nogui            Disable preview window\n"
+    << "  -d, --debug            Enable verbose debug logging\n"
+    << "  -h, --help             Show this help message\n";
 }
 
 int main(int argc, char** argv) {
@@ -21,6 +24,7 @@ int main(int argc, char** argv) {
     std::string user, det = "none", log;
     bool clean_only = false;
 
+    // Command line argument definitions
     static struct option long_opts[] = {
         {"user", 1, 0, 'u'}, {"detector", 1, 0, 'D'}, {"number", 1, 0, 'n'},
         {"width", 1, 0, 'w'}, {"height", 1, 0, 'H'}, {"clean", 0, 0, 'c'},
@@ -45,20 +49,30 @@ int main(int argc, char** argv) {
         }
     }
 
-    if (user.empty()) { print_usage(argv[0]); return 1; }
-    if (!fa_check_root(argv[0])) return 1;
-
-    if (clean_only) {
-        std::cout << "Pulizia utente: " << user << "\n";
-        return fa_delete_user_data(user, cfg) ? 0 : 1;
-    }
-
-    fa_load_config(cfg, log, FACIALAUTH_DEFAULT_CONFIG);
-    if (!fa_capture_user(user, cfg, det, log)) {
-        std::cerr << "Errore: " << log << "\n";
+    if (user.empty()) {
+        std::cerr << "Error: --user is required.\n";
+        print_usage(argv[0]);
         return 1;
     }
 
-    std::cout << "Completato.\n";
+    // Root check is mandatory for sysadmins tools
+    if (!fa_check_root(argv[0])) return 1;
+
+    // Handle user data cleanup
+    if (clean_only) {
+        std::cout << "Cleaning data for user: " << user << "...\n";
+        return fa_delete_user_data(user, cfg) ? 0 : 1;
+    }
+
+    // Load config and start capture
+    fa_load_config(cfg, log, FACIALAUTH_DEFAULT_CONFIG);
+    std::cout << "Starting capture session for: " << user << "\n";
+
+    if (!fa_capture_user(user, cfg, det, log)) {
+        std::cerr << "Capture error: " << log << "\n";
+        return 1;
+    }
+
+    std::cout << "Capture session completed successfully.\n";
     return 0;
 }
