@@ -3,10 +3,12 @@
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/face.hpp>
 #include <opencv2/dnn.hpp>
+#include <opencv2/videoio.hpp> // Risolve VideoCapture
 #include <fstream>
 #include <iostream>
 #include <filesystem>
 #include <sstream>
+#include <unistd.h>            // Risolve getuid()
 
 namespace fs = std::filesystem;
 
@@ -53,6 +55,7 @@ public:
         cv::Mat gray;
         if (face.channels() == 3) cv::cvtColor(face, gray, cv::COLOR_BGR2GRAY); else gray = face;
         model->predict(gray, label, confidence);
+        // Per i metodi classici, confidenza più bassa = migliore corrispondenza
         return (confidence <= threshold);
     }
     std::string get_name() const override { return type; }
@@ -111,6 +114,7 @@ public:
             if (sim > max_sim) max_sim = sim;
         }
         confidence = max_sim;
+        // Per SFace, confidenza più alta = migliore corrispondenza
         label = (confidence >= threshold) ? 0 : -1;
         return (label == 0);
     }
@@ -118,25 +122,31 @@ public:
 };
 
 // ==========================================================
-// CORE FUNCTIONS & HELPERS
+// FUNZIONI CORE & HELPER
 // ==========================================================
 
 std::unique_ptr<RecognizerPlugin> fa_create_plugin(const FacialAuthConfig& cfg) {
     std::string method = cfg.training_method;
     if (method == "auto") method = fs::exists(cfg.recognize_sface) ? "sface" : "lbph";
+
     if (method == "sface") return std::make_unique<SFacePlugin>(cfg);
     return std::make_unique<ClassicPlugin>(method, cfg);
 }
 
 bool fa_load_config(FacialAuthConfig &cfg, std::string &log, const std::string &path) {
     std::ifstream file(path);
-    if (!file.is_open()) { log = "Config file non trovato: " + path; return false; }
+    if (!file.is_open()) { log = "File di configurazione non trovato: " + path; return false; }
+
     std::string line;
     while (std::getline(file, line)) {
         if (line.empty() || line[0] == '#') continue;
         std::istringstream is_line(line);
         std::string key, value;
         if (std::getline(is_line, key, '=') && std::getline(is_line, value)) {
+            // Trim whitespace
+            key.erase(key.find_last_not_of(" \t\r\n") + 1);
+            value.erase(0, value.find_first_not_of(" \t\r\n"));
+
             if (key == "basedir") cfg.basedir = value;
             else if (key == "device") cfg.device = value;
             else if (key == "width") cfg.width = std::stoi(value);
@@ -158,28 +168,37 @@ bool fa_train_user(const std::string &user, const FacialAuthConfig &cfg, std::st
     std::vector<cv::Mat> faces;
     std::vector<int> labels;
     std::string path = cfg.basedir + "/" + user + "/captures";
-    if (!fs::exists(path)) { log = "Path non trovato: " + path; return false; }
+
+    if (!fs::exists(path)) { log = "Directory catture non trovata: " + path; return false; }
+
     for (const auto& entry : fs::directory_iterator(path)) {
         cv::Mat img = cv::imread(entry.path().string());
-        if (!img.empty()) { faces.push_back(img); labels.push_back(0); }
+        if (!img.empty()) {
+            faces.push_back(img);
+            labels.push_back(0);
+        }
     }
+
+    if (faces.empty()) { log = "Nessuna immagine valida per il training."; return false; }
     return plugin->train(faces, labels, fa_user_model_path(cfg, user));
 }
 
 bool fa_test_user(const std::string &user, const FacialAuthConfig &cfg, const std::string &modelPath,
                   double &best_conf, int &best_label, std::string &log, double threshold_override) {
     auto plugin = fa_create_plugin(cfg);
-    if (!plugin->load(modelPath)) { log = "Modello non caricabile"; return false; }
+    if (!plugin->load(modelPath)) { log = "Impossibile caricare il modello: " + modelPath; return false; }
 
     cv::VideoCapture cap;
-    if (cfg.device.find_first_not_of("0123456789") == std::string::npos) cap.open(std::stoi(cfg.device));
-    else cap.open(cfg.device);
+    if (cfg.device.find_first_not_of("0123456789") == std::string::npos)
+        cap.open(std::stoi(cfg.device));
+    else
+        cap.open(cfg.device);
 
-    if (!cap.isOpened()) { log = "Camera non accessibile"; return false; }
+    if (!cap.isOpened()) { log = "Dispositivo video non accessibile"; return false; }
 
     cv::Mat frame;
-    cap >> frame; // Cattura un singolo frame per il test
-    if (frame.empty()) return false;
+    cap >> frame;
+    if (frame.empty()) { log = "Frame catturato vuoto"; return false; }
 
     return plugin->predict(frame, best_label, best_conf);
                   }
@@ -194,7 +213,7 @@ bool fa_test_user(const std::string &user, const FacialAuthConfig &cfg, const st
 
                   bool fa_check_root(const std::string &tool_name) {
                       if (getuid() != 0) {
-                          std::cerr << tool_name << " deve essere eseguito come root.\n";
+                          std::cerr << "[ERRORE] " << tool_name << " deve essere eseguito con privilegi di root.\n";
                           return false;
                       }
                       return true;
