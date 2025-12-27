@@ -1,47 +1,35 @@
-#ifndef LIB_FACIALAUTH_H
-#define LIB_FACIALAUTH_H
+#ifndef LIBFACIALAUTH_H
+#define LIBFACIALAUTH_H
 
 #include <string>
-#include <string_view>
 #include <vector>
-#include <opencv2/core.hpp>
+#include <opencv2/opencv.hpp>
+#include <opencv2/face.hpp>
 
-/* * Progetto: pam_facial_auth
- * Licenza: GPL-3
- */
-
-#define FACIALAUTH_DEFAULT_CONFIG "/etc/security/pam_facial.conf"
-
+// Struttura di configurazione allineata con i file sorgente
 struct FacialAuthConfig {
-    std::string basedir = "/var/lib/pam_facial_auth";      // Dataset immagini
-    std::string modeldir = "/etc/security/pam_facial_auth"; // Modelli addestrati XML
-    std::string device = "0";
-    std::string training_method = "sface";
-    std::string detect_model_path;
-    std::string rec_model_path;
-
-    int frames = 30;
-    int width = 1280;
-    int height = 720;
-    bool nogui = true;
+    bool verbose = false;
     bool debug = false;
-    bool use_accel = false;
-
-    double sface_threshold = 0.36;
-    double lbph_threshold = 60.0;
+    bool force = false;
+    int sleep_ms = 100;           // Ritardo tra i frame durante la cattura
+    std::string image_format = "jpg";
+    std::string model_type = "lbph";
+    std::string cascade_path = "/usr/share/opencv4/haarcascades/haarcascade_frontalface_default.xml";
+    double threshold = 80.0;
 };
 
-class RecognizerPlugin {
-public:
-    virtual ~RecognizerPlugin() = default;
-    virtual bool load(const std::string& path) = 0;
-    virtual bool train(const std::vector<cv::Mat>& faces, const std::vector<int>& labels, const std::string& save_path) = 0;
-    virtual bool predict(const cv::Mat& face, int& label, double& confidence) = 0;
-};
+// --- API della Libreria ---
 
-bool fa_load_config(FacialAuthConfig &cfg, std::string &log, const std::string &path);
-bool fa_file_exists(std::string_view path);
-std::string fa_user_model_path(const FacialAuthConfig &cfg, std::string_view user);
-bool fa_test_user(std::string_view user, const FacialAuthConfig &cfg, const std::string &model_path, double &conf, int &label, std::string &log);
+// Funzioni di sistema
+bool fa_check_root(const std::string& tool_name);
+bool fa_file_exists(const std::string& path);
 
-#endif
+// Funzioni di cattura e training
+bool fa_capture_dataset(const FacialAuthConfig& cfg, std::string& log, const std::string& user, int count);
+bool fa_capture_user(const std::string& user, const FacialAuthConfig& cfg, const std::string& detector, std::string& log);
+bool fa_train_user(const std::string& user, const FacialAuthConfig& cfg, std::string& log);
+
+// Funzioni di verifica
+bool fa_test_user(const std::string& user, const FacialAuthConfig& cfg, std::string& log);
+
+#endif // LIBFACIALAUTH_H
