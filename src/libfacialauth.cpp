@@ -39,7 +39,6 @@ bool fa_file_exists(const std::string &path) { return fs::exists(path); }
 
 bool fa_load_config(FacialAuthConfig &cfg, std::string &log, const std::string &path) {
     if (!fs::exists(path)) { log = "Config not found, using defaults."; return false; }
-    // Implement parsing here if needed
     return true;
 }
 
@@ -59,7 +58,9 @@ std::string fa_user_model_path(const FacialAuthConfig &cfg, const std::string &u
 }
 
 bool fa_capture_user(const std::string &user, const FacialAuthConfig &cfg, const std::string &det_type, std::string &log) {
-    std::string user_dir = cfg.basedir + "/" + user + "/captures";
+    std::string user_dir_str = cfg.basedir + "/" + user + "/captures";
+    fs::path user_dir(user_dir_str);
+
     if (cfg.force) fs::remove_all(user_dir);
     fs::create_directories(user_dir);
 
@@ -72,7 +73,6 @@ bool fa_capture_user(const std::string &user, const FacialAuthConfig &cfg, const
             return false;
         }
         try {
-            // Force strict check for ONNX file readability
             yunet = cv::FaceDetectorYN::create(cfg.detect_model_path, "", cv::Size(cfg.width, cfg.height));
         } catch (const cv::Exception& e) {
             log = "OpenCV DNN Error: " + std::string(e.what());
@@ -110,15 +110,20 @@ bool fa_capture_user(const std::string &user, const FacialAuthConfig &cfg, const
         }
 
         if (face_found) {
-            std::string filename = user_dir + "/img_" + std::to_string(count++) + "." + cfg.image_format;
-            cv::imwrite(filename, frame);
-            if (cfg.debug) std::cout << "[DEBUG] Frame " << count << "/" << cfg.frames << " captured.\n";
+            std::string filename = "img_" + std::to_string(count++) + "." + cfg.image_format;
+            fs::path full_path = user_dir / filename;
+            cv::imwrite(full_path.string(), frame);
+
+            if (cfg.debug) {
+                std::cout << "[DEBUG] [" << count << "/" << cfg.frames << "] Saved: "
+                << fs::absolute(full_path).string() << std::endl;
+            }
         } else if (cfg.debug) {
-            std::cout << "[DEBUG] No face detected, skipping.\n";
+            std::cout << "[DEBUG] Face detection active (" << det_type << "): No face found in current frame, skipping..." << std::endl;
         }
 
         if (!cfg.nogui) {
-            cv::imshow("Press 'q' to stop capture", frame);
+            cv::imshow("Capturing - Press 'q' to stop", frame);
             if (cv::waitKey(1) == 'q') break;
         }
     }
@@ -126,6 +131,7 @@ bool fa_capture_user(const std::string &user, const FacialAuthConfig &cfg, const
     return (count >= cfg.frames);
 }
 
+// ... Rest of the functions (fa_train_user, fa_test_user) stay the same ...
 bool fa_train_user(const std::string &user, const FacialAuthConfig &cfg, std::string &log) {
     std::string user_dir = cfg.basedir + "/" + user + "/captures";
     std::vector<cv::Mat> faces; std::vector<int> labels;
