@@ -6,22 +6,26 @@
 #include <vector>
 #include <opencv2/core.hpp>
 
+/* * Progetto: pam_facial_auth
+ * Licenza: GPL-3
+ */
+
 #define FACIALAUTH_DEFAULT_CONFIG "/etc/security/pam_facial.conf"
 
 struct FacialAuthConfig {
-    std::string basedir;
-    std::string device;
-    std::string training_method;
-    std::string image_format;
+    std::string basedir = "/var/lib/pam_facial_auth";      // Dataset immagini
+    std::string modeldir = "/etc/security/pam_facial_auth"; // Modelli addestrati XML
+    std::string device = "0";
+    std::string training_method = "sface";
     std::string detect_model_path;
     std::string rec_model_path;
 
     int frames = 30;
     int width = 1280;
     int height = 720;
-    bool force = false;
     bool nogui = true;
     bool debug = false;
+    bool use_accel = false;
 
     double sface_threshold = 0.36;
     double lbph_threshold = 60.0;
@@ -36,12 +40,8 @@ public:
 };
 
 bool fa_load_config(FacialAuthConfig &cfg, std::string &log, const std::string &path);
-bool fa_check_root(std::string_view tool_name);
 bool fa_file_exists(std::string_view path);
-bool fa_delete_user_data(std::string_view user, const FacialAuthConfig &cfg);
 std::string fa_user_model_path(const FacialAuthConfig &cfg, std::string_view user);
-bool fa_capture_user(std::string_view user, const FacialAuthConfig &cfg, std::string_view det_type, std::string &log);
-bool fa_train_user(std::string_view user, const FacialAuthConfig &cfg, std::string &log);
 bool fa_test_user(std::string_view user, const FacialAuthConfig &cfg, const std::string &model_path, double &conf, int &label, std::string &log);
 
 #endif
