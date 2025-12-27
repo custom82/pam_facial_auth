@@ -7,14 +7,15 @@
 #include <iostream>
 #include <fstream>
 #include <filesystem>
-#include <algorithm>
+#include <thread>
+#include <chrono>
 #include <unistd.h>
 
 namespace fs = std::filesystem;
 
 bool fa_check_root(const std::string& tool_name) {
     if (getuid() != 0) {
-        std::cerr << "ERRORE [" << tool_name << "]: Devi eseguire questo comando come root (sudo)." << std::endl;
+        std::cerr << "ERRORE [" << tool_name << "]: Devi eseguire come root." << std::endl;
         return false;
     }
     return true;
@@ -27,10 +28,6 @@ static std::string trim(const std::string& s) {
     if (start == s.end()) return "";
     do { end--; } while (std::distance(start, end) > 0 && std::isspace(*end));
     return std::string(start, end + 1);
-}
-
-bool fa_file_exists(const std::string& path) {
-    return fs::exists(path);
 }
 
 bool fa_load_config(FacialAuthConfig& cfg, std::string& log, const std::string& path) {
@@ -68,7 +65,7 @@ bool fa_clean_captures(const std::string& user, const FacialAuthConfig& cfg, std
             fs::remove_all(user_dir);
             log = "Pulizia completata per l'utente: " + user;
         } else {
-            log = "Nessun dato da pulire per l'utente: " + user;
+            log = "Nessun dato trovato per l'utente: " + user;
         }
         return true;
     } catch (const fs::filesystem_error& e) {
@@ -77,16 +74,27 @@ bool fa_clean_captures(const std::string& user, const FacialAuthConfig& cfg, std
     }
 }
 
-bool fa_capture_user(const std::string& user, const FacialAuthConfig& cfg, const std::string& detector, std::string& log) {
+bool fa_capture_user(const std::string& user, const FacialAuthConfig& cfg, const std::string& device_path, std::string& log) {
     #ifdef HAVE_OPENCV
-    cv::VideoCapture cap(0);
-    cv::CascadeClassifier face_cascade(cfg.cascade_path);
-    if (!cap.isOpened() || face_cascade.empty()) {
-        log = "Errore: Webcam o file cascade non accessibili.";
+    int device_id = 0;
+    if (device_path.find("/dev/video") != std::string::npos) {
+        try { device_id = std::stoi(device_path.substr(10)); } catch (...) { device_id = 0; }
+    }
+
+    cv::VideoCapture cap(device_id);
+    cv::CascadeClassifier face_cascade;
+    if (!face_cascade.load(cfg.cascade_path)) {
+        log = "Errore caricamento detector: " + cfg.cascade_path;
         return false;
     }
+    if (!cap.isOpened()) {
+        log = "Impossibile aprire device: " + device_path;
+        return false;
+    }
+
     std::string user_dir = cfg.basedir + "/captures/" + user;
     fs::create_directories(user_dir);
+
     int count = 0;
     while (count < cfg.frames) {
         cv::Mat frame, gray;
@@ -95,71 +103,62 @@ bool fa_capture_user(const std::string& user, const FacialAuthConfig& cfg, const
         cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
         std::vector<cv::Rect> faces;
         face_cascade.detectMultiScale(gray, faces, 1.1, 4);
+
         for (const auto& area : faces) {
             cv::Mat face_roi = gray(area);
             cv::resize(face_roi, face_roi, cv::Size(cfg.width, cfg.height));
             cv::imwrite(user_dir + "/" + std::to_string(count) + ".jpg", face_roi);
             count++;
-            std::cout << "\rCattura frame: " << count << "/" << cfg.frames << std::flush;
+
+            if (cfg.verbose) std::cout << "\r[*] Frame: " << count << "/" << cfg.frames << std::flush;
+            if (!cfg.nogui) {
+                cv::rectangle(frame, area, cv::Scalar(0, 255, 0), 2);
+                cv::imshow("Facial Capture", frame);
+                if (cv::waitKey(1) == 27) return false;
+            }
+            if (cfg.capture_delay > 0)
+                std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<int>(cfg.capture_delay * 1000)));
             if (count >= cfg.frames) break;
         }
     }
-    std::cout << std::endl;
+    if (!cfg.nogui) cv::destroyAllWindows();
     return true;
     #else
-    log = "Errore: OpenCV non abilitato."; return false;
+    log = "OpenCV non disponibile."; return false;
     #endif
 }
 
 bool fa_train_user(const std::string& user, const FacialAuthConfig& cfg, std::string& log) {
     #ifdef HAVE_OPENCV
     std::string user_dir = cfg.basedir + "/captures/" + user;
-    if (!fs::exists(user_dir)) {
-        log = "Nessuna cattura trovata. Esegui prima la cattura.";
-        return false;
-    }
-    std::vector<cv::Mat> images;
-    std::vector<int> labels;
+    if (!fs::exists(user_dir)) { log = "Dati mancanti."; return false; }
+    std::vector<cv::Mat> images; std::vector<int> labels;
     for (const auto& entry : fs::directory_iterator(user_dir)) {
         cv::Mat img = cv::imread(entry.path().string(), cv::IMREAD_GRAYSCALE);
-        if (!img.empty()) {
-            images.push_back(img);
-            labels.push_back(0);
-        }
-    }
-    if (images.empty()) {
-        log = "Immagini non valide."; return false;
+        if (!img.empty()) { images.push_back(img); labels.push_back(0); }
     }
     auto model = cv::face::LBPHFaceRecognizer::create();
     model->train(images, labels);
     model->write(fa_user_model_path(cfg, user));
-    log = "Training completato per " + user;
+    log = "Modello creato per " + user;
     return true;
     #else
-    log = "Errore: OpenCV non abilitato."; return false;
+    return false;
     #endif
 }
 
 bool fa_test_user(const std::string& user, const FacialAuthConfig& cfg, const std::string& model_path, double& confidence, int& label, std::string& log) {
     #ifdef HAVE_OPENCV
-    if (!fs::exists(model_path)) {
-        log = "Modello mancante: " + model_path; return false;
-    }
+    if (!fs::exists(model_path)) { log = "Modello non trovato."; return false; }
     auto model = cv::face::LBPHFaceRecognizer::create();
     model->read(model_path);
     cv::VideoCapture cap(0);
-    if (!cap.isOpened()) {
-        log = "Webcam non trovata."; return false;
-    }
-    cv::Mat frame, gray;
-    cap >> frame;
-    if (frame.empty()) {
-        log = "Impossibile leggere dalla webcam."; return false;
-    }
+    cv::Mat frame, gray; cap >> frame;
+    if (frame.empty()) return false;
     cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
     model->predict(gray, label, confidence);
     return true;
     #else
-    log = "Errore: OpenCV non abilitato."; return false;
+    return false;
     #endif
 }

@@ -5,7 +5,7 @@
 
 #include <security/pam_modules.h>
 #include <security/pam_ext.h>
-#include <syslog.h>      // <--- Aggiunto per LOG_ERR
+#include <syslog.h>
 #include "libfacialauth.h"
 
 PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, const char **argv) {
@@ -25,11 +25,7 @@ PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, cons
         return PAM_AUTH_ERR;
     }
 
-    if (confidence <= cfg.threshold) {
-        return PAM_SUCCESS;
-    }
-
-    return PAM_AUTH_ERR;
+    return (confidence <= cfg.threshold) ? PAM_SUCCESS : PAM_AUTH_ERR;
 }
 
 PAM_EXTERN int pam_sm_setcred(pam_handle_t *pamh, int flags, int argc, const char **argv) {
