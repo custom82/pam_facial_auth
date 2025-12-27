@@ -12,23 +12,22 @@ int main(int argc, char** argv) {
     if (!fa_check_root("facial_test")) return 1;
 
     std::string user;
-    std::vector<std::string> args(argv + 1, argv + argc);
+    std::string config_path = "/etc/security/pam_facial_auth.conf";
+    FacialAuthConfig cfg;
+    std::string log;
 
+    std::vector<std::string> args(argv + 1, argv + argc);
     for (size_t i = 0; i < args.size(); ++i) {
-        if (args[i] == "-u" && i + 1 < args.size()) {
-            user = args[++i];
-        }
+        if ((args[i] == "-u" || args[i] == "--user") && i + 1 < args.size()) user = args[++i];
+        if ((args[i] == "-c" || args[i] == "--config") && i + 1 < args.size()) config_path = args[++i];
     }
 
     if (user.empty()) {
-        std::cout << "Uso: facial_test -u <utente>" << std::endl;
+        std::cout << "Uso: facial_test -u <utente> [-c <config>]" << std::endl;
         return 1;
     }
 
-    FacialAuthConfig cfg;
-    std::string log;
-    fa_load_config(cfg, log);
-
+    fa_load_config(cfg, log, config_path);
     double confidence = 0.0;
     int label = -1;
     std::string model = fa_user_model_path(cfg, user);

@@ -46,6 +46,7 @@ bool fa_load_config(FacialAuthConfig& cfg, std::string& log, const std::string& 
         std::string val = trim(line.substr(sep + 1));
         if (key == "basedir") cfg.basedir = val;
         else if (key == "cascade_path") cfg.cascade_path = val;
+        else if (key == "method") cfg.method = val;
         else if (key == "threshold") cfg.threshold = std::stod(val);
         else if (key == "frames") cfg.frames = std::stoi(val);
         else if (key == "width") cfg.width = std::stoi(val);
@@ -63,9 +64,9 @@ bool fa_clean_captures(const std::string& user, const FacialAuthConfig& cfg, std
     try {
         if (fs::exists(user_dir)) {
             fs::remove_all(user_dir);
-            log = "Pulizia completata per l'utente: " + user;
+            log = "Pulizia completata per: " + user;
         } else {
-            log = "Nessun dato trovato per l'utente: " + user;
+            log = "Nessun dato trovato per: " + user;
         }
         return true;
     } catch (const fs::filesystem_error& e) {
@@ -111,54 +112,26 @@ bool fa_capture_user(const std::string& user, const FacialAuthConfig& cfg, const
             count++;
 
             if (cfg.verbose) std::cout << "\r[*] Frame: " << count << "/" << cfg.frames << std::flush;
+
             if (!cfg.nogui) {
                 cv::rectangle(frame, area, cv::Scalar(0, 255, 0), 2);
                 cv::imshow("Facial Capture", frame);
                 if (cv::waitKey(1) == 27) return false;
             }
+
             if (cfg.capture_delay > 0)
                 std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<int>(cfg.capture_delay * 1000)));
+
             if (count >= cfg.frames) break;
         }
     }
     if (!cfg.nogui) cv::destroyAllWindows();
+    std::cout << std::endl;
     return true;
     #else
     log = "OpenCV non disponibile."; return false;
     #endif
 }
 
-bool fa_train_user(const std::string& user, const FacialAuthConfig& cfg, std::string& log) {
-    #ifdef HAVE_OPENCV
-    std::string user_dir = cfg.basedir + "/captures/" + user;
-    if (!fs::exists(user_dir)) { log = "Dati mancanti."; return false; }
-    std::vector<cv::Mat> images; std::vector<int> labels;
-    for (const auto& entry : fs::directory_iterator(user_dir)) {
-        cv::Mat img = cv::imread(entry.path().string(), cv::IMREAD_GRAYSCALE);
-        if (!img.empty()) { images.push_back(img); labels.push_back(0); }
-    }
-    auto model = cv::face::LBPHFaceRecognizer::create();
-    model->train(images, labels);
-    model->write(fa_user_model_path(cfg, user));
-    log = "Modello creato per " + user;
-    return true;
-    #else
-    return false;
-    #endif
-}
-
-bool fa_test_user(const std::string& user, const FacialAuthConfig& cfg, const std::string& model_path, double& confidence, int& label, std::string& log) {
-    #ifdef HAVE_OPENCV
-    if (!fs::exists(model_path)) { log = "Modello non trovato."; return false; }
-    auto model = cv::face::LBPHFaceRecognizer::create();
-    model->read(model_path);
-    cv::VideoCapture cap(0);
-    cv::Mat frame, gray; cap >> frame;
-    if (frame.empty()) return false;
-    cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
-    model->predict(gray, label, confidence);
-    return true;
-    #else
-    return false;
-    #endif
-}
+// Nota: fa_train_user e fa_test_user rimangono simili a quelli caricati,
+// ma useranno la logica dei plugin una volta integrati nel main factory.
