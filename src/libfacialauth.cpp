@@ -13,7 +13,7 @@
 
 namespace fs = std::filesystem;
 
-// Utility C++20
+// Utility per pulizia stringhe
 std::string trim(std::string_view s) {
     auto first = s.find_first_not_of(" \t\r\n");
     if (std::string::npos == first) return "";
@@ -21,11 +21,13 @@ std::string trim(std::string_view s) {
     return std::string(s.substr(first, (last - first + 1)));
 }
 
-// FIX: Implementazione della funzione mancante
+// FIX: Implementazione controllo esistenza file
 bool fa_file_exists(std::string_view path) {
     if (path.empty()) return false;
     return fs::exists(path);
 }
+
+// --- PLUGIN SYSTEM ---
 
 class SFacePlugin : public RecognizerPlugin {
     cv::Ptr<cv::FaceRecognizerSF> face_recon;
@@ -51,6 +53,7 @@ public:
     bool load(const std::string& path) override {
         if (!fa_file_exists(path)) return false;
         cv::FileStorage fs_in(path, cv::FileStorage::READ);
+        if (!fs_in.isOpened()) return false;
         std::string algo; fs_in["algorithm"] >> algo;
         if (algo != "sface") return false;
         fs_in["embeddings"] >> registered_embeddings;
@@ -64,7 +67,8 @@ public:
             double s = face_recon->match(query, registered_embeddings.row(i), cv::FaceRecognizerSF::FR_COSINE);
             if (s > max_s) max_s = s;
         }
-        confidence = max_s; label = 0; return true;
+        confidence = max_s; label = 0;
+        return true;
     }
 };
 
@@ -85,7 +89,8 @@ public:
         model->read(p); return true;
     }
     bool predict(const cv::Mat& f, int& l, double& c) override {
-        cv::Mat gray; if (f.channels() == 3) cv::cvtColor(f, gray, cv::COLOR_BGR2GRAY); else gray = f;
+        cv::Mat gray;
+        if (f.channels() == 3) cv::cvtColor(f, gray, cv::COLOR_BGR2GRAY); else gray = f;
         model->predict(gray, l, c); return true;
     }
 };
@@ -95,9 +100,11 @@ std::unique_ptr<RecognizerPlugin> get_plugin(const FacialAuthConfig& cfg) {
     return std::make_unique<ClassicPlugin>(cfg.training_method);
 }
 
+// --- FUNZIONI CORE ---
+
 bool fa_load_config(FacialAuthConfig &cfg, std::string &log, const std::string &path) {
     std::ifstream file(path);
-    if (!file.is_open()) { log = "Config not found"; return false; }
+    if (!file.is_open()) { log = "Config not found: " + path; return false; }
     std::string line;
     while (std::getline(file, line)) {
         std::string_view sv = line; auto trimmed = trim(sv);
@@ -126,6 +133,12 @@ bool fa_load_config(FacialAuthConfig &cfg, std::string &log, const std::string &
 bool fa_check_root(std::string_view tool) {
     if (getuid() != 0) { std::cerr << "Error: " << tool << " needs root.\n"; return false; }
     return true;
+}
+
+bool fa_delete_user_data(std::string_view user, const FacialAuthConfig &cfg) {
+    fs::path p = fs::path(cfg.basedir) / user;
+    if (fs::exists(p)) { fs::remove_all(p); return true; }
+    return false;
 }
 
 std::string fa_user_model_path(const FacialAuthConfig &cfg, std::string_view u) {
@@ -166,21 +179,49 @@ bool fa_capture_user(std::string_view u, const FacialAuthConfig &cfg, std::strin
         if (ok) {
             std::string p = (dir / ("img_" + std::to_string(start_idx + count) + "." + cfg.image_format)).string();
             cv::imwrite(p, frame);
-            std::cout << "Saved: " << p << std::endl;
+            if (cfg.debug) std::cout << "Saved: " << p << std::endl;
             count++;
         }
-        if (!cfg.nogui) { cv::imshow("Capture", frame); if (cv::waitKey(1) == 'q') break; }
+        if (!cfg.nogui) {
+            cv::imshow("Capture Session", frame);
+            if (cv::waitKey(1) == 'q') break;
+        }
     }
+    if (!cfg.nogui) cv::destroyAllWindows();
     return count >= cfg.frames;
 }
 
 bool fa_train_user(std::string_view u, const FacialAuthConfig &cfg, std::string &log) {
     fs::path dir = fs::path(cfg.basedir) / u / "captures";
-    if (!fs::exists(dir)) return false;
+    if (!fs::exists(dir)) { log = "No captures found"; return false; }
     std::vector<cv::Mat> faces; std::vector<int> labels;
     for (const auto& e : fs::directory_iterator(dir)) {
         cv::Mat img = cv::imread(e.path().string());
         if (!img.empty()) { faces.push_back(img); labels.push_back(0); }
     }
     return get_plugin(cfg)->train(faces, labels, fa_user_model_path(cfg, u));
+}
+
+// FIX: Implementazione fa_test_user (per risolvere errore linker)
+bool fa_test_user(std::string_view user, const FacialAuthConfig &cfg, const std::string &model_path, double &conf, int &label, std::string &log) {
+    auto plugin = get_plugin(cfg);
+    if (!plugin->load(model_path)) { log = "Model load failed: " + model_path; return false; }
+
+    cv::VideoCapture cap;
+    try { cap.open(std::stoi(cfg.device)); } catch(...) { cap.open(cfg.device.c_str()); }
+    if (!cap.isOpened()) { log = "Camera error"; return false; }
+
+    cv::Mat frame;
+    cap >> frame; // Cattura un singolo frame per il test
+    if (frame.empty()) { log = "Empty frame captured"; return false; }
+
+    bool res = plugin->predict(frame, label, conf);
+
+    if (!cfg.nogui) {
+        cv::putText(frame, "Conf: " + std::to_string(conf), cv::Point(30,30), 1, 1.5, cv::Scalar(0,255,0), 2);
+        cv::imshow("Verification Test", frame);
+        cv::waitKey(2000); // Mostra per 2 secondi
+        cv::destroyAllWindows();
+    }
+    return res;
 }
