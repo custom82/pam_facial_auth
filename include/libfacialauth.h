@@ -16,13 +16,22 @@ struct FacialAuthConfig {
     int frames = 30;
     int sleep_ms = 100;
     bool debug = false;
+    bool ignore_failure = false; // Necessario per src/pam_facial_auth.cpp
     std::string training_method = "auto";
     std::string recognize_sface = "/usr/share/opencv4/dnn/models/face_recognition_sface_2021dec.onnx";
     double sface_threshold = 0.36;
     double lbph_threshold = 80.0;
+
+    // Parametri per altri algoritmi (se usati)
+    int eigen_components = 80;
+    double eigen_threshold = 5000.0;
+    int fisher_components = 80;
+    double fisher_threshold = 3500.0;
+
     std::string image_format = "jpg";
 };
 
+// Interfaccia per i Plugin di riconoscimento
 class RecognizerPlugin {
 public:
     virtual ~RecognizerPlugin() = default;
@@ -32,10 +41,11 @@ public:
     virtual std::string get_name() const = 0;
 };
 
-// API
+// API della libreria
 bool fa_load_config(FacialAuthConfig &cfg, std::string &log, const std::string &path);
 bool fa_train_user(const std::string &user, const FacialAuthConfig &cfg, std::string &log);
-bool fa_test_user(const std::string &user, const FacialAuthConfig &cfg, const std::string &modelPath, double &best_conf, int &best_label, std::string &log, double threshold_override = -1.0);
+bool fa_test_user(const std::string &user, const FacialAuthConfig &cfg, const std::string &modelPath,
+                  double &best_conf, int &best_label, std::string &log, double threshold_override = -1.0);
 std::string fa_user_model_path(const FacialAuthConfig &cfg, const std::string &user);
 bool fa_file_exists(const std::string &path);
 bool fa_check_root(const std::string &tool_name);
