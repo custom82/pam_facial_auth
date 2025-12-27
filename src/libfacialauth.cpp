@@ -9,9 +9,13 @@
 #include <iostream>
 #include <unistd.h>
 #include <cstdlib>
+#include <regex>
 
 namespace fs = std::filesystem;
 
+/**
+ * Implementation of Classic OpenCV Face Recognizers
+ */
 class ClassicPlugin : public RecognizerPlugin {
     cv::Ptr<cv::face::FaceRecognizer> model;
 public:
@@ -58,14 +62,37 @@ std::string fa_user_model_path(const FacialAuthConfig &cfg, const std::string &u
     return cfg.basedir + "/" + user + "/model.xml";
 }
 
+/**
+ * Capture user faces with auto-incrementing filenames and face detection filtering
+ */
 bool fa_capture_user(const std::string &user, const FacialAuthConfig &cfg, const std::string &det_type, std::string &log) {
     std::string user_dir_str = cfg.basedir + "/" + user + "/captures";
     fs::path user_dir(user_dir_str);
 
-    if (cfg.force) fs::remove_all(user_dir);
+    // If --force is set, we wipe everything and start from 0
+    if (cfg.force) {
+        fs::remove_all(user_dir);
+    }
     fs::create_directories(user_dir);
 
-    // Check if a display is available to avoid Wayland/X11 crashes
+    // AUTO-INCREMENT LOGIC: Find the highest 'img_X.ext' to resume counting
+    int start_index = 0;
+    if (!cfg.force && fs::exists(user_dir)) {
+        // Regex to match "img_" followed by digits and the selected extension
+        std::regex file_regex("img_([0-9]+)\\." + cfg.image_format);
+        for (const auto& entry : fs::directory_iterator(user_dir)) {
+            std::string filename = entry.path().filename().string();
+            std::smatch match;
+            if (std::regex_match(filename, match, file_regex)) {
+                try {
+                    int index = std::stoi(match[1].str());
+                    if (index >= start_index) start_index = index + 1;
+                } catch (...) { continue; }
+            }
+        }
+    }
+
+    // Display check for Wayland/X11 safety
     bool display_available = (std::getenv("DISPLAY") != NULL || std::getenv("WAYLAND_DISPLAY") != NULL);
     bool should_show_gui = (!cfg.nogui && display_available);
 
@@ -115,25 +142,23 @@ bool fa_capture_user(const std::string &user, const FacialAuthConfig &cfg, const
         }
 
         if (face_found) {
-            std::string filename = "img_" + std::to_string(count++) + "." + cfg.image_format;
+            // Filename based on existing files + session progress
+            std::string filename = "img_" + std::to_string(start_index + count) + "." + cfg.image_format;
             fs::path full_path = user_dir / filename;
             cv::imwrite(full_path.string(), frame);
 
-            if (cfg.debug) {
-                std::cout << "[DEBUG] [" << count << "/" << cfg.frames << "] Saved: "
-                << fs::absolute(full_path).string() << std::endl;
-            }
+            // Output always active as requested
+            std::cout << "Saved: " << fs::absolute(full_path).string() << std::endl;
+            count++;
+        } else if (cfg.debug) {
+            std::cout << "[DEBUG] No face detected in frame, skipping." << std::endl;
         }
 
         if (should_show_gui) {
             try {
-                cv::imshow("Capturing - Press 'q' to stop", frame);
+                cv::imshow("Facial Auth Capture", frame);
                 if (cv::waitKey(1) == 'q') break;
-            } catch (...) {
-                // If GUI fails unexpectedly, continue in headless mode
-                display_available = false;
-                should_show_gui = false;
-            }
+            } catch (...) { should_show_gui = false; }
         }
     }
     if (should_show_gui) cv::destroyAllWindows();

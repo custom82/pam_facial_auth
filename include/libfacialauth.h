@@ -14,8 +14,7 @@ struct FacialAuthConfig {
     std::string basedir = "/var/lib/pam_facial_auth";
     std::string device = "0";
     std::string training_method = "lbph";
-    std::string image_format = "jpg";
-    // Default path adjusted for your Gentoo system
+    std::string image_format = "jpg"; // Default image format
     std::string detect_model_path = "/usr/share/opencv4/dnn/models/face_detection_yunet_2023mar.onnx";
     std::string haar_path = "/usr/share/opencv4/haarcascades/haarcascade_frontalface_default.xml";
 
