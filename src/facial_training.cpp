@@ -15,23 +15,19 @@ int main(int argc, char** argv) {
         switch (opt) {
             case 'u': user = optarg; break;
             case 'm': cfg.training_method = optarg; break;
-            case 'h': std::cout << "Usage: facial_training -u <user> [-m lbph|sface]\n"; return 0;
+            case 'h': std::cout << "Usage: facial_training -u <user> [-m method]\n"; return 0;
         }
     }
 
-    if (user.empty() || !fa_check_root(argv[0])) return 1;
+    if (user.empty() || !fa_check_root("facial_training")) return 1;
+    fa_load_config(cfg, log, FACIALAUTH_DEFAULT_CONFIG);
 
-    // Load config from file to get basedir and model paths
-    if (!fa_load_config(cfg, log, FACIALAUTH_DEFAULT_CONFIG)) {
-        std::cerr << "[WARN] " << log << std::endl;
-    }
-
-    std::cout << "Training for user: " << user << " using method: " << cfg.training_method << std::endl;
+    std::cout << "Training for: " << user << " [Method: " << cfg.training_method << "]\n";
 
     if (fa_train_user(user, cfg, log)) {
-        std::cout << "[SUCCESS] Model created: " << fa_user_model_path(cfg, user) << std::endl;
+        std::cout << "[SUCCESS] Model: " << fa_user_model_path(cfg, user) << "\n";
     } else {
-        std::cerr << "[ERROR] Training failed." << std::endl;
+        std::cerr << "[ERROR] Training failed\n";
         return 1;
     }
     return 0;

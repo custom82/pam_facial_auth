@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.10)
 project(pam_facial_auth)
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 
 find_package(OpenCV REQUIRED COMPONENTS core highgui imgproc objdetect videoio face dnn)
 find_package(PkgConfig REQUIRED)

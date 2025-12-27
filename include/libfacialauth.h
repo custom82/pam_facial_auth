@@ -2,6 +2,7 @@
 #define LIB_FACIALAUTH_H
 
 #include <string>
+#include <string_view>
 #include <vector>
 #include <opencv2/core.hpp>
 
@@ -12,8 +13,6 @@ struct FacialAuthConfig {
     std::string device;
     std::string training_method;
     std::string image_format;
-
-    // Paths populated ONLY via config file
     std::string detect_model_path;
     std::string rec_model_path;
 
@@ -36,12 +35,14 @@ public:
     virtual bool predict(const cv::Mat& face, int& label, double& confidence) = 0;
 };
 
+// C++20 Interface
 bool fa_load_config(FacialAuthConfig &cfg, std::string &log, const std::string &path);
-bool fa_check_root(const std::string &tool_name);
-bool fa_delete_user_data(const std::string &user, const FacialAuthConfig &cfg);
-std::string fa_user_model_path(const FacialAuthConfig &cfg, const std::string &user);
-bool fa_capture_user(const std::string &user, const FacialAuthConfig &cfg, const std::string &det_type, std::string &log);
-bool fa_train_user(const std::string &user, const FacialAuthConfig &cfg, std::string &log);
-bool fa_test_user(const std::string &user, const FacialAuthConfig &cfg, const std::string &model_path, double &conf, int &label, std::string &log);
+bool fa_check_root(std::string_view tool_name);
+bool fa_file_exists(std::string_view path);
+bool fa_delete_user_data(std::string_view user, const FacialAuthConfig &cfg);
+std::string fa_user_model_path(const FacialAuthConfig &cfg, std::string_view user);
+bool fa_capture_user(std::string_view user, const FacialAuthConfig &cfg, std::string_view det_type, std::string &log);
+bool fa_train_user(std::string_view user, const FacialAuthConfig &cfg, std::string &log);
+bool fa_test_user(std::string_view user, const FacialAuthConfig &cfg, const std::string &model_path, double &conf, int &label, std::string &log);
 
 #endif
