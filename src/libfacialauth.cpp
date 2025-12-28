@@ -114,13 +114,13 @@ static bool ensure_secure_model_dir(std::string& err) {
     std::error_code ec;
     fs::create_directories(dir, ec);
     if (ec) {
-        err = "Impossibile creare directory modelli " + dir + ": " + ec.message();
+        err = "Unable to create model directory " + dir + ": " + ec.message();
         return false;
     }
 
     // Force mode 0700 (best effort)
     if (::chmod(dir.c_str(), 0700) != 0) {
-        err = "chmod(0700) fallito su " + dir + ": " + std::string(std::strerror(errno));
+        err = "chmod(0700) failed on " + dir + ": " + std::string(std::strerror(errno));
         return false;
     }
 
@@ -129,7 +129,7 @@ static bool ensure_secure_model_dir(std::string& err) {
 
 static bool chmod0600(const std::string& path, std::string& err) {
     if (::chmod(path.c_str(), 0600) != 0) {
-        err = "chmod(0600) fallito su " + path + ": " + std::string(std::strerror(errno));
+        err = "chmod(0600) failed on " + path + ": " + std::string(std::strerror(errno));
         return false;
     }
     return true;
@@ -155,7 +155,7 @@ static std::unique_ptr<RecognizerPlugin> create_plugin_for_method(const FacialAu
 
 static bool detect_one_face(const FacialAuthConfig& cfg, const cv::Mat& bgr, cv::Mat& face_out, std::string& err) {
     if (bgr.empty()) {
-        err = "detect_one_face: immagine vuota";
+        err = "detect_one_face: empty image";
         return false;
     }
 
@@ -166,13 +166,13 @@ static bool detect_one_face(const FacialAuthConfig& cfg, const cv::Mat& bgr, cv:
 
     if (cfg.detector == "cascade") {
         if (cfg.cascade_path.empty()) {
-            err = "detector=cascade ma cascade_path è vuoto";
+            err = "detector=cascade but cascade_path is empty";
             return false;
         }
 
         cv::CascadeClassifier cc;
         if (!cc.load(cfg.cascade_path)) {
-            err = "Impossibile caricare cascade: " + cfg.cascade_path;
+            err = "Unable to load cascade: " + cfg.cascade_path;
             return false;
         }
 
@@ -183,7 +183,7 @@ static bool detect_one_face(const FacialAuthConfig& cfg, const cv::Mat& bgr, cv:
         cc.detectMultiScale(gray, faces, 1.1, 3);
 
         if (faces.empty()) {
-            err = "Nessun volto (cascade)";
+            err = "No face detected (cascade)";
             return false;
         }
 
@@ -194,7 +194,7 @@ static bool detect_one_face(const FacialAuthConfig& cfg, const cv::Mat& bgr, cv:
 
         cv::Rect clipped = best & cv::Rect(0, 0, bgr.cols, bgr.rows);
         if (clipped.area() <= 0) {
-            err = "BBox volto non valida (cascade)";
+            err = "Invalid face bounding box (cascade)";
             return false;
         }
 
@@ -205,7 +205,7 @@ static bool detect_one_face(const FacialAuthConfig& cfg, const cv::Mat& bgr, cv:
 #if CV_VERSION_MAJOR >= 4
     if (cfg.detector == "yunet") {
         if (cfg.detect_yunet.empty()) {
-            err = "detector=yunet ma detect_yunet è vuoto";
+            err = "detector=yunet but detect_yunet is empty";
             return false;
         }
 
@@ -216,7 +216,7 @@ static bool detect_one_face(const FacialAuthConfig& cfg, const cv::Mat& bgr, cv:
         yn->detect(bgr, faces);
 
         if (faces.empty() || faces.rows <= 0) {
-            err = "Nessun volto (yunet)";
+            err = "No face detected (yunet)";
             return false;
         }
 
@@ -240,7 +240,7 @@ static bool detect_one_face(const FacialAuthConfig& cfg, const cv::Mat& bgr, cv:
         cv::Rect r(x, y, w, h);
         r &= cv::Rect(0, 0, bgr.cols, bgr.rows);
         if (r.area() <= 0) {
-            err = "BBox volto non valida (yunet)";
+            err = "Invalid face bounding box (yunet)";
             return false;
         }
 
@@ -249,7 +249,7 @@ static bool detect_one_face(const FacialAuthConfig& cfg, const cv::Mat& bgr, cv:
     }
 #endif
 
-    err = "Detector non supportato: " + cfg.detector;
+    err = "Unsupported detector: " + cfg.detector;
     return false;
 }
 
@@ -257,7 +257,7 @@ extern "C" {
 
 bool fa_check_root(const std::string& tool_name) {
     if (geteuid() != 0) {
-        std::cerr << "Errore: " << tool_name << " richiede privilegi di root.\n";
+        std::cerr << "Error: " << tool_name << " requires root privileges.\n";
         return false;
     }
     return true;
@@ -268,7 +268,7 @@ bool fa_load_config(FacialAuthConfig& cfg, std::string& log, const std::string& 
 
     std::ifstream file(real_path);
     if (!file.is_open()) {
-        log = "Config non trovata in " + real_path + " (uso default)";
+        log = "Config not found in " + real_path + " (using defaults)";
         return true;
     }
 
@@ -315,7 +315,7 @@ bool fa_load_config(FacialAuthConfig& cfg, std::string& log, const std::string& 
         else if (key == "ignore_failure") cfg.ignore_failure = parse_bool(val);
     }
 
-    log = "Config caricata da " + real_path;
+    log = "Config loaded from " + real_path;
     return true;
 }
 
@@ -328,10 +328,10 @@ bool fa_clean_captures(const std::string& user, const FacialAuthConfig& cfg, std
     std::error_code ec;
     fs::remove_all(dir, ec);
     if (ec) {
-        log = "Errore rimozione " + dir + ": " + ec.message();
+        log = "Error removing " + dir + ": " + ec.message();
         return false;
     }
-    log = "Pulizia completata: " + dir;
+    log = "Cleanup complete: " + dir;
     return true;
 }
 
@@ -343,37 +343,37 @@ bool fa_capture_user(const std::string& user,
     std::error_code ec;
     fs::create_directories(dir, ec);
     if (ec) {
-        log = "Impossibile creare directory " + dir + ": " + ec.message();
+        log = "Unable to create directory " + dir + ": " + ec.message();
         return false;
     }
 
     cv::VideoCapture cap(device_path);
     if (!cap.isOpened()) {
-        log = "Impossibile aprire device " + device_path;
+        log = "Unable to open device " + device_path;
         return false;
     }
     if (cfg.width > 0) cap.set(cv::CAP_PROP_FRAME_WIDTH, cfg.width);
     if (cfg.height > 0) cap.set(cv::CAP_PROP_FRAME_HEIGHT, cfg.height);
 
     if (cfg.verbose || cfg.debug) {
-        std::cout << "[INFO] Avvio cattura per utente: " << user << "\n";
+        std::cout << "[INFO] Starting capture for user: " << user << "\n";
         std::cout << "[INFO] Device: " << device_path
                   << " (" << cfg.width << "x" << cfg.height << ")\n";
         std::cout << "[INFO] Detector: " << cfg.detector
-                  << " | Formato: " << cfg.image_format
-                  << " | Numero immagini: " << cfg.frames
+                  << " | Format: " << cfg.image_format
+                  << " | Image count: " << cfg.frames
                   << " | Sleep: " << cfg.sleep_ms << " ms\n";
-        std::cout << "[INFO] Directory output: " << dir << "\n";
+        std::cout << "[INFO] Output directory: " << dir << "\n";
     }
     if (cfg.debug) {
-        std::cerr << "[DEBUG] Salvataggio immagini in " << dir << "\n";
+        std::cerr << "[DEBUG] Saving images to " << dir << "\n";
     }
 
     int saved = 0;
     int discarded = 0;
     int start_index = next_capture_index(dir, user, cfg.image_format);
     if (start_index > 0 && (cfg.verbose || cfg.debug)) {
-        std::cout << "[INFO] Immagini esistenti trovate, riparto da "
+        std::cout << "[INFO] Existing images found, resuming from "
                   << start_index << "\n";
     }
     for (int i = 0; i < cfg.frames; ++i) {
@@ -396,21 +396,21 @@ bool fa_capture_user(const std::string& user,
         int index = start_index + saved;
         std::string filename = dir + "/" + user + "_" + std::to_string(index) + "." + cfg.image_format;
         if (cfg.debug) {
-            std::cerr << "[DEBUG] Salvo immagine su: " << filename << "\n";
+            std::cerr << "[DEBUG] Saving image to: " << filename << "\n";
         }
         if (!cv::imwrite(filename, face)) {
-            log = "Impossibile salvare " + filename;
+            log = "Unable to save " + filename;
             return false;
         }
 
         ++saved;
-        std::cout << "[INFO] Salvata immagine: " << filename << "\n";
+        std::cout << "[INFO] Saved image: " << filename << "\n";
         if (cfg.verbose || cfg.debug) {
-            std::cout << "[INFO] Acquisita immagine " << saved << "/" << cfg.frames
+            std::cout << "[INFO] Captured image " << saved << "/" << cfg.frames
                       << " (" << filename << ")\n";
         }
         if (cfg.debug) {
-            std::cerr << "[DEBUG] Salvata immagine: " << filename << "\n";
+            std::cerr << "[DEBUG] Saved image: " << filename << "\n";
         }
         if (cfg.sleep_ms > 0) {
             std::this_thread::sleep_for(std::chrono::milliseconds(cfg.sleep_ms));
@@ -418,15 +418,15 @@ bool fa_capture_user(const std::string& user,
     }
 
     if (saved == 0) {
-        log = "Nessuna immagine catturata";
+        log = "No images captured";
         return false;
     }
 
     if (discarded > 0) {
-        std::cout << "[INFO] Immagini scartate: " << discarded << "\n";
+        std::cout << "[INFO] Discarded images: " << discarded << "\n";
     }
-    log = "Catturate " + std::to_string(saved) + " immagini in " + dir +
-          " (scartate " + std::to_string(discarded) + ")";
+    log = "Captured " + std::to_string(saved) + " images in " + dir +
+          " (discarded " + std::to_string(discarded) + ")";
     return true;
 }
 
@@ -438,7 +438,7 @@ bool fa_train_user(const std::string& user,
     std::vector<cv::Mat> faces;
 
     if (!fs::exists(dir)) {
-        log = "Directory immagini non trovata: " + dir;
+        log = "Images directory not found: " + dir;
         return false;
     }
 
@@ -457,7 +457,7 @@ bool fa_train_user(const std::string& user,
     }
 
     if (faces.empty()) {
-        log = "Nessuna immagine valida per il training in " + dir;
+        log = "No valid images for training in " + dir;
         return false;
     }
 
@@ -468,7 +468,7 @@ bool fa_train_user(const std::string& user,
 
     auto plugin = create_plugin_for_method(cfg, method);
     if (!plugin) {
-        log = "Impossibile creare plugin per metodo " + method;
+        log = "Unable to create plugin for method " + method;
         return false;
     }
 
@@ -482,12 +482,12 @@ bool fa_train_user(const std::string& user,
     }
 
     if (!force && fs::exists(model_path)) {
-        log = "Modello già esistente: " + model_path + " (usa -f per sovrascrivere)";
+        log = "Model already exists: " + model_path + " (use -f to overwrite)";
         return false;
     }
 
     if (!plugin->train(faces, labels, model_path, err)) {
-        log = "Training fallito: " + err;
+        log = "Training failed: " + err;
         return false;
     }
 
@@ -496,7 +496,7 @@ bool fa_train_user(const std::string& user,
         return false;
     }
 
-    log = "Modello creato: " + model_path + " (" + plugin->get_name() + ")";
+    log = "Model created: " + model_path + " (" + plugin->get_name() + ")";
     return true;
 }
 
@@ -507,7 +507,7 @@ bool fa_test_user(const std::string& user,
                   int& label,
                   std::string& log) {
     if (!fs::exists(model_path)) {
-        log = "Modello non trovato: " + model_path;
+        log = "Model not found: " + model_path;
         return false;
     }
 
@@ -519,19 +519,19 @@ bool fa_test_user(const std::string& user,
 
     auto plugin = create_plugin_for_method(cfg, method);
     if (!plugin) {
-        log = "Impossibile creare plugin per metodo " + method;
+        log = "Unable to create plugin for method " + method;
         return false;
     }
 
     std::string err;
     if (!plugin->load(model_path, err)) {
-        log = "Caricamento modello fallito: " + err;
+        log = "Failed to load model: " + err;
         return false;
     }
 
     cv::VideoCapture cap(cfg.device);
     if (!cap.isOpened()) {
-        log = "Impossibile aprire device " + cfg.device;
+        log = "Unable to open device " + cfg.device;
         return false;
     }
 
@@ -579,7 +579,7 @@ bool fa_test_user(const std::string& user,
         if (plugin->is_match(conf, cfg)) {
             confidence = conf;
             label = lbl;
-            log = "Match OK per utente " + user + " (" + plugin->get_name() + ")";
+            log = "Match OK for user " + user + " (" + plugin->get_name() + ")";
             return true;
         }
 
@@ -593,7 +593,7 @@ bool fa_test_user(const std::string& user,
         label = best_label;
     }
 
-    log = "Match fallito per utente " + user + " (" + plugin->get_name() + ")";
+    log = "Match failed for user " + user + " (" + plugin->get_name() + ")";
     return false;
 }
 

@@ -10,19 +10,19 @@
 void usage() {
     std::cout << "Usage: facial_capture -u <user> [options]\n\n"
     << "Options:\n"
-    << "  -u, --user <name>       Nome utente per cui salvare le immagini\n"
-    << "  -c, --config <file>     File di configurazione (default: /etc/security/pam_facial_auth.conf)\n"
-    << "  -d, --device <path>     Device della webcam (es: /dev/video0)\n"
-    << "  -w, --width <px>        Larghezza frame\n"
-    << "  -h, --height <px>       Altezza frame\n"
-    << "  -f, --force             Sovrascrive immagini esistenti e riparte da 1\n"
-    << "  --flush, --clean        Elimina tutte le immagini per l'utente specificato\n"
-    << "  -n, --num_images <num>  Numero di immagini da acquisire\n"
-    << "  -s, --sleep <sec>       Pausa tra una cattura e l'altra (in secondi)\n"
-    << "  -v, --verbose           Output dettagliato\n"
-    << "  --debug                 Abilita output di debug\n"
-    << "  --nogui                 Disabilita GUI, cattura solo da console\n"
-    << "  --help, -H              Mostra questo messaggio\n"
+    << "  -u, --user <name>       User name to save images for\n"
+    << "  -c, --config <file>     Configuration file (default: /etc/security/pam_facial_auth.conf)\n"
+    << "  -d, --device <path>     Webcam device (e.g., /dev/video0)\n"
+    << "  -w, --width <px>        Frame width\n"
+    << "  -h, --height <px>       Frame height\n"
+    << "  -f, --force             Overwrite existing images and restart from 1\n"
+    << "  --flush, --clean        Delete all images for the specified user\n"
+    << "  -n, --num_images <num>  Number of images to capture\n"
+    << "  -s, --sleep <sec>       Pause between captures (seconds)\n"
+    << "  -v, --verbose           Verbose output\n"
+    << "  --debug                 Enable debug output\n"
+    << "  --nogui                 Disable GUI, capture from console only\n"
+    << "  --help, -H              Show this message\n"
     << "  --detector              yunet or haar\n";
 }
 
@@ -86,7 +86,7 @@ int main(int argc, char** argv) {
     if (clean_only) return 0;
 
     if (!fa_capture_user(user, cfg, cfg.device, log)) {
-        std::cerr << "[ERRORE] " << log << std::endl;
+        std::cerr << "[ERROR] " << log << std::endl;
         return 1;
     }
     if (cfg.verbose || cfg.debug) {
