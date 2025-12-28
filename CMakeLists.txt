@@ -4,6 +4,7 @@ project(pam_facial_auth LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+set(CMAKE_SKIP_RPATH ON)
 
 # 1. Ricerca Obbligatoria di OpenCV (senza IF condizionali)
 find_package(OpenCV REQUIRED COMPONENTS
