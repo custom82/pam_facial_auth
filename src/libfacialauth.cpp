@@ -68,6 +68,7 @@ extern "C" {
             else if (key == "frames") cfg.frames = std::stoi(val);
             else if (key == "width") cfg.width = std::stoi(val);
             else if (key == "height") cfg.height = std::stoi(val);
+            else if (key == "image_format") cfg.image_format = val;
             else if (key == "sleep_ms") { cfg.sleep_ms = std::stoi(val); cfg.capture_delay = (double)cfg.sleep_ms / 1000.0; }
             else if (key == "debug") cfg.debug = (val == "yes");
             else if (key == "nogui") cfg.nogui = (val == "yes");
@@ -119,10 +120,18 @@ extern "C" {
                 cv::Mat res; cv::resize(frame, res, cv::Size(cfg.width, cfg.height));
                 std::string img_path = user_dir + "/frame_" + std::to_string(start_idx + current_saved) + "." + cfg.image_format;
                 cv::imwrite(img_path, res);
+
+                // FIX DEBUG: Stampa il percorso del file salvato
+                if (cfg.debug) {
+                    std::cout << "\n[DEBUG] Salvato: " << img_path << std::flush;
+                }
                 current_saved++;
             }
 
-            std::cout << "\r[*] Cattura (" << cfg.detector << "): " << current_saved << "/" << cfg.frames << " (Indice: " << (start_idx + current_saved - 1) << ")" << std::flush;
+            if (!cfg.debug) {
+                std::cout << "\r[*] Cattura (" << cfg.detector << "): " << current_saved << "/" << cfg.frames << " (Indice file: " << (start_idx + current_saved - 1) << ")" << std::flush;
+            }
+
             if (!cfg.nogui) {
                 cv::imshow("Cattura", frame);
                 if (cv::waitKey(1) == 27) break;
