@@ -16,7 +16,6 @@
 
 namespace fs = std::filesystem;
 
-// Funzione interna per trovare l'ultimo indice salvato
 int get_last_index(const std::string& dir) {
     int max_idx = -1;
     if (!fs::exists(dir)) return max_idx;
@@ -83,22 +82,20 @@ extern "C" {
         }
 
         cv::VideoCapture cap(device_path);
-        if (!cap.isOpened()) { log = "Webcam non accessibile: " + device_path; return false; }
+        if (!cap.isOpened()) { log = "Webcam non accessibile."; return false; }
 
         cv::Ptr<cv::FaceDetectorYN> detector_yn;
         cv::CascadeClassifier detector_cascade;
 
         if (cfg.detector == "yunet") {
-            if (cfg.detect_yunet.empty() || !fs::exists(cfg.detect_yunet)) { log = "Modello YuNet non trovato."; return false; }
             detector_yn = cv::FaceDetectorYN::create(cfg.detect_yunet, "", cv::Size(320, 320));
         } else if (cfg.detector == "cascade") {
-            if (cfg.cascade_path.empty() || !detector_cascade.load(cfg.cascade_path)) { log = "File Cascade XML non trovato."; return false; }
+            if (!detector_cascade.load(cfg.cascade_path)) { log = "Errore caricamento XML Cascade."; return false; }
         }
 
         std::string user_dir = cfg.basedir + "/captures/" + user;
         fs::create_directories(user_dir);
 
-        // Feature: numerazione continua
         int start_idx = get_last_index(user_dir) + 1;
         int current_saved = 0;
 
@@ -123,26 +120,25 @@ extern "C" {
                 std::string img_path = user_dir + "/frame_" + std::to_string(start_idx + current_saved) + "." + cfg.image_format;
                 cv::imwrite(img_path, res);
                 current_saved++;
-                if (cfg.debug) std::cout << "\n[DEBUG] Salvato: " << img_path << std::flush;
             }
 
-            std::cout << "\r[*] Cattura (" << cfg.detector << "): " << current_saved << "/" << cfg.frames << " (Inizio da: " << start_idx << ")" << std::flush;
+            std::cout << "\r[*] Cattura (" << cfg.detector << "): " << current_saved << "/" << cfg.frames << " (Indice: " << (start_idx + current_saved - 1) << ")" << std::flush;
             if (!cfg.nogui) {
-                cv::imshow("Cattura Volto", frame);
+                cv::imshow("Cattura", frame);
                 if (cv::waitKey(1) == 27) break;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds((int)(cfg.capture_delay * 1000)));
         }
-        cv::destroyAllWindows();
         std::cout << std::endl;
+        return true;
+    }
+
+    FA_EXPORT bool fa_clean_captures(const std::string& user, const FacialAuthConfig& cfg, std::string& log) {
+        fs::remove_all(cfg.basedir + "/captures/" + user);
         return true;
     }
 
     FA_EXPORT bool fa_train_user(const std::string& user, const FacialAuthConfig& cfg, std::string& log) { return false; }
     FA_EXPORT bool fa_test_user(const std::string& user, const FacialAuthConfig& cfg, const std::string& model_path, double& conf, int& lbl, std::string& log) { return false; }
-    FA_EXPORT bool fa_clean_captures(const std::string& user, const FacialAuthConfig& cfg, std::string& log) {
-        fs::remove_all(cfg.basedir + "/captures/" + user);
-        return true;
-    }
 
 }
