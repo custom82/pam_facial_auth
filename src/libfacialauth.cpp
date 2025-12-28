@@ -11,13 +11,12 @@
 #include <chrono>
 #include <unistd.h>
 
-// Includi gli header dei plugin invece dei .cpp
-// Se non hai creato plugin_classic.h e plugin_sface.h,
-// assicurati che le classi siano dichiarate qui o nei loro header.
-#include "plugin_classic.cpp"
-#include "plugin_sface.cpp"
-
 namespace fs = std::filesystem;
+
+// Dichiarazioni esterne per i plugin (saranno linkati da Ninja/CMake)
+// Questo risolve l'errore di file non trovato senza usare #include ".cpp"
+std::unique_ptr<RecognizerPlugin> create_classic_plugin(const std::string& method, const FacialAuthConfig& cfg);
+std::unique_ptr<RecognizerPlugin> create_sface_plugin(const FacialAuthConfig& cfg);
 
 // --- Utility Functions ---
 
@@ -78,13 +77,13 @@ bool fa_clean_captures(const std::string& user, const FacialAuthConfig& cfg, std
 
 std::unique_ptr<RecognizerPlugin> create_plugin(const FacialAuthConfig& cfg) {
     if (cfg.method == "sface") {
-        return std::make_unique<SFacePlugin>(cfg);
+        return create_sface_plugin(cfg);
     } else {
-        return std::make_unique<ClassicPlugin>(cfg.method, cfg);
+        return create_classic_plugin(cfg.method, cfg);
     }
 }
 
-// --- Logic ---
+// --- Core Logic ---
 
 bool fa_capture_user(const std::string& user, const FacialAuthConfig& cfg, const std::string& device_path, std::string& log) {
     cv::VideoCapture cap(device_path);
@@ -95,7 +94,7 @@ bool fa_capture_user(const std::string& user, const FacialAuthConfig& cfg, const
 
     cv::CascadeClassifier face_cascade;
     if (!face_cascade.load(cfg.cascade_path)) {
-        log = "Impossibile caricare Haar Cascade.";
+        log = "Errore caricamento cascade: " + cfg.cascade_path;
         return false;
     }
 
@@ -116,8 +115,9 @@ bool fa_capture_user(const std::string& user, const FacialAuthConfig& cfg, const
             cv::resize(face_roi, face_roi, cv::Size(cfg.width, cfg.height));
             cv::imwrite(user_dir + "/" + std::to_string(count) + ".jpg", face_roi);
             count++;
-            if (cfg.verbose) std::cout << "\r[*] Frame: " << count << "/" << cfg.frames << std::flush;
+            if (cfg.verbose) std::cout << "\r[*] Frame acquisiti: " << count << "/" << cfg.frames << std::flush;
             if (!cfg.nogui) {
+                cv::rectangle(frame, area, cv::Scalar(0, 255, 0), 2);
                 cv::imshow("Capture", frame);
                 if (cv::waitKey(1) == 27) return false;
             }
@@ -128,17 +128,16 @@ bool fa_capture_user(const std::string& user, const FacialAuthConfig& cfg, const
 }
 
 bool fa_train_user(const std::string& user, const FacialAuthConfig& cfg, std::string& log) {
-    auto plugin = create_plugin(cfg);
+    std::string user_dir = cfg.basedir + "/captures/" + user;
     std::vector<cv::Mat> faces;
     std::vector<int> labels;
-    std::string user_dir = cfg.basedir + "/captures/" + user;
-
     for (const auto& entry : fs::directory_iterator(user_dir)) {
         cv::Mat img = cv::imread(entry.path().string());
         if (!img.empty()) { faces.push_back(img); labels.push_back(0); }
     }
+    if (faces.empty()) { log = "Nessuna immagine trovata."; return false; }
 
-    if (faces.empty()) return false;
+    auto plugin = create_plugin(cfg);
     return plugin->train(faces, labels, fa_user_model_path(cfg, user));
 }
 
@@ -148,8 +147,7 @@ bool fa_test_user(const std::string& user, const FacialAuthConfig& cfg, const st
 
     cv::VideoCapture cap(0);
     cv::Mat frame;
-    cap >> frame; // Semplificato per brevità
+    cap >> frame;
     if (frame.empty()) return false;
-
     return plugin->predict(frame, label, confidence);
 }
