@@ -95,7 +95,10 @@ extern "C" {
     // Capture/training/testing
     bool fa_clean_captures(const std::string& user, const FacialAuthConfig& cfg, std::string& log);
     bool fa_capture_user(const std::string& user, const FacialAuthConfig& cfg, const std::string& device_path, std::string& log);
-    bool fa_train_user(const std::string& user, const FacialAuthConfig& cfg, std::string& log);
+    bool fa_train_user(const std::string& user,
+                       const FacialAuthConfig& cfg,
+                       std::string& log,
+                       bool force = false);
 
     // Returns true if authenticated (match), false otherwise. Still fills confidence/label/log.
     bool fa_test_user(const std::string& user,
