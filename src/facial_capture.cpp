@@ -11,72 +11,51 @@
 void usage() {
     std::cout << "Usage: facial_capture -u <user> [options]\n\n"
     << "Options:\n"
-    << "  -u, --user <name>       Nome utente per cui salvare le immagini\n"
-    << "  -c, --config <file>     File di configurazione\n"
-    << "  -d, --device <path>     Device della webcam (es: /dev/video0)\n"
-    << "  -w, --width <px>        Larghezza frame\n"
-    << "  -h, --height <px>       Altezza frame\n"
-    << "  -f, --force             Sovrascrive immagini esistenti\n"
-    << "  --flush, --clean        Elimina tutte le immagini dell'utente ed esce\n"
-    << "  -n, --num_images <num>  Numero di immagini da acquisire\n"
-    << "  -s, --sleep <sec>       Pausa tra una cattura e l'altra\n"
-    << "  --detector <name>       Detector: yunet, cascade, none\n"
-    << "  --cascade <path>        Percorso file XML Haar Cascade\n"
-    << "  --yunet <path>          Percorso file ONNX YuNet\n"
-    << "  -v, --verbose           Output dettagliato\n"
-    << "  --debug                 Abilita output di debug (mostra percorsi file)\n"
-    << "  --nogui                 Disabilita visualizzazione video\n"
-    << "  --help, -H              Mostra questo messaggio\n";
+    << "  -u, --user <name>       Utente\n"
+    << "  -c, --config <file>     Config (default: /etc/security/pam_facial_auth.conf)\n"
+    << "  -d, --device <path>     Webcam device\n"
+    << "  -w, --width <px>        Larghezza\n"
+    << "  -h, --height <px>       Altezza\n"
+    << "  -n, --num_images <n>    Immagini\n"
+    << "  -s, --sleep <sec>       Pausa\n"
+    << "  --detector <name>       yunet, cascade, none\n"
+    << "  -f, --force             Pulisce prima\n"
+    << "  --debug                 Output debug\n"
+    << "  --nogui                 Niente finestra video\n";
 }
 
 int main(int argc, char** argv) {
     if (!fa_check_root("facial_capture")) return 1;
 
-    std::string user;
-    std::string config_path = "/etc/security/pam_facial_auth.conf";
+    std::string user, config_path = "/etc/security/pam_facial_auth.conf", log;
     FacialAuthConfig cfg;
-    std::string log;
-    bool force_restart = false;
-    bool clean_only = false;
+    bool force = false;
 
     std::vector<std::string> args(argv + 1, argv + argc);
-    if (args.empty()) { usage(); return 1; }
-
-    // Primo passaggio per individuare il config file
     for (size_t i = 0; i < args.size(); ++i) {
         if ((args[i] == "-c" || args[i] == "--config") && i + 1 < args.size()) config_path = args[++i];
     }
 
     fa_load_config(cfg, log, config_path);
 
-    // Secondo passaggio per sovrascrivere tutto il resto
     for (size_t i = 0; i < args.size(); ++i) {
-        if (args[i] == "--help" || args[i] == "-H") { usage(); return 0; }
-        else if ((args[i] == "-u" || args[i] == "--user") && i + 1 < args.size()) user = args[++i];
-        else if ((args[i] == "-d" || args[i] == "--device") && i + 1 < args.size()) cfg.device = args[++i];
-        else if ((args[i] == "-w" || args[i] == "--width") && i + 1 < args.size()) cfg.width = std::stoi(args[++i]);
-        else if ((args[i] == "-h" || args[i] == "--height") && i + 1 < args.size()) cfg.height = std::stoi(args[++i]);
-        else if ((args[i] == "-n" || args[i] == "--num_images") && i + 1 < args.size()) cfg.frames = std::stoi(args[++i]);
-        else if ((args[i] == "-s" || args[i] == "--sleep") && i + 1 < args.size()) cfg.capture_delay = std::stod(args[++i]);
-        else if (args[i] == "--detector" && i + 1 < args.size()) cfg.detector = args[++i];
-        else if (args[i] == "--cascade" && i + 1 < args.size()) cfg.cascade_path = args[++i];
-        else if (args[i] == "--yunet" && i + 1 < args.size()) cfg.detect_yunet = args[++i];
-        else if (args[i] == "-f" || args[i] == "--force") force_restart = true;
-        else if (args[i] == "--flush" || args[i] == "--clean") clean_only = true;
-        else if (args[i] == "-v" || args[i] == "--verbose") cfg.verbose = true;
+        if (args[i] == "-u" || args[i] == "--user") user = args[++i];
+        else if (args[i] == "-d" || args[i] == "--device") cfg.device = args[++i];
+        else if (args[i] == "-w" || args[i] == "--width") cfg.width = std::stoi(args[++i]);
+        else if (args[i] == "-h" || args[i] == "--height") cfg.height = std::stoi(args[++i]);
+        else if (args[i] == "-n" || args[i] == "--num_images") cfg.frames = std::stoi(args[++i]);
+        else if (args[i] == "-s" || args[i] == "--sleep") cfg.capture_delay = std::stod(args[++i]);
+        else if (args[i] == "--detector") cfg.detector = args[++i];
+        else if (args[i] == "-f" || args[i] == "--force") force = true;
         else if (args[i] == "--debug") cfg.debug = true;
         else if (args[i] == "--nogui") cfg.nogui = true;
     }
 
-    if (user.empty()) { std::cerr << "Errore: utente (-u) obbligatorio." << std::endl; return 1; }
-
-    if (clean_only || force_restart) {
-        fa_clean_captures(user, cfg, log);
-        if (clean_only) { std::cout << "[*] Dati utente eliminati." << std::endl; return 0; }
-    }
+    if (user.empty()) { usage(); return 1; }
+    if (force) fa_clean_captures(user, cfg, log);
 
     if (!fa_capture_user(user, cfg, cfg.device, log)) {
-        std::cerr << "[ERRORE] " << log << std::endl;
+        std::cerr << "\n[ERRORE] " << log << std::endl;
         return 1;
     }
 

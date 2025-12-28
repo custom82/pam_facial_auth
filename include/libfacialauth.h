@@ -38,7 +38,7 @@ struct FacialAuthConfig {
     bool nogui = false;
 };
 
-// Questa classe DEVE essere visibile ai plugin
+// Classe base per i plugin (LBPH, SFace, ecc.)
 class RecognizerPlugin {
 public:
     virtual ~RecognizerPlugin() = default;

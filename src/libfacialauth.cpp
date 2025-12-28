@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include <opencv2/objdetect.hpp>
 #include <opencv2/imgproc.hpp>
+#include <opencv2/highgui.hpp>
 
 namespace fs = std::filesystem;
 
@@ -57,16 +58,23 @@ extern "C" {
     }
 
     FA_EXPORT bool fa_capture_user(const std::string& user, const FacialAuthConfig& cfg, const std::string& device_path, std::string& log) {
+        // Validazione Detector
+        if (cfg.detector != "yunet" && cfg.detector != "cascade" && cfg.detector != "none") {
+            log = "Detector '" + cfg.detector + "' non supportato. Usa: yunet, cascade, none.";
+            return false;
+        }
+
         cv::VideoCapture cap(device_path);
-        if (!cap.isOpened()) { log = "Webcam off: " + device_path; return false; }
+        if (!cap.isOpened()) { log = "Webcam non accessibile: " + device_path; return false; }
 
         cv::Ptr<cv::FaceDetectorYN> detector_yn;
         cv::CascadeClassifier detector_cascade;
 
         if (cfg.detector == "yunet") {
+            if (cfg.detect_yunet.empty() || !fs::exists(cfg.detect_yunet)) { log = "Modello YuNet mancante."; return false; }
             detector_yn = cv::FaceDetectorYN::create(cfg.detect_yunet, "", cv::Size(320, 320));
         } else if (cfg.detector == "cascade") {
-            if (!detector_cascade.load(cfg.cascade_path)) { log = "Errore caricamento XML Cascade"; return false; }
+            if (cfg.cascade_path.empty() || !detector_cascade.load(cfg.cascade_path)) { log = "File Cascade XML mancante o invalido."; return false; }
         }
 
         std::string user_dir = cfg.basedir + "/captures/" + user;
@@ -78,7 +86,7 @@ extern "C" {
             if (frame.empty()) continue;
 
             bool face_found = false;
-            if (cfg.detector == "yunet" && detector_yn) {
+            if (cfg.detector == "yunet") {
                 detector_yn->setInputSize(frame.size());
                 cv::Mat faces; detector_yn->detect(frame, faces);
                 face_found = (faces.rows > 0);
@@ -91,20 +99,26 @@ extern "C" {
 
             if (face_found) {
                 cv::Mat res; cv::resize(frame, res, cv::Size(cfg.width, cfg.height));
-                cv::imwrite(user_dir + "/frame_" + std::to_string(saved) + "." + cfg.image_format, res);
+                std::string img_path = user_dir + "/frame_" + std::to_string(saved) + "." + cfg.image_format;
+                cv::imwrite(img_path, res);
                 saved++;
+                if (cfg.debug) std::cout << "\n[DEBUG] Salvato: " << img_path << std::flush;
             }
 
-            std::cout << "\r[*] Cattura: " << saved << "/" << cfg.frames << std::flush;
+            std::cout << "\r[*] Cattura (" << cfg.detector << "): " << saved << "/" << cfg.frames << std::flush;
+            if (!cfg.nogui) {
+                cv::imshow("Cattura Volto", frame);
+                if (cv::waitKey(1) == 27) break;
+            }
             std::this_thread::sleep_for(std::chrono::milliseconds((int)(cfg.capture_delay * 1000)));
         }
+        cv::destroyAllWindows();
         std::cout << std::endl;
         return true;
     }
 
-    // Stub per evitare errori di link, queste andranno implementate nei plugin/training
     FA_EXPORT bool fa_train_user(const std::string& user, const FacialAuthConfig& cfg, std::string& log) { return false; }
-    FA_EXPORT bool fa_test_user(const std::string& user, const FacialAuthConfig& cfg, const std::string& model_path, double& confidence, int& label, std::string& log) { return false; }
+    FA_EXPORT bool fa_test_user(const std::string& user, const FacialAuthConfig& cfg, const std::string& model_path, double& conf, int& lbl, std::string& log) { return false; }
     FA_EXPORT bool fa_clean_captures(const std::string& user, const FacialAuthConfig& cfg, std::string& log) {
         fs::remove_all(cfg.basedir + "/captures/" + user);
         return true;
