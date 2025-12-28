@@ -17,10 +17,13 @@
 struct FacialAuthConfig {
     std::string basedir;
     std::string device;
-    std::string recognize_sface;
-    std::string detect_yunet;
+    std::string recognize_sface; // Mappato su recognize_sface nel conf
+    std::string detect_yunet;    // Mappato su detect_yunet nel conf
+    std::string cascade_path;    // Aggiunto per plugin_sface.cpp
+    std::string detector;        // Aggiunto per facial_capture.cpp
     std::string method;
 
+    double threshold = 0.0;      // Aggiunto per pam_facial_auth.cpp e facial_test.cpp
     double sface_threshold = 0.0;
     double lbph_threshold = 0.0;
 
@@ -28,6 +31,7 @@ struct FacialAuthConfig {
     int width = 0;
     int height = 0;
     int sleep_ms = 0;
+    double capture_delay = 0.0;  // Aggiunto per facial_capture.cpp
 
     bool debug = false;
     bool verbose = false;
