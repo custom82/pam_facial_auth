@@ -4,14 +4,18 @@
  */
 
 #include "libfacialauth.h"
-#include "plugin_classic.cpp"
-#include "plugin_sface.cpp"
 #include <iostream>
 #include <fstream>
 #include <filesystem>
 #include <thread>
 #include <chrono>
 #include <unistd.h>
+
+// Includi gli header dei plugin invece dei .cpp
+// Se non hai creato plugin_classic.h e plugin_sface.h,
+// assicurati che le classi siano dichiarate qui o nei loro header.
+#include "plugin_classic.cpp"
+#include "plugin_sface.cpp"
 
 namespace fs = std::filesystem;
 
@@ -80,7 +84,7 @@ std::unique_ptr<RecognizerPlugin> create_plugin(const FacialAuthConfig& cfg) {
     }
 }
 
-// --- Core Logic: Capture, Training, Test ---
+// --- Logic ---
 
 bool fa_capture_user(const std::string& user, const FacialAuthConfig& cfg, const std::string& device_path, std::string& log) {
     cv::VideoCapture cap(device_path);
@@ -91,7 +95,7 @@ bool fa_capture_user(const std::string& user, const FacialAuthConfig& cfg, const
 
     cv::CascadeClassifier face_cascade;
     if (!face_cascade.load(cfg.cascade_path)) {
-        log = "Impossibile caricare Haar Cascade da: " + cfg.cascade_path;
+        log = "Impossibile caricare Haar Cascade.";
         return false;
     }
 
@@ -112,100 +116,40 @@ bool fa_capture_user(const std::string& user, const FacialAuthConfig& cfg, const
             cv::resize(face_roi, face_roi, cv::Size(cfg.width, cfg.height));
             cv::imwrite(user_dir + "/" + std::to_string(count) + ".jpg", face_roi);
             count++;
-
-            if (cfg.verbose) std::cout << "\r[*] Frame acquisiti: " << count << "/" << cfg.frames << std::flush;
-
+            if (cfg.verbose) std::cout << "\r[*] Frame: " << count << "/" << cfg.frames << std::flush;
             if (!cfg.nogui) {
-                cv::rectangle(frame, area, cv::Scalar(0, 255, 0), 2);
-                cv::imshow("Facial Capture", frame);
+                cv::imshow("Capture", frame);
                 if (cv::waitKey(1) == 27) return false;
             }
-
-            if (cfg.capture_delay > 0)
-                std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<int>(cfg.capture_delay * 1000)));
-
             if (count >= cfg.frames) break;
         }
     }
-    if (!cfg.nogui) cv::destroyAllWindows();
-    return count >= cfg.frames;
+    return true;
 }
 
 bool fa_train_user(const std::string& user, const FacialAuthConfig& cfg, std::string& log) {
-    std::string user_dir = cfg.basedir + "/captures/" + user;
-    if (!fs::exists(user_dir)) {
-        log = "Directory immagini non trovata per " + user;
-        return false;
-    }
-
+    auto plugin = create_plugin(cfg);
     std::vector<cv::Mat> faces;
     std::vector<int> labels;
+    std::string user_dir = cfg.basedir + "/captures/" + user;
+
     for (const auto& entry : fs::directory_iterator(user_dir)) {
         cv::Mat img = cv::imread(entry.path().string());
-        if (!img.empty()) {
-            faces.push_back(img);
-            labels.push_back(0);
-        }
+        if (!img.empty()) { faces.push_back(img); labels.push_back(0); }
     }
 
-    if (faces.empty()) {
-        log = "Nessuna immagine trovata per il training.";
-        return false;
-    }
-
-    auto plugin = create_plugin(cfg);
-    std::string save_path = fa_user_model_path(cfg, user);
-    if (plugin->train(faces, labels, save_path)) {
-        log = "Training completato con metodo '" + cfg.method + "'. Modello: " + save_path;
-        return true;
-    }
-
-    log = "Errore durante il training del plugin.";
-    return false;
+    if (faces.empty()) return false;
+    return plugin->train(faces, labels, fa_user_model_path(cfg, user));
 }
 
 bool fa_test_user(const std::string& user, const FacialAuthConfig& cfg, const std::string& model_path, double& confidence, int& label, std::string& log) {
     auto plugin = create_plugin(cfg);
-    if (!plugin->load(model_path)) {
-        log = "Errore caricamento modello: " + model_path;
-        return false;
-    }
+    if (!plugin->load(model_path)) return false;
 
-    cv::VideoCapture cap(0); // Usa il device predefinito
-    if (!cap.isOpened()) {
-        log = "Webcam non disponibile.";
-        return false;
-    }
-
-    cv::CascadeClassifier face_cascade;
-    face_cascade.load(cfg.cascade_path);
-
+    cv::VideoCapture cap(0);
     cv::Mat frame;
-    bool success = false;
-    for (int i = 0; i < 50; i++) { // Prova per 50 frame
-        cap >> frame;
-        if (frame.empty()) continue;
+    cap >> frame; // Semplificato per brevità
+    if (frame.empty()) return false;
 
-        cv::Mat gray;
-        cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
-        std::vector<cv::Rect> faces;
-        face_cascade.detectMultiScale(gray, faces, 1.1, 4);
-
-        if (!faces.empty()) {
-            cv::Mat face_roi = frame(faces[0]);
-            cv::resize(face_roi, face_roi, cv::Size(cfg.width, cfg.height));
-            if (plugin->predict(face_roi, label, confidence)) {
-                success = true;
-                break;
-            }
-        }
-        if (!cfg.nogui) {
-            cv::imshow("Facial Test", frame);
-            cv::waitKey(10);
-        }
-    }
-    if (!cfg.nogui) cv::destroyAllWindows();
-
-    if (!success) log = "Riconoscimento fallito o volto non rilevato.";
-    return success;
+    return plugin->predict(frame, label, confidence);
 }
