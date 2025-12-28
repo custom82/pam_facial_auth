@@ -32,8 +32,10 @@ int get_last_index(const std::string& dir) {
         std::string filename = entry.path().filename().string();
         std::smatch match;
         if (std::regex_match(filename, match, re)) {
-            int idx = std::stoi(match[1].str());
-            if (idx > max_idx) max_idx = idx;
+            try {
+                int idx = std::stoi(match[1].str());
+                if (idx > max_idx) max_idx = idx;
+            } catch (...) {}
         }
     }
     return max_idx;
@@ -43,7 +45,7 @@ extern "C" {
 
     FA_EXPORT bool fa_check_root(const std::string& tool_name) {
         if (getuid() != 0) {
-            std::cerr << "ERRORE [" << tool_name << "]: Eseguire come root." << std::endl;
+            std::cerr << "ERRORE [" << tool_name << "]: Devi essere root." << std::endl;
             return false;
         }
         return true;
@@ -51,7 +53,7 @@ extern "C" {
 
     FA_EXPORT bool fa_load_config(FacialAuthConfig& cfg, std::string& log, const std::string& path) {
         std::ifstream file(path);
-        if (!file.is_open()) { log = "Config non trovata: " + path; return false; }
+        if (!file.is_open()) { log = "File non trovato: " + path; return false; }
         std::string line;
         while (std::getline(file, line)) {
             if (line.empty() || line[0] == '#') continue;
@@ -63,53 +65,46 @@ extern "C" {
                 if (key == "basedir") cfg.basedir = value;
                 else if (key == "device") cfg.device = value;
                 else if (key == "detect_yunet") cfg.detect_yunet = value;
-                else if (key == "recognize_sface") cfg.recognize_sface = value;
                 else if (key == "training_method") cfg.method = value;
                 else if (key == "detector") cfg.detector = value;
                 else if (key == "image_format") cfg.image_format = value;
-                else if (key == "sface_threshold") { cfg.sface_threshold = std::stod(value); cfg.threshold = cfg.sface_threshold; }
-                else if (key == "lbph_threshold") { cfg.lbph_threshold = std::stod(value); if(cfg.method == "lbph") cfg.threshold = cfg.lbph_threshold; }
                 else if (key == "frames") cfg.frames = std::stoi(value);
                 else if (key == "width") cfg.width = std::stoi(value);
                 else if (key == "height") cfg.height = std::stoi(value);
                 else if (key == "sleep_ms") { cfg.sleep_ms = std::stoi(value); cfg.capture_delay = (double)cfg.sleep_ms / 1000.0; }
                 else if (key == "debug") cfg.debug = (value == "yes");
                 else if (key == "verbose") cfg.verbose = (value == "yes");
-                else if (key == "nogui") cfg.nogui = (value == "yes");
             }
         }
         return true;
     }
 
-    FA_EXPORT std::string fa_user_model_path(const FacialAuthConfig& cfg, const std::string& user) {
-        std::string ext = (cfg.method == "sface" || cfg.method == "auto") ? ".yml" : ".xml";
-        return cfg.basedir + "/models/" + user + ext;
-    }
-
     FA_EXPORT bool fa_clean_captures(const std::string& user, const FacialAuthConfig& cfg, std::string& log) {
         std::string user_dir = cfg.basedir + "/captures/" + user;
         if (fs::exists(user_dir)) fs::remove_all(user_dir);
+        log = "Cartella pulita.";
         return true;
     }
 
     FA_EXPORT bool fa_capture_user(const std::string& user, const FacialAuthConfig& cfg, const std::string& device_path, std::string& log) {
         cv::VideoCapture cap(device_path);
-        if (!cap.isOpened()) { log = "Webcam off"; return false; }
+        if (!cap.isOpened()) { log = "Webcam non disponibile: " + device_path; return false; }
 
-        // Setup Detector YuNet se richiesto
         cv::Ptr<cv::FaceDetectorYN> detector;
         if (cfg.detector == "yunet") {
+            if (cfg.verbose) std::cout << "[INFO] Caricamento modello YuNet: " << cfg.detect_yunet << std::endl;
             detector = cv::FaceDetectorYN::create(cfg.detect_yunet, "", cv::Size(320, 320));
-            if (detector.empty()) { log = "Errore caricamento YuNet"; return false; }
+            if (detector.empty()) { log = "Errore init YuNet!"; return false; }
         }
 
         std::string user_dir = cfg.basedir + "/captures/" + user;
         fs::create_directories(user_dir);
         int start_idx = get_last_index(user_dir) + 1;
 
-        if (cfg.verbose) std::cout << "[INFO] Inizio acquisizione (Solo se volto rilevato)..." << std::endl;
+        std::cout << "[START] Acquisizione per '" << user << "' (Richiesti: " << cfg.frames << " frame)" << std::endl;
 
         int count = 0;
+        int dropped = 0;
         while (count < cfg.frames) {
             cv::Mat frame; cap >> frame;
             if (frame.empty()) continue;
@@ -128,18 +123,26 @@ extern "C" {
                 std::string path = user_dir + "/frame_" + std::to_string(start_idx + count) + "." + cfg.image_format;
                 if (cv::imwrite(path, resized)) {
                     count++;
-                    if (cfg.verbose) {
-                        std::cout << "\r[PROGRESS] Acquisito " << count << "/" << cfg.frames << std::flush;
-                    }
                 }
-            } else if (cfg.debug) {
-                std::cout << "\r[DEBUG] Nessun volto rilevato, salto frame..." << std::flush;
+            } else {
+                dropped++;
+            }
+
+            // OUTPUT VERBOSO IN TEMPO REALE
+            if (cfg.verbose || cfg.debug) {
+                std::cout << "\r[CATTURA] Salvati: " << count << "/" << cfg.frames
+                << " | Scartati (No Volto): " << dropped << std::flush;
             }
 
             if (cfg.sleep_ms > 0) std::this_thread::sleep_for(std::chrono::milliseconds(cfg.sleep_ms));
         }
-        std::cout << "\n[SUCCESS] Completato." << std::endl;
+        std::cout << "\n[FINISH] Salvate " << count << " immagini in " << user_dir << std::endl;
         return true;
+    }
+
+    FA_EXPORT std::string fa_user_model_path(const FacialAuthConfig& cfg, const std::string& user) {
+        std::string ext = (cfg.method == "sface" || cfg.method == "auto") ? ".yml" : ".xml";
+        return cfg.basedir + "/models/" + user + ext;
     }
 
     FA_EXPORT bool fa_train_user(const std::string& user, const FacialAuthConfig& cfg, std::string& log) {
