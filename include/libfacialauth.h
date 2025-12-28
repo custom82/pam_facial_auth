@@ -32,7 +32,7 @@ struct FacialAuthConfig {
     int width = 640;
     int height = 480;
     int sleep_ms = 100;
-    double capture_delay = 0.1; // Sincronizzato con facial_capture.cpp
+    double capture_delay = 0.1;
 
     bool debug = false;
     bool verbose = false;

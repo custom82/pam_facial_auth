@@ -12,6 +12,7 @@
 
 namespace fs = std::filesystem;
 
+// Dichiarazioni esterne per i plugin linkati nella stessa lib
 extern "C" std::unique_ptr<RecognizerPlugin> create_classic_plugin(const std::string& method, const FacialAuthConfig& cfg);
 extern "C" std::unique_ptr<RecognizerPlugin> create_sface_plugin(const FacialAuthConfig& cfg);
 
@@ -42,7 +43,7 @@ extern "C" {
 
     FA_EXPORT bool fa_load_config(FacialAuthConfig& cfg, std::string& log, const std::string& path) {
         std::ifstream file(path);
-        if (!file.is_open()) { log = "Config non trovata"; return false; }
+        if (!file.is_open()) { log = "Config non trovata: " + path; return false; }
         std::string line;
         while (std::getline(file, line)) {
             if (line.empty() || line[0] == '#') continue;
@@ -61,23 +62,20 @@ extern "C" {
             else if (key == "width") cfg.width = std::stoi(val);
             else if (key == "height") cfg.height = std::stoi(val);
             else if (key == "sleep_ms") { cfg.sleep_ms = std::stoi(val); cfg.capture_delay = (double)cfg.sleep_ms / 1000.0; }
-            else if (key == "sface_threshold") cfg.threshold = std::stod(val);
+            else if (key == "sface_threshold") { cfg.sface_threshold = std::stod(val); cfg.threshold = cfg.sface_threshold; }
+            else if (key == "lbph_threshold") { cfg.lbph_threshold = std::stod(val); if(cfg.method=="lbph") cfg.threshold=val; }
         }
         return true;
     }
 
     FA_EXPORT bool fa_capture_user(const std::string& user, const FacialAuthConfig& cfg, const std::string& device_path, std::string& log) {
         cv::VideoCapture cap(device_path);
-        if (!cap.isOpened()) { log = "Errore apertura webcam"; return false; }
+        if (!cap.isOpened()) { log = "Webcam non accessibile"; return false; }
 
         cv::Ptr<cv::FaceDetectorYN> detector;
-        // Se il detector è impostato a yunet, lo carichiamo
         if (cfg.detector == "yunet") {
-            if (fs::exists(cfg.detect_yunet)) {
-                detector = cv::FaceDetectorYN::create(cfg.detect_yunet, "", cv::Size(320, 320));
-            } else {
-                std::cerr << "\n[ERRORE] File YuNet non trovato: " << cfg.detect_yunet << std::endl;
-            }
+            if (!fs::exists(cfg.detect_yunet)) { log = "File YuNet ONNX non trovato"; return false; }
+            detector = cv::FaceDetectorYN::create(cfg.detect_yunet, "", cv::Size(320, 320));
         }
 
         std::string user_dir = cfg.basedir + "/captures/" + user;
@@ -91,16 +89,12 @@ extern "C" {
             if (frame.empty()) continue;
 
             bool face_found = false;
-
             if (detector) {
                 detector->setInputSize(frame.size());
                 cv::Mat faces;
                 detector->detect(frame, faces);
-                // CONDIZIONE CRITICA: Solo se rows > 0
                 if (faces.rows > 0) face_found = true;
             } else {
-                // Se NON c'è detector (none), salva tutto.
-                // Ma tu lo passi da riga di comando, quindi detector NON dovrebbe essere nullo.
                 face_found = (cfg.detector == "none");
             }
 
@@ -113,23 +107,49 @@ extern "C" {
                 dropped++;
             }
 
-            // Feedback in tempo reale
-            fprintf(stdout, "\r[DEBUG] Detector: %s | Salvati: %d/%d | Scartati: %d [%s]   ",
-                    cfg.detector.c_str(), saved, cfg.frames, dropped, (face_found ? "OK" : "VUOTO"));
-            fflush(stdout);
+            if (cfg.debug || cfg.verbose) {
+                std::cout << "\r[DEBUG] Detector: " << cfg.detector << " | Salvati: " << saved << "/" << cfg.frames
+                << " | Scartati: " << dropped << (face_found ? " [VOLTO OK]" : " [COPERTA]") << "    " << std::flush;
+            }
 
-            // Usiamo il delay passato dal comando (convertito in ms)
-            int wait_time = (cfg.capture_delay > 0) ? (int)(cfg.capture_delay * 1000) : cfg.sleep_ms;
-            std::this_thread::sleep_for(std::chrono::milliseconds(wait_time));
+            int wait = (cfg.capture_delay > 0) ? (int)(cfg.capture_delay * 1000) : cfg.sleep_ms;
+            std::this_thread::sleep_for(std::chrono::milliseconds(wait));
         }
-        std::cout << "\n[SUCCESS] Completato." << std::endl;
+        std::cout << std::endl;
         return true;
     }
 
-    // Implementazioni placeholder per far compilare tutto
-    FA_EXPORT bool fa_train_user(const std::string& user, const FacialAuthConfig& cfg, std::string& log) { return true; }
-    FA_EXPORT bool fa_test_user(const std::string& user, const FacialAuthConfig& cfg, const std::string& model_path, double& conf, int& lbl, std::string& log) { return true; }
-    FA_EXPORT std::string fa_user_model_path(const FacialAuthConfig& cfg, const std::string& user) { return cfg.basedir + "/models/" + user + ".yml"; }
-    FA_EXPORT bool fa_clean_captures(const std::string& user, const FacialAuthConfig& cfg, std::string& log) { return true; }
+    FA_EXPORT bool fa_train_user(const std::string& user, const FacialAuthConfig& cfg, std::string& log) {
+        std::string user_dir = cfg.basedir + "/captures/" + user;
+        if (!fs::exists(user_dir)) return false;
+        std::vector<cv::Mat> faces; std::vector<int> labels;
+        for (const auto& entry : fs::directory_iterator(user_dir)) {
+            cv::Mat img = cv::imread(entry.path().string(), cv::IMREAD_GRAYSCALE);
+            if (!img.empty()) { faces.push_back(img); labels.push_back(0); }
+        }
+        auto plugin = create_plugin(cfg);
+        return plugin->train(faces, labels, fa_user_model_path(cfg, user));
+    }
 
-} // extern "C"
+    FA_EXPORT bool fa_test_user(const std::string& user, const FacialAuthConfig& cfg, const std::string& model_path, double& conf, int& lbl, std::string& log) {
+        auto plugin = create_plugin(cfg);
+        if (!plugin->load(model_path)) return false;
+        cv::VideoCapture cap(cfg.device);
+        cv::Mat frame; cap >> frame;
+        if (frame.empty()) return false;
+        return plugin->predict(frame, lbl, conf);
+    }
+
+    FA_EXPORT std::string fa_user_model_path(const FacialAuthConfig& cfg, const std::string& user) {
+        std::string ext = (cfg.method == "sface" || cfg.method == "auto") ? ".yml" : ".xml";
+        return cfg.basedir + "/models/" + user + ext;
+    }
+
+    FA_EXPORT bool fa_clean_captures(const std::string& user, const FacialAuthConfig& cfg, std::string& log) {
+        std::string user_dir = cfg.basedir + "/captures/" + user;
+        if (fs::exists(user_dir)) fs::remove_all(user_dir);
+        log = "Dati eliminati.";
+        return true;
+    }
+
+}
