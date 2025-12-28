@@ -11,14 +11,14 @@
 void usage() {
     std::cout << "Usage: facial_test -u <user> [-m <path>] [options]\n\n"
     << "Options:\n"
-    << "  -u, --user <user>        Utente da verificare (obbligatorio)\n"
-    << "  -m, --model <path>       File modello XML (default: /etc/security/pam_facial_auth/<user>.xml)\n"
-    << "  -c, --config <file>      File di configurazione (default: /etc/security/pam_facial_auth.conf)\n"
-    << "  -d, --device <device>    Dispositivo webcam (es. /dev/video0)\n"
-    << "  --threshold <value>      Soglia di confidenza per il match (default: 80.0)\n"
-    << "  -v, --verbose            Modalità verbosa\n"
-    << "  --nogui                  Disabilita la GUI (solo console)\n"
-    << "  -h, --help               Mostra questo messaggio\n";
+    << "  -u, --user <user>        User to verify (required)\n"
+    << "  -m, --model <path>       XML model file (default: /etc/security/pam_facial_auth/<user>.xml)\n"
+    << "  -c, --config <file>      Configuration file (default: /etc/security/pam_facial_auth.conf)\n"
+    << "  -d, --device <device>    Webcam device (e.g., /dev/video0)\n"
+    << "  --threshold <value>      Match confidence threshold (default: 80.0)\n"
+    << "  -v, --verbose            Verbose mode\n"
+    << "  --nogui                  Disable GUI (console only)\n"
+    << "  -h, --help               Show this message\n";
 }
 
 int main(int argc, char** argv) {
@@ -36,10 +36,10 @@ int main(int argc, char** argv) {
     std::vector<std::string> args(argv + 1, argv + argc);
     if (args.empty()) { usage(); return 1; }
 
-    // Caricamento configurazione base
+    // Load base configuration
     fa_load_config(cfg, log, config_path);
 
-    // Parsing parametri CLI (sovrascrivono il config)
+    // Parse CLI parameters (override config)
     for (size_t i = 0; i < args.size(); ++i) {
         if (args[i] == "-h" || args[i] == "--help") { usage(); return 0; }
         else if ((args[i] == "-u" || args[i] == "--user") && i + 1 < args.size()) user = args[++i];
@@ -52,7 +52,7 @@ int main(int argc, char** argv) {
     }
 
     if (user.empty()) {
-        std::cerr << "Errore: parametro -u (user) è obbligatorio.\n";
+        std::cerr << "Error: -u (user) is required.\n";
         return 1;
     }
 
@@ -64,28 +64,28 @@ int main(int argc, char** argv) {
     int label = -1;
 
     if (cfg.verbose) {
-        std::cout << "[*] Avvio test di riconoscimento...\n";
-        std::cout << "[*] Utente:      " << user << "\n";
-        std::cout << "[*] Modello:     " << model_path << "\n";
-        std::cout << "[*] Soglia:      " << cfg.threshold << "\n";
-        std::cout << "[*] Dispositivo: " << device << "\n";
+        std::cout << "[*] Starting recognition test...\n";
+        std::cout << "[*] User:        " << user << "\n";
+        std::cout << "[*] Model:       " << model_path << "\n";
+        std::cout << "[*] Threshold:   " << cfg.threshold << "\n";
+        std::cout << "[*] Device:      " << device << "\n";
     }
 
     cfg.device = device;
 
-    // Esecuzione del test (fa_test_user deve gestire l'apertura del device e il predict)
+    // Run the test (fa_test_user handles device opening and prediction)
     if (!fa_test_user(user, cfg, model_path, confidence, label, log)) {
-        std::cerr << "ERRORE: " << log << std::endl;
+        std::cerr << "ERROR: " << log << std::endl;
         return 1;
     }
 
-    // Logica di validazione basata sulla soglia (minore è meglio per LBPH/Eigen, maggiore per SFace)
-    // Qui assumiamo la logica standard: confidence <= threshold è un match (per i plugin classici)
+    // Threshold-based validation (lower is better for LBPH/Eigen, higher for SFace).
+    // Assume standard logic: confidence <= threshold is a match (for classic plugins).
     bool is_authenticated = (confidence <= cfg.threshold);
 
     std::cout << "\n-----------------------------------" << std::endl;
-    std::cout << " RISULTATO:   " << (is_authenticated ? "AUTENTICATO" : "FALLITO") << std::endl;
-    std::cout << " Confidence:  " << confidence << " (Soglia: " << cfg.threshold << ")" << std::endl;
+    std::cout << " RESULT:      " << (is_authenticated ? "AUTHENTICATED" : "FAILED") << std::endl;
+    std::cout << " Confidence:  " << confidence << " (Threshold: " << cfg.threshold << ")" << std::endl;
     std::cout << " Label:       " << label << std::endl;
     std::cout << "-----------------------------------" << std::endl;
 

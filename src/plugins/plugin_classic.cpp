@@ -19,24 +19,24 @@ public:
     bool load(const std::string& path, std::string& err) override {
         cv::FileStorage fs(path, cv::FileStorage::READ);
         if (!fs.isOpened()) {
-            err = "Impossibile aprire il modello " + path;
+            err = "Unable to open model " + path;
             return false;
         }
 
         cv::FileNode header = fs["pfa_header"];
         if (header.empty()) {
-            err = "Header modello mancante: " + path;
+            err = "Missing model header: " + path;
             return false;
         }
 
         std::string alg;
         header["algorithm"] >> alg;
         if (!alg.empty() && alg != type) {
-            err = "Algoritmo modello " + alg + " non compatibile con " + type;
+            err = "Model algorithm " + alg + " is incompatible with " + type;
             return false;
         }
 
-        // il read() ignora i nodi extra e prende i suoi
+        // read() ignores extra nodes and reads its own.
         model->read(path);
         return true;
     }
@@ -55,7 +55,7 @@ public:
             gray.push_back(g);
         }
         if (gray.empty()) {
-            err = "Nessuna immagine valida per il training";
+            err = "No valid images for training";
             return false;
         }
 
@@ -63,24 +63,24 @@ public:
 
         cv::FileStorage fs(save_path, cv::FileStorage::WRITE);
         if (!fs.isOpened()) {
-            err = "Impossibile scrivere il modello: " + save_path;
+            err = "Unable to write model: " + save_path;
             return false;
         }
 
-        // Header PFA
+        // PFA header
         fs << "pfa_header" << "{"
            << "version" << 1
            << "algorithm" << type
            << "}";
 
-        // Dati del riconoscitore OpenCV (LBPH/Eigen/Fisher)
+        // OpenCV recognizer data (LBPH/Eigen/Fisher)
         model->write(fs);
         return true;
     }
 
     bool predict(const cv::Mat& face, int& label, double& confidence, std::string& err) override {
         if (face.empty()) {
-            err = "Face vuota per predict";
+            err = "Empty face for predict";
             return false;
         }
         cv::Mat g;

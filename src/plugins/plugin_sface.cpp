@@ -10,7 +10,7 @@ class SFacePlugin : public RecognizerPlugin {
 
 public:
     explicit SFacePlugin(const FacialAuthConfig& cfg) {
-        // modello ONNX SFace
+        // SFace ONNX model
         if (!cfg.recognize_sface.empty()) {
             sface = cv::FaceRecognizerSF::create(cfg.recognize_sface, "");
         }
@@ -21,26 +21,26 @@ public:
     bool load(const std::string& path, std::string& err) override {
         cv::FileStorage fs(path, cv::FileStorage::READ);
         if (!fs.isOpened()) {
-            err = "Impossibile aprire il modello " + path;
+            err = "Unable to open model " + path;
             return false;
         }
 
         cv::FileNode h = fs["pfa_header"];
         if (h.empty()) {
-            err = "Header modello mancante: " + path;
+            err = "Missing model header: " + path;
             return false;
         }
 
         std::string alg;
         h["algorithm"] >> alg;
         if (alg != "sface") {
-            err = "Algoritmo modello non compatibile: " + alg;
+            err = "Incompatible model algorithm: " + alg;
             return false;
         }
 
         fs["embeddings"] >> embeddings;
         if (embeddings.empty() || embeddings.type() != CV_32F) {
-            err = "Embeddings mancanti o non validi";
+            err = "Missing or invalid embeddings";
             return false;
         }
         return true;
@@ -51,11 +51,11 @@ public:
                const std::string& save_path,
                std::string& err) override {
         if (!sface) {
-            err = "Modello SFace non configurato (recognize_sface)";
+            err = "SFace model not configured (recognize_sface)";
             return false;
         }
 
-        // genera embeddings: 1 per immagine
+        // Generate embeddings: one per image.
         std::vector<cv::Mat> vec;
         vec.reserve(faces.size());
 
@@ -63,15 +63,15 @@ public:
             if (img.empty()) continue;
 
             cv::Mat face = img;
-            // SFace lavora bene con facce "piccole" uniformi. Se non hai alignment,
-            // almeno ridimensiona a 112x112.
+            // SFace works well with uniformly small faces. If you do not have alignment,
+            // at least resize to 112x112.
             if (face.cols != 112 || face.rows != 112)
                 cv::resize(face, face, cv::Size(112, 112));
 
             cv::Mat emb;
             sface->feature(face, emb);   // emb: 1xD CV_32F
             if (emb.empty() || emb.type() != CV_32F) {
-                err = "Embedding non valido";
+                err = "Invalid embedding";
                 return false;
             }
 
@@ -79,20 +79,20 @@ public:
         }
 
         if (vec.empty()) {
-            err = "Nessuna immagine valida per il training";
+            err = "No valid images for training";
             return false;
         }
 
-        // concat in NxD
+        // Concatenate into NxD
         embeddings = cv::Mat((int)vec.size(), vec[0].cols, CV_32F);
         for (int i = 0; i < (int)vec.size(); ++i) {
             vec[i].copyTo(embeddings.row(i));
         }
 
-        // Scrivi XML con header + embeddings
+        // Write XML with header + embeddings
         cv::FileStorage fs(save_path, cv::FileStorage::WRITE);
         if (!fs.isOpened()) {
-            err = "Impossibile scrivere il modello: " + save_path;
+            err = "Unable to write model: " + save_path;
             return false;
         }
 
@@ -109,17 +109,17 @@ public:
 
     bool predict(const cv::Mat& face, int& label, double& confidence, std::string& err) override {
         if (!sface) {
-            err = "Modello SFace non configurato (recognize_sface)";
+            err = "SFace model not configured (recognize_sface)";
             return false;
         }
         if (embeddings.empty()) {
-            err = "Embeddings non caricati";
+            err = "Embeddings not loaded";
             return false;
         }
 
         cv::Mat f = face;
         if (f.empty()) {
-            err = "Face vuota per predict";
+            err = "Empty face for predict";
             return false;
         }
         if (f.cols != 112 || f.rows != 112)
@@ -128,18 +128,18 @@ public:
         cv::Mat emb;
         sface->feature(f, emb);
         if (emb.empty() || emb.type() != CV_32F) {
-            err = "Embedding non valido";
+            err = "Invalid embedding";
             return false;
         }
 
-        // match best cosine
+        // Match best cosine
         double best = -1e9;
         for (int i = 0; i < embeddings.rows; ++i) {
             double sim = sface->match(emb, embeddings.row(i), cv::FaceRecognizerSF::FR_COSINE);
             if (sim > best) best = sim;
         }
 
-        // label "1" se c’è un confronto valido; confidence = similarità
+        // Label "1" if a valid comparison exists; confidence = similarity.
         label = 1;
         confidence = best;
         return true;

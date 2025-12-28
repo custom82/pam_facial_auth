@@ -10,10 +10,10 @@
 void usage() {
     std::cout << "Usage: facial_training -u <user> [options]\n\n"
     << "Options:\n"
-    << "  -u, --user <name>       Utente\n"
+    << "  -u, --user <name>       User\n"
     << "  -m, --method <type>     lbph, eigen, fisher, sface\n"
     << "  -c, --config <file>     Config path\n"
-    << "  -f, --force             Sovrascrivi XML\n";
+    << "  -f, --force             Overwrite XML\n";
 }
 
 int main(int argc, char** argv) {
@@ -35,7 +35,7 @@ int main(int argc, char** argv) {
     fa_load_config(cfg, log, config_path);
 
     if (!fa_train_user(user, cfg, log, force)) {
-        std::cerr << "[ERRORE] " << log << std::endl;
+        std::cerr << "[ERROR] " << log << std::endl;
         return 1;
     }
     std::cout << "[OK] " << log << std::endl;
