@@ -19,12 +19,12 @@ struct FacialAuthConfig {
     std::string device = "/dev/video0";
     std::string recognize_sface;
     std::string detect_yunet;
-    std::string cascade_path; // Necessario per SFace o Haar
+    std::string cascade_path;
     std::string detector = "none";
     std::string method = "auto";
     std::string image_format = "jpg";
 
-    double threshold = 0.0;    // Necessario per facial_test e PAM
+    double threshold = 0.0;
     double sface_threshold = 0.0;
     double lbph_threshold = 0.0;
 
@@ -32,7 +32,7 @@ struct FacialAuthConfig {
     int width = 640;
     int height = 480;
     int sleep_ms = 100;
-    double capture_delay = 0.1;
+    double capture_delay = 0.1; // Sincronizzato con facial_capture.cpp
 
     bool debug = false;
     bool verbose = false;
