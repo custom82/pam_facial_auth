@@ -53,7 +53,7 @@ extern "C" {
 
     FA_EXPORT bool fa_load_config(FacialAuthConfig& cfg, std::string& log, const std::string& path) {
         std::ifstream file(path);
-        if (!file.is_open()) { log = "File non trovato: " + path; return false; }
+        if (!file.is_open()) { log = "Config non trovata: " + path; return false; }
         std::string line;
         while (std::getline(file, line)) {
             if (line.empty() || line[0] == '#') continue;
@@ -64,7 +64,7 @@ extern "C" {
                 value.erase(0, value.find_first_not_of(" \t"));
                 if (key == "basedir") cfg.basedir = value;
                 else if (key == "device") cfg.device = value;
-                else if (key == "detect_yunet") cfg.detect_yunet = value;
+                else if (key == "detect_yunet") { cfg.detect_yunet = value; cfg.cascade_path = value; }
                 else if (key == "training_method") cfg.method = value;
                 else if (key == "detector") cfg.detector = value;
                 else if (key == "image_format") cfg.image_format = value;
@@ -82,61 +82,63 @@ extern "C" {
     FA_EXPORT bool fa_clean_captures(const std::string& user, const FacialAuthConfig& cfg, std::string& log) {
         std::string user_dir = cfg.basedir + "/captures/" + user;
         if (fs::exists(user_dir)) fs::remove_all(user_dir);
-        log = "Cartella pulita.";
+        log = "Dati utente rimossi.";
         return true;
     }
 
     FA_EXPORT bool fa_capture_user(const std::string& user, const FacialAuthConfig& cfg, const std::string& device_path, std::string& log) {
         cv::VideoCapture cap(device_path);
-        if (!cap.isOpened()) { log = "Webcam non disponibile: " + device_path; return false; }
+        if (!cap.isOpened()) { log = "Impossibile aprire " + device_path; return false; }
 
         cv::Ptr<cv::FaceDetectorYN> detector;
         if (cfg.detector == "yunet") {
-            if (cfg.verbose) std::cout << "[INFO] Caricamento modello YuNet: " << cfg.detect_yunet << std::endl;
             detector = cv::FaceDetectorYN::create(cfg.detect_yunet, "", cv::Size(320, 320));
-            if (detector.empty()) { log = "Errore init YuNet!"; return false; }
+            if (detector.empty()) { log = "Fallito init YuNet"; return false; }
         }
 
         std::string user_dir = cfg.basedir + "/captures/" + user;
         fs::create_directories(user_dir);
         int start_idx = get_last_index(user_dir) + 1;
 
-        std::cout << "[START] Acquisizione per '" << user << "' (Richiesti: " << cfg.frames << " frame)" << std::endl;
+        std::cout << "[INFO] Inizio acquisizione per: " << user << std::endl;
 
-        int count = 0;
+        int saved = 0;
         int dropped = 0;
-        while (count < cfg.frames) {
-            cv::Mat frame; cap >> frame;
+        while (saved < cfg.frames) {
+            cv::Mat frame;
+            cap >> frame;
             if (frame.empty()) continue;
 
-            bool face_found = true;
-            if (cfg.detector == "yunet") {
+            bool face_valid = true;
+            if (detector) {
                 detector->setInputSize(frame.size());
                 cv::Mat faces;
                 detector->detect(frame, faces);
-                face_found = (faces.rows > 0);
+                // CRITICO: Salva solo se il numero di righe (volti) è > 0
+                face_valid = (faces.rows > 0);
             }
 
-            if (face_found) {
+            if (face_valid) {
                 cv::Mat resized;
                 cv::resize(frame, resized, cv::Size(cfg.width, cfg.height));
-                std::string path = user_dir + "/frame_" + std::to_string(start_idx + count) + "." + cfg.image_format;
+                std::string path = user_dir + "/frame_" + std::to_string(start_idx + saved) + "." + cfg.image_format;
                 if (cv::imwrite(path, resized)) {
-                    count++;
+                    saved++;
                 }
             } else {
                 dropped++;
             }
 
-            // OUTPUT VERBOSO IN TEMPO REALE
+            // Verbose progress bar con contatore scarti
             if (cfg.verbose || cfg.debug) {
-                std::cout << "\r[CATTURA] Salvati: " << count << "/" << cfg.frames
-                << " | Scartati (No Volto): " << dropped << std::flush;
+                std::cout << "\r[STATO] Salvati: " << saved << "/" << cfg.frames
+                << " | Scartati (No Volto): " << dropped
+                << (face_valid ? " [OK]" : " [CAMERA COPERTA]") << std::flush;
             }
 
             if (cfg.sleep_ms > 0) std::this_thread::sleep_for(std::chrono::milliseconds(cfg.sleep_ms));
         }
-        std::cout << "\n[FINISH] Salvate " << count << " immagini in " << user_dir << std::endl;
+        std::cout << "\n[SUCCESS] Sessione completata in: " << user_dir << std::endl;
         return true;
     }
 
