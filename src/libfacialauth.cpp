@@ -370,6 +370,7 @@ bool fa_capture_user(const std::string& user,
     }
 
     int saved = 0;
+    int discarded = 0;
     int start_index = next_capture_index(dir, user, cfg.image_format);
     if (start_index > 0 && (cfg.verbose || cfg.debug)) {
         std::cout << "[INFO] Immagini esistenti trovate, riparto da "
@@ -379,6 +380,7 @@ bool fa_capture_user(const std::string& user,
         cv::Mat frame;
         cap >> frame;
         if (frame.empty()) {
+            ++discarded;
             continue;
         }
 
@@ -386,6 +388,7 @@ bool fa_capture_user(const std::string& user,
         std::string err;
         if (!detect_one_face(cfg, frame, face, err)) {
             if (cfg.debug) std::cerr << "[DEBUG] " << err << "\n";
+            ++discarded;
             std::this_thread::sleep_for(std::chrono::milliseconds(cfg.sleep_ms));
             continue;
         }
@@ -401,6 +404,7 @@ bool fa_capture_user(const std::string& user,
         }
 
         ++saved;
+        std::cout << "[INFO] Salvata immagine: " << filename << "\n";
         if (cfg.verbose || cfg.debug) {
             std::cout << "[INFO] Acquisita immagine " << saved << "/" << cfg.frames
                       << " (" << filename << ")\n";
@@ -418,7 +422,11 @@ bool fa_capture_user(const std::string& user,
         return false;
     }
 
-    log = "Catturate " + std::to_string(saved) + " immagini in " + dir;
+    if (discarded > 0) {
+        std::cout << "[INFO] Immagini scartate: " << discarded << "\n";
+    }
+    log = "Catturate " + std::to_string(saved) + " immagini in " + dir +
+          " (scartate " + std::to_string(discarded) + ")";
     return true;
 }
 
