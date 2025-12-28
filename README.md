@@ -27,7 +27,7 @@ Build and install facial auth module
 How it Work
 -----------
 
-- Configure /etc/security/pam_facial.conf with opencv haar xml and other paramenter
+- Configure /etc/security/pam_facial_auth.conf with opencv haar xml and other paramenter
 
 - Capture Face Images
 

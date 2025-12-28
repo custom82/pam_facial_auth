@@ -11,7 +11,7 @@ void usage() {
     std::cout << "Usage: facial_capture -u <user> [options]\n\n"
     << "Options:\n"
     << "  -u, --user <name>       Nome utente per cui salvare le immagini\n"
-    << "  -c, --config <file>     File di configurazione (default: /etc/pam_facial_auth/pam_facial.conf)\n"
+    << "  -c, --config <file>     File di configurazione (default: /etc/security/pam_facial_auth.conf)\n"
     << "  -d, --device <path>     Device della webcam (es: /dev/video0)\n"
     << "  -w, --width <px>        Larghezza frame\n"
     << "  -h, --height <px>       Altezza frame\n"
@@ -29,7 +29,7 @@ void usage() {
 int main(int argc, char** argv) {
     if (!fa_check_root("facial_capture")) return 1;
 
-    std::string user, config_path = "/etc/pam_facial_auth/pam_facial.conf", log;
+    std::string user, config_path = "/etc/security/pam_facial_auth.conf", log;
     FacialAuthConfig cfg;
     bool force = false, clean_only = false;
 
