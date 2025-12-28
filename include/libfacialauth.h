@@ -21,7 +21,7 @@ struct FacialAuthConfig {
     std::string cascade_path;
     std::string detector = "none";
     std::string method = "auto";
-    std::string image_format = "jpg"; // Formato di default
+    std::string image_format = "jpg";
 
     double threshold = 0.0;
     double sface_threshold = 0.0;
@@ -49,6 +49,7 @@ public:
 
 extern "C" {
     FA_EXPORT bool fa_check_root(const std::string& tool_name);
+    // Cambiato il default path qui
     FA_EXPORT bool fa_load_config(FacialAuthConfig& cfg, std::string& log, const std::string& path = "/etc/security/pam_facial_auth.conf");
     FA_EXPORT std::string fa_user_model_path(const FacialAuthConfig& cfg, const std::string& user);
     FA_EXPORT bool fa_clean_captures(const std::string& user, const FacialAuthConfig& cfg, std::string& log);
