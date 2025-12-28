@@ -86,7 +86,7 @@ extern "C" {
 
     bool fa_check_root(const std::string& tool_name);
 
-    // Load configuration from file (default: /etc/pam_facial_auth/pam_facial.conf)
+    // Load configuration from file (default: /etc/security/pam_facial_auth.conf)
     bool fa_load_config(FacialAuthConfig& cfg, std::string& log, const std::string& path = "");
 
     // Always returns: /etc/security/pam_facial_auth/<user>.xml

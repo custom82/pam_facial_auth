@@ -68,7 +68,7 @@ static bool parse_double(const std::string& v, double& out) {
 }
 
 static std::string default_config_path() {
-    return "/etc/pam_facial_auth/pam_facial.conf";
+    return "/etc/security/pam_facial_auth.conf";
 }
 
 // HARD security path
