@@ -34,7 +34,7 @@ int main(int argc, char** argv) {
     if (user.empty()) { usage(); return 1; }
     fa_load_config(cfg, log, config_path);
 
-    if (!fa_train_user(user, cfg, log)) {
+    if (!fa_train_user(user, cfg, log, force)) {
         std::cerr << "[ERRORE] " << log << std::endl;
         return 1;
     }

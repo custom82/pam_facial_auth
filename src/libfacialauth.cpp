@@ -430,7 +430,10 @@ bool fa_capture_user(const std::string& user,
     return true;
 }
 
-bool fa_train_user(const std::string& user, const FacialAuthConfig& cfg, std::string& log) {
+bool fa_train_user(const std::string& user,
+                   const FacialAuthConfig& cfg,
+                   std::string& log,
+                   bool force) {
     const std::string dir = user_capture_dir(cfg, user);
     std::vector<cv::Mat> faces;
 
@@ -475,6 +478,11 @@ bool fa_train_user(const std::string& user, const FacialAuthConfig& cfg, std::st
 
     if (!ensure_secure_model_dir(err)) {
         log = err;
+        return false;
+    }
+
+    if (!force && fs::exists(model_path)) {
+        log = "Modello già esistente: " + model_path + " (usa -f per sovrascrivere)";
         return false;
     }
 
