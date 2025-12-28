@@ -12,7 +12,7 @@
 
 namespace fs = std::filesystem;
 
-// Dichiarazioni esterne per i plugin linkati nella stessa lib
+// Simboli interni per i plugin (linkati nella stessa .so)
 extern "C" std::unique_ptr<RecognizerPlugin> create_classic_plugin(const std::string& method, const FacialAuthConfig& cfg);
 extern "C" std::unique_ptr<RecognizerPlugin> create_sface_plugin(const FacialAuthConfig& cfg);
 
@@ -63,18 +63,17 @@ extern "C" {
             else if (key == "height") cfg.height = std::stoi(val);
             else if (key == "sleep_ms") { cfg.sleep_ms = std::stoi(val); cfg.capture_delay = (double)cfg.sleep_ms / 1000.0; }
             else if (key == "sface_threshold") { cfg.sface_threshold = std::stod(val); cfg.threshold = cfg.sface_threshold; }
-            else if (key == "lbph_threshold") { cfg.lbph_threshold = std::stod(val); if(cfg.method=="lbph") cfg.threshold=val; }
         }
         return true;
     }
 
     FA_EXPORT bool fa_capture_user(const std::string& user, const FacialAuthConfig& cfg, const std::string& device_path, std::string& log) {
         cv::VideoCapture cap(device_path);
-        if (!cap.isOpened()) { log = "Webcam non accessibile"; return false; }
+        if (!cap.isOpened()) { log = "Webcam off: " + device_path; return false; }
 
         cv::Ptr<cv::FaceDetectorYN> detector;
         if (cfg.detector == "yunet") {
-            if (!fs::exists(cfg.detect_yunet)) { log = "File YuNet ONNX non trovato"; return false; }
+            if (!fs::exists(cfg.detect_yunet)) { log = "YuNet ONNX non trovato"; return false; }
             detector = cv::FaceDetectorYN::create(cfg.detect_yunet, "", cv::Size(320, 320));
         }
 
@@ -95,6 +94,7 @@ extern "C" {
                 detector->detect(frame, faces);
                 if (faces.rows > 0) face_found = true;
             } else {
+                // Se il detector è "none", salva tutto
                 face_found = (cfg.detector == "none");
             }
 
@@ -108,8 +108,8 @@ extern "C" {
             }
 
             if (cfg.debug || cfg.verbose) {
-                std::cout << "\r[DEBUG] Detector: " << cfg.detector << " | Salvati: " << saved << "/" << cfg.frames
-                << " | Scartati: " << dropped << (face_found ? " [VOLTO OK]" : " [COPERTA]") << "    " << std::flush;
+                std::cout << "\r[STATO] Detector: " << cfg.detector << " | Salvati: " << saved << "/" << cfg.frames
+                << " | Saltati: " << dropped << (face_found ? " [OK]" : " [NO FACE]") << "    " << std::flush;
             }
 
             int wait = (cfg.capture_delay > 0) ? (int)(cfg.capture_delay * 1000) : cfg.sleep_ms;
@@ -148,7 +148,6 @@ extern "C" {
     FA_EXPORT bool fa_clean_captures(const std::string& user, const FacialAuthConfig& cfg, std::string& log) {
         std::string user_dir = cfg.basedir + "/captures/" + user;
         if (fs::exists(user_dir)) fs::remove_all(user_dir);
-        log = "Dati eliminati.";
         return true;
     }
 
