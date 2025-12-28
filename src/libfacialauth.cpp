@@ -355,6 +355,16 @@ bool fa_capture_user(const std::string& user,
     if (cfg.width > 0) cap.set(cv::CAP_PROP_FRAME_WIDTH, cfg.width);
     if (cfg.height > 0) cap.set(cv::CAP_PROP_FRAME_HEIGHT, cfg.height);
 
+    if (cfg.verbose || cfg.debug) {
+        std::cout << "[INFO] Avvio cattura per utente: " << user << "\n";
+        std::cout << "[INFO] Device: " << device_path
+                  << " (" << cfg.width << "x" << cfg.height << ")\n";
+        std::cout << "[INFO] Detector: " << cfg.detector
+                  << " | Formato: " << cfg.image_format
+                  << " | Numero immagini: " << cfg.frames
+                  << " | Sleep: " << cfg.sleep_ms << " ms\n";
+        std::cout << "[INFO] Directory output: " << dir << "\n";
+    }
     if (cfg.debug) {
         std::cerr << "[DEBUG] Salvataggio immagini in " << dir << "\n";
     }
@@ -382,6 +392,9 @@ bool fa_capture_user(const std::string& user,
 
         int index = start_index + saved;
         std::string filename = dir + "/" + user + "_" + std::to_string(index) + "." + cfg.image_format;
+        if (cfg.debug) {
+            std::cerr << "[DEBUG] Salvo immagine su: " << filename << "\n";
+        }
         if (!cv::imwrite(filename, face)) {
             log = "Impossibile salvare " + filename;
             return false;
@@ -389,7 +402,8 @@ bool fa_capture_user(const std::string& user,
 
         ++saved;
         if (cfg.verbose || cfg.debug) {
-            std::cout << "[INFO] Acquisita immagine " << saved << "/" << cfg.frames << "\n";
+            std::cout << "[INFO] Acquisita immagine " << saved << "/" << cfg.frames
+                      << " (" << filename << ")\n";
         }
         if (cfg.debug) {
             std::cerr << "[DEBUG] Salvata immagine: " << filename << "\n";

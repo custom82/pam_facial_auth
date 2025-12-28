@@ -77,12 +77,20 @@ int main(int argc, char** argv) {
 
     if (user.empty()) { usage(); return 1; }
 
-    if (clean_only || force) fa_clean_captures(user, cfg, log);
+    if (clean_only || force) {
+        fa_clean_captures(user, cfg, log);
+        if (cfg.verbose || cfg.debug) {
+            std::cout << "[INFO] " << log << "\n";
+        }
+    }
     if (clean_only) return 0;
 
     if (!fa_capture_user(user, cfg, cfg.device, log)) {
         std::cerr << "[ERRORE] " << log << std::endl;
         return 1;
+    }
+    if (cfg.verbose || cfg.debug) {
+        std::cout << "[INFO] " << log << "\n";
     }
     return 0;
 }
