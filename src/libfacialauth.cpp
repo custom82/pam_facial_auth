@@ -12,7 +12,6 @@
 
 namespace fs = std::filesystem;
 
-// Simboli interni per i plugin (linkati nella stessa .so)
 extern "C" std::unique_ptr<RecognizerPlugin> create_classic_plugin(const std::string& method, const FacialAuthConfig& cfg);
 extern "C" std::unique_ptr<RecognizerPlugin> create_sface_plugin(const FacialAuthConfig& cfg);
 
@@ -57,23 +56,30 @@ extern "C" {
             if (key == "basedir") cfg.basedir = val;
             else if (key == "device") cfg.device = val;
             else if (key == "detect_yunet") cfg.detect_yunet = val;
+            else if (key == "recognize_sface") { cfg.recognize_sface = val; cfg.cascade_path = val; }
             else if (key == "detector") cfg.detector = val;
+            else if (key == "training_method") cfg.method = val;
+            else if (key == "image_format") cfg.image_format = val;
             else if (key == "frames") cfg.frames = std::stoi(val);
             else if (key == "width") cfg.width = std::stoi(val);
             else if (key == "height") cfg.height = std::stoi(val);
             else if (key == "sleep_ms") { cfg.sleep_ms = std::stoi(val); cfg.capture_delay = (double)cfg.sleep_ms / 1000.0; }
-            else if (key == "sface_threshold") { cfg.sface_threshold = std::stod(val); cfg.threshold = cfg.sface_threshold; }
+            else if (key == "sface_threshold") { cfg.sface_threshold = std::stod(val); if(cfg.method == "sface" || cfg.method == "auto") cfg.threshold = cfg.sface_threshold; }
+            else if (key == "lbph_threshold") { cfg.lbph_threshold = std::stod(val); if(cfg.method == "lbph") cfg.threshold = cfg.lbph_threshold; }
+            else if (key == "debug") cfg.debug = (val == "yes");
+            else if (key == "verbose") cfg.verbose = (val == "yes");
+            else if (key == "nogui") cfg.nogui = (val == "yes");
         }
         return true;
     }
 
     FA_EXPORT bool fa_capture_user(const std::string& user, const FacialAuthConfig& cfg, const std::string& device_path, std::string& log) {
         cv::VideoCapture cap(device_path);
-        if (!cap.isOpened()) { log = "Webcam off: " + device_path; return false; }
+        if (!cap.isOpened()) { log = "Webcam off"; return false; }
 
         cv::Ptr<cv::FaceDetectorYN> detector;
         if (cfg.detector == "yunet") {
-            if (!fs::exists(cfg.detect_yunet)) { log = "YuNet ONNX non trovato"; return false; }
+            if (!fs::exists(cfg.detect_yunet)) { log = "Modello YuNet mancante"; return false; }
             detector = cv::FaceDetectorYN::create(cfg.detect_yunet, "", cv::Size(320, 320));
         }
 
@@ -83,35 +89,26 @@ extern "C" {
 
         int saved = 0, dropped = 0;
         while (saved < cfg.frames) {
-            cv::Mat frame;
-            cap >> frame;
+            cv::Mat frame; cap >> frame;
             if (frame.empty()) continue;
 
             bool face_found = false;
             if (detector) {
                 detector->setInputSize(frame.size());
-                cv::Mat faces;
-                detector->detect(frame, faces);
+                cv::Mat faces; detector->detect(frame, faces);
                 if (faces.rows > 0) face_found = true;
-            } else {
-                // Se il detector è "none", salva tutto
-                face_found = (cfg.detector == "none");
-            }
+            } else { face_found = (cfg.detector == "none"); }
 
             if (face_found) {
-                cv::Mat res;
-                cv::resize(frame, res, cv::Size(cfg.width, cfg.height));
+                cv::Mat res; cv::resize(frame, res, cv::Size(cfg.width, cfg.height));
                 std::string path = user_dir + "/frame_" + std::to_string(start_idx + saved) + "." + cfg.image_format;
                 if (cv::imwrite(path, res)) saved++;
-            } else {
-                dropped++;
-            }
+            } else { dropped++; }
 
             if (cfg.debug || cfg.verbose) {
-                std::cout << "\r[STATO] Detector: " << cfg.detector << " | Salvati: " << saved << "/" << cfg.frames
-                << " | Saltati: " << dropped << (face_found ? " [OK]" : " [NO FACE]") << "    " << std::flush;
+                std::cout << "\r[STATO] Salvati: " << saved << "/" << cfg.frames
+                << " | Scartati: " << dropped << (face_found ? " [VOLTO OK]" : " [COPERTA]") << "    " << std::flush;
             }
-
             int wait = (cfg.capture_delay > 0) ? (int)(cfg.capture_delay * 1000) : cfg.sleep_ms;
             std::this_thread::sleep_for(std::chrono::milliseconds(wait));
         }
