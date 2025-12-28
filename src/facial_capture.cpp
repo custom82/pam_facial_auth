@@ -6,24 +6,19 @@
 #include "libfacialauth.h"
 #include <iostream>
 #include <vector>
-#include <string>
 
 void usage() {
     std::cout << "Usage: facial_capture -u <user> [options]\n\n"
     << "Options:\n"
-    << "  -u, --user <name>       Utente obbligatorio\n"
-    << "  -c, --config <file>     Percorso config\n"
-    << "  -d, --device <path>     Video device (es: /dev/video0)\n"
-    << "  -w, --width <px>        Larghezza frame\n"
-    << "  -h, --height <px>       Altezza frame\n"
-    << "  -n, --num_images <n>    Immagini da scattare\n"
-    << "  -s, --sleep <sec>       Pausa tra scatti (es: 0.1)\n"
-    << "  --format <ext>          Formato file: jpg, png, bmp (default: jpg)\n"
+    << "  -u, --user <name>       Utente\n"
+    << "  -c, --config <file>     Config (default: /etc/security/pam_facial_auth.conf)\n"
+    << "  -n, --num_images <n>    Numero immagini\n"
     << "  --detector <name>       yunet, cascade, none\n"
-    << "  -f, --force             Pulisce la cartella prima della cattura\n"
-    << "  --clean, --flush        Elimina le catture dell'utente ed esce\n"
-    << "  --debug                 Mostra i percorsi dei file salvati\n"
-    << "  --nogui                 Niente anteprima video\n";
+    << "  --format <ext>          jpg, png, bmp\n"
+    << "  -f, --force             Pulisce prima di iniziare\n"
+    << "  --clean                 Elimina catture utente ed esce\n"
+    << "  --nogui                 Niente finestra video (evita crash display)\n"
+    << "  --debug                 Log dettagliati\n";
 }
 
 int main(int argc, char** argv) {
@@ -40,32 +35,24 @@ int main(int argc, char** argv) {
     fa_load_config(cfg, log, config_path);
 
     for (size_t i = 0; i < args.size(); ++i) {
-        if (args[i] == "-u" || args[i] == "--user" && i + 1 < args.size()) user = args[++i];
-        else if (args[i] == "-d" || args[i] == "--device" && i + 1 < args.size()) cfg.device = args[++i];
-        else if (args[i] == "-w" || args[i] == "--width" && i + 1 < args.size()) cfg.width = std::stoi(args[++i]);
-        else if (args[i] == "-h" || args[i] == "--height" && i + 1 < args.size()) cfg.height = std::stoi(args[++i]);
-        else if (args[i] == "-n" || args[i] == "--num_images" && i + 1 < args.size()) cfg.frames = std::stoi(args[++i]);
-        else if (args[i] == "-s" || args[i] == "--sleep" && i + 1 < args.size()) cfg.capture_delay = std::stod(args[++i]);
-        else if (args[i] == "--format" && i + 1 < args.size()) cfg.image_format = args[++i];
-        else if (args[i] == "--detector" && i + 1 < args.size()) cfg.detector = args[++i];
+        if (args[i] == "-u" || args[i] == "--user") user = args[++i];
+        else if (args[i] == "-n" || args[i] == "--num_images") cfg.frames = std::stoi(args[++i]);
+        else if (args[i] == "--detector") cfg.detector = args[++i];
+        else if (args[i] == "--format") cfg.image_format = args[++i];
         else if (args[i] == "-f" || args[i] == "--force") force = true;
-        else if (args[i] == "--clean" || args[i] == "--flush") clean_only = true;
-        else if (args[i] == "--debug") cfg.debug = true;
+        else if (args[i] == "--clean") clean_only = true;
         else if (args[i] == "--nogui") cfg.nogui = true;
-        else if (args[i] == "--help" || args[i] == "-H") { usage(); return 0; }
+        else if (args[i] == "--debug") cfg.debug = true;
     }
 
     if (user.empty()) { usage(); return 1; }
 
-    if (clean_only || force) {
-        fa_clean_captures(user, cfg, log);
-        if (clean_only) { std::cout << "[*] Dati utente " << user << " rimossi." << std::endl; return 0; }
-    }
+    if (clean_only || force) fa_clean_captures(user, cfg, log);
+    if (clean_only) return 0;
 
     if (!fa_capture_user(user, cfg, cfg.device, log)) {
         std::cerr << "[ERRORE] " << log << std::endl;
         return 1;
     }
-
     return 0;
 }
