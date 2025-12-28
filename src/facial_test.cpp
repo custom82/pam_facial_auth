@@ -67,6 +67,8 @@ int main(int argc, char** argv) {
         std::cout << "[*] Dispositivo: " << device << "\n";
     }
 
+    cfg.device = device;
+
     // Esecuzione del test (fa_test_user deve gestire l'apertura del device e il predict)
     if (!fa_test_user(user, cfg, model_path, confidence, label, log)) {
         std::cerr << "ERRORE: " << log << std::endl;
