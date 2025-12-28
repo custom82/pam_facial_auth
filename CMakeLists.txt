@@ -5,10 +5,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-# Per gestire correttamente i percorsi /usr/lib64 su Gentoo
-include(GNUInstallDirs)
-
-# 1. Ricerca Obbligatoria di OpenCV
+# 1. Ricerca Obbligatoria di OpenCV (senza IF condizionali)
 find_package(OpenCV REQUIRED COMPONENTS
     core
     imgproc
@@ -23,7 +20,8 @@ find_package(OpenCV REQUIRED COMPONENTS
 # 2. Directory degli header
 include_directories(include ${OpenCV_INCLUDE_DIRS})
 
-# 3. Target: Libreria principale (compila tutto insieme per evitare undefined references)
+# 3. Target: Libreria principale
+# Includiamo i plugin direttamente per evitare errori di linkaggio
 add_library(facialauth SHARED
     src/libfacialauth.cpp
     src/plugins/plugin_classic.cpp
@@ -36,7 +34,7 @@ add_library(pam_facial_auth MODULE src/pam_facial_auth.cpp)
 target_link_libraries(pam_facial_auth PRIVATE facialauth pam)
 set_target_properties(pam_facial_auth PROPERTIES PREFIX "")
 
-# 5. Target: Tool Binary
+# 5. Target: Eseguibili di supporto
 add_executable(facial_capture src/facial_capture.cpp)
 target_link_libraries(facial_capture PRIVATE facialauth)
 
