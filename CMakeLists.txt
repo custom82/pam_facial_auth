@@ -16,7 +16,11 @@ pkg_check_modules(PAM REQUIRED pam)
 add_definitions(-DHAVE_OPENCV=1)
 
 # 1. Libreria Core
-add_library(facialauth SHARED src/libfacialauth.cpp)
+add_library(facialauth SHARED
+    src/libfacialauth.cpp
+    src/plugins/plugin_classic.cpp
+    src/plugins/plugin_sface.cpp
+)
 target_include_directories(facialauth PUBLIC include ${OpenCV_INCLUDE_DIRS})
 target_link_libraries(facialauth PRIVATE ${OpenCV_LIBRARIES})
 

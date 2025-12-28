@@ -11,26 +11,23 @@ public:
     ClassicPlugin(const std::string& method, const FacialAuthConfig& cfg) : type(method) {
         if (method == "lbph") {
             model = cv::face::LBPHFaceRecognizer::create();
-            threshold = cfg.lbph_threshold;
+            threshold = 80.0; // Valore indicativo, usa cfg se preferisci
         } else if (method == "eigen") {
             model = cv::face::EigenFaceRecognizer::create();
-            threshold = 5000.0; // Esempio
+            threshold = 5000.0;
         } else {
             model = cv::face::FisherFaceRecognizer::create();
-            threshold = 500.0; // Esempio
+            threshold = 500.0;
         }
     }
 
-    bool load(const std::string& path) override {
-        model->read(path);
-        return true;
-    }
+    bool load(const std::string& path) override { return model->read(path), true; }
 
     bool train(const std::vector<cv::Mat>& faces, const std::vector<int>& labels, const std::string& save_path) override {
         std::vector<cv::Mat> grays;
         for(auto& f : faces) {
             cv::Mat g;
-            cv::cvtColor(f, g, cv::COLOR_BGR2GRAY);
+            if(f.channels() == 3) cv::cvtColor(f, g, cv::COLOR_BGR2GRAY); else g = f;
             grays.push_back(g);
         }
         model->train(grays, labels);
@@ -40,10 +37,15 @@ public:
 
     bool predict(const cv::Mat& face, int& label, double& confidence) override {
         cv::Mat gray;
-        cv::cvtColor(face, gray, cv::COLOR_BGR2GRAY);
+        if(face.channels() == 3) cv::cvtColor(face, gray, cv::COLOR_BGR2GRAY); else gray = face;
         model->predict(gray, label, confidence);
-        return (confidence <= threshold); // Per i classici "meno è meglio"
+        return true;
     }
 
     std::string get_name() const override { return type; }
 };
+
+// FUNZIONE BRIDGE PER IL LINKER
+extern "C" std::unique_ptr<RecognizerPlugin> create_classic_plugin(const std::string& method, const FacialAuthConfig& cfg) {
+    return std::make_unique<ClassicPlugin>(method, cfg);
+}
