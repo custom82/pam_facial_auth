@@ -9,10 +9,10 @@
 #include <string>
 
 void usage() {
-    std::cout << "Usage: facial_test -u <user> -m <path> [options]\n\n"
+    std::cout << "Usage: facial_test -u <user> [-m <path>] [options]\n\n"
     << "Options:\n"
     << "  -u, --user <user>        Utente da verificare (obbligatorio)\n"
-    << "  -m, --model <path>       File modello XML (obbligatorio)\n"
+    << "  -m, --model <path>       File modello XML (default: /etc/security/pam_facial_auth/<user>.xml)\n"
     << "  -c, --config <file>      File di configurazione (default: /etc/security/pam_facial_auth.conf)\n"
     << "  -d, --device <device>    Dispositivo webcam (es. /dev/video0)\n"
     << "  --threshold <value>      Soglia di confidenza per il match (default: 80.0)\n"
@@ -51,9 +51,13 @@ int main(int argc, char** argv) {
         else if (args[i] == "--nogui") cfg.nogui = true;
     }
 
-    if (user.empty() || !model_provided) {
-        std::cerr << "Errore: parametri -u (user) e -m (model) sono obbligatori.\n";
+    if (user.empty()) {
+        std::cerr << "Errore: parametro -u (user) è obbligatorio.\n";
         return 1;
+    }
+
+    if (!model_provided) {
+        model_path = fa_user_model_path(cfg, user);
     }
 
     double confidence = 0.0;
