@@ -72,12 +72,12 @@ public:
                        const std::vector<int>& labels,
                        const std::string& save_path,
                        std::string& err) = 0;
-                       virtual bool predict(const cv::Mat& face, int& label, double& confidence, std::string& err) = 0;
+    virtual bool predict(const cv::Mat& face, int& label, double& confidence, std::string& err) = 0;
 
-                       // Return true if confidence indicates a match, based on plugin semantics + config thresholds.
-                       virtual bool is_match(double confidence, const FacialAuthConfig& cfg) const = 0;
+    // Return true if confidence indicates a match, based on plugin semantics + config thresholds.
+    virtual bool is_match(double confidence, const FacialAuthConfig& cfg) const = 0;
 
-                       virtual std::string get_name() const = 0; // lbph/eigen/fisher/sface
+    virtual std::string get_name() const = 0; // lbph/eigen/fisher/sface
 };
 
 #ifdef __cplusplus

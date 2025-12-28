@@ -13,6 +13,7 @@
 #include <fstream>
 #include <filesystem>
 #include <thread>
+#include <chrono>
 #include <cctype>
 #include <unistd.h>
 #include <sys/stat.h>
@@ -241,4 +242,247 @@ extern "C" {
             else if (key == "detect_yunet") cfg.detect_yunet = val;
 
             // Recognizer
-            else if (key == "method") cfg.m
+            else if (key == "method") cfg.method = val;
+            else if (key == "recognize_sface") cfg.recognize_sface = val;
+
+            // Thresholds
+            else if (key == "threshold") cfg.threshold = std::stod(val);
+            else if (key == "lbph_threshold") cfg.lbph_threshold = std::stod(val);
+            else if (key == "eigen_threshold") cfg.eigen_threshold = std::stod(val);
+            else if (key == "fisher_threshold") cfg.fisher_threshold = std::stod(val);
+            else if (key == "sface_threshold") cfg.sface_threshold = std::stod(val);
+
+            // Output / debug
+            else if (key == "debug") cfg.debug = parse_bool(val);
+            else if (key == "verbose") cfg.verbose = parse_bool(val);
+            else if (key == "nogui") cfg.nogui = parse_bool(val);
+
+            // PAM behavior
+            else if (key == "ignore_failure") cfg.ignore_failure = parse_bool(val);
+        }
+
+        log = "Config caricata da " + real_path;
+        return true;
+    }
+
+    std::string fa_user_model_path(const FacialAuthConfig& /*cfg*/, const std::string& user) {
+        return model_base_dir() + "/" + user + ".xml";
+    }
+
+    bool fa_clean_captures(const std::string& user, const FacialAuthConfig& cfg, std::string& log) {
+        const fs::path dir = fs::path(cfg.basedir) / "captures" / user;
+        std::error_code ec;
+        const std::uintmax_t removed = fs::remove_all(dir, ec);
+        if (ec) {
+            log = "Errore rimozione catture: " + dir.string() + " (" + ec.message() + ")";
+            return false;
+        }
+        log = "Catture rimosse (" + std::to_string(removed) + " elementi) per " + user;
+        return true;
+    }
+
+    bool fa_capture_user(const std::string& user, const FacialAuthConfig& cfg, const std::string& device_path, std::string& log) {
+        const fs::path out_dir = fs::path(cfg.basedir) / "captures" / user;
+        std::error_code ec;
+        fs::create_directories(out_dir, ec);
+        if (ec) {
+            log = "Impossibile creare directory catture: " + out_dir.string() + " (" + ec.message() + ")";
+            return false;
+        }
+
+        cv::VideoCapture cap(device_path);
+        if (!cap.isOpened()) {
+            log = "Impossibile aprire dispositivo: " + device_path;
+            return false;
+        }
+
+        cap.set(cv::CAP_PROP_FRAME_WIDTH, cfg.width);
+        cap.set(cv::CAP_PROP_FRAME_HEIGHT, cfg.height);
+
+        int saved = 0;
+        for (int i = 0; i < cfg.frames; ++i) {
+            cv::Mat frame;
+            cap >> frame;
+            if (frame.empty()) continue;
+
+            cv::Mat face;
+            std::string err;
+            if (!detect_one_face(cfg, frame, face, err)) {
+                if (cfg.debug) std::cerr << "[DEBUG] frame " << i << ": " << err << "\n";
+                std::this_thread::sleep_for(std::chrono::milliseconds(cfg.sleep_ms));
+                continue;
+            }
+
+            const std::string filename = "f_" + std::to_string(i) + "." + cfg.image_format;
+            const fs::path out_path = out_dir / filename;
+            if (!cv::imwrite(out_path.string(), face)) {
+                if (cfg.debug) std::cerr << "[DEBUG] Salvataggio fallito: " << out_path << "\n";
+                std::this_thread::sleep_for(std::chrono::milliseconds(cfg.sleep_ms));
+                continue;
+            }
+
+            ++saved;
+            if (!cfg.nogui) {
+                cv::imshow("pam_facial_auth capture", face);
+                cv::waitKey(1);
+            }
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(cfg.sleep_ms));
+        }
+
+        log = "Catture completate: " + std::to_string(saved) + " immagini per " + user;
+        return saved > 0;
+    }
+
+    bool fa_train_user(const std::string& user, const FacialAuthConfig& cfg, std::string& log) {
+        const fs::path cap_dir = fs::path(cfg.basedir) / "captures" / user;
+        if (!fs::exists(cap_dir)) {
+            log = "Directory catture non trovata: " + cap_dir.string();
+            return false;
+        }
+
+        std::vector<cv::Mat> faces;
+        std::vector<int> labels;
+        for (const auto& entry : fs::directory_iterator(cap_dir)) {
+            if (!entry.is_regular_file()) continue;
+            cv::Mat img = cv::imread(entry.path().string());
+            if (img.empty()) continue;
+            faces.push_back(img);
+            labels.push_back(1);
+        }
+
+        if (faces.empty()) {
+            log = "Nessuna immagine valida in " + cap_dir.string();
+            return false;
+        }
+
+        std::string method = cfg.method;
+        if (method == "auto") {
+            method = cfg.recognize_sface.empty() ? "lbph" : "sface";
+        }
+
+        if (method == "sface" && cfg.recognize_sface.empty()) {
+            log = "recognize_sface mancante per metodo sface";
+            return false;
+        }
+
+        auto plugin = create_plugin_for_method(cfg, method);
+        if (!plugin) {
+            log = "Impossibile creare plugin per metodo " + method;
+            return false;
+        }
+
+        std::string err;
+        const std::string model_path = fa_user_model_path(cfg, user);
+        if (!ensure_secure_model_dir(err)) {
+            log = err;
+            return false;
+        }
+
+        if (!plugin->train(faces, labels, model_path, err)) {
+            log = "Training fallito: " + err;
+            return false;
+        }
+
+        if (!chmod0600(model_path, err)) {
+            log = err;
+            return false;
+        }
+
+        log = "Training completato con metodo " + method + " (" + std::to_string(faces.size()) + " immagini)";
+        return true;
+    }
+
+    bool fa_test_user(const std::string& user,
+                      const FacialAuthConfig& cfg,
+                      const std::string& model_path,
+                      double& confidence,
+                      int& label,
+                      std::string& log) {
+        if (!fs::exists(model_path)) {
+            log = "Modello non trovato: " + model_path;
+            return false;
+        }
+
+        std::string method = cfg.method;
+        const std::string model_alg = model_algorithm_from_xml(model_path);
+        if (!model_alg.empty()) method = model_alg;
+        if (method == "auto") method = cfg.recognize_sface.empty() ? "lbph" : "sface";
+        if (method == "sface" && cfg.recognize_sface.empty()) {
+            log = "recognize_sface mancante per metodo sface";
+            return false;
+        }
+
+        auto plugin = create_plugin_for_method(cfg, method);
+        if (!plugin) {
+            log = "Impossibile creare plugin per metodo " + method;
+            return false;
+        }
+
+        std::string err;
+        if (!plugin->load(model_path, err)) {
+            log = "Caricamento modello fallito: " + err;
+            return false;
+        }
+
+        cv::VideoCapture cap(cfg.device);
+        if (!cap.isOpened()) {
+            log = "Impossibile aprire dispositivo: " + cfg.device;
+            return false;
+        }
+
+        cap.set(cv::CAP_PROP_FRAME_WIDTH, cfg.width);
+        cap.set(cv::CAP_PROP_FRAME_HEIGHT, cfg.height);
+
+        bool has_prediction = false;
+        double best_confidence = 0.0;
+        int best_label = -1;
+
+        for (int i = 0; i < cfg.frames; ++i) {
+            cv::Mat frame;
+            cap >> frame;
+            if (frame.empty()) continue;
+
+            cv::Mat face;
+            if (!detect_one_face(cfg, frame, face, err)) {
+                if (cfg.debug) std::cerr << "[DEBUG] frame " << i << ": " << err << "\n";
+                std::this_thread::sleep_for(std::chrono::milliseconds(cfg.sleep_ms));
+                continue;
+            }
+
+            double current_confidence = 0.0;
+            int current_label = -1;
+            if (!plugin->predict(face, current_label, current_confidence, err)) {
+                if (cfg.debug) std::cerr << "[DEBUG] predict: " << err << "\n";
+                std::this_thread::sleep_for(std::chrono::milliseconds(cfg.sleep_ms));
+                continue;
+            }
+
+            has_prediction = true;
+            best_confidence = current_confidence;
+            best_label = current_label;
+
+            if (plugin->is_match(current_confidence, cfg)) {
+                confidence = current_confidence;
+                label = current_label;
+                log = "Match trovato con metodo " + method;
+                return true;
+            }
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(cfg.sleep_ms));
+        }
+
+        if (!has_prediction) {
+            log = "Nessuna predizione valida";
+            return false;
+        }
+
+        confidence = best_confidence;
+        label = best_label;
+        log = "Nessun match (metodo " + method + ")";
+        return false;
+    }
+
+#ifdef __cplusplus
+}
+#endif
