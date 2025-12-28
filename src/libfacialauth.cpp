@@ -82,10 +82,20 @@ extern "C" {
         std::string user_dir = cfg.basedir + "/captures/" + user;
         if (!fs::exists(user_dir)) { log = "Directory catture mancante"; return false; }
 
+        std::string method = cfg.method;
+        if (method == "auto") method = "lbph"; // oppure "sface" se vuoi default moderno
+
+        std::unique_ptr<RecognizerPlugin> plugin;
+        if (method == "sface") plugin = std::make_unique<SFacePlugin>(cfg);
+        else                   plugin = std::make_unique<ClassicPlugin>(method, cfg);
+
         std::vector<cv::Mat> images;
         std::vector<int> labels;
+
         for (const auto& entry : fs::directory_iterator(user_dir)) {
-            cv::Mat img = cv::imread(entry.path().string(), cv::IMREAD_GRAYSCALE);
+            // per sface meglio caricare a colori (BGR) e poi resize 112x112 nel plugin
+            int mode = (method == "sface") ? cv::IMREAD_COLOR : cv::IMREAD_GRAYSCALE;
+            cv::Mat img = cv::imread(entry.path().string(), mode);
             if (!img.empty()) {
                 images.push_back(img);
                 labels.push_back(1);
@@ -94,23 +104,15 @@ extern "C" {
 
         if (images.empty()) { log = "Nessuna immagine valida trovata"; return false; }
 
-        cv::Ptr<cv::face::LBPHFaceRecognizer> model = cv::face::LBPHFaceRecognizer::create();
-        model->train(images, labels);
-
         fs::create_directories(cfg.modeldir);
-        model->write(fa_user_model_path(cfg, user));
-        log = "Modello salvato con successo";
+
+        std::string out = cfg.modeldir + "/" + user + ".xml";
+        if (!plugin->train(images, labels, out)) {
+            log = "Training fallito";
+            return false;
+        }
+
+        log = "Modello XML salvato: " + out + " (algorithm=" + plugin->get_name() + ")";
         return true;
     }
 
-    bool fa_clean_captures(const std::string& user, const FacialAuthConfig& cfg, std::string& log) {
-        fs::remove_all(cfg.basedir + "/captures/" + user);
-        return true;
-    }
-
-    bool fa_test_user(const std::string& user, const FacialAuthConfig& cfg, const std::string& model_path, double& confidence, int& label, std::string& log) {
-        log = "Modulo test non ancora implementato.";
-        return false;
-    }
-
-}
