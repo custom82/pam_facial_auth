@@ -22,7 +22,7 @@ struct FacialAuthConfig {
     std::string cascade_path;
     std::string detector;
     std::string method;
-    std::string image_format = "jpg"; // Default aggiunto qui
+    std::string image_format = "jpg";
 
     double threshold = 0.0;
     double sface_threshold = 0.0;
