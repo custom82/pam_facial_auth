@@ -8,12 +8,31 @@
 #include <fstream>
 #include <filesystem>
 #include <thread>
+#include <regex>
 #include <unistd.h>
 #include <opencv2/objdetect.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/highgui.hpp>
 
 namespace fs = std::filesystem;
+
+// Funzione interna per trovare l'ultimo indice salvato
+int get_last_index(const std::string& dir) {
+    int max_idx = -1;
+    if (!fs::exists(dir)) return max_idx;
+    std::regex re("frame_(\\d+)\\.\\w+");
+    for (const auto& entry : fs::directory_iterator(dir)) {
+        std::smatch match;
+        std::string fname = entry.path().filename().string();
+        if (std::regex_match(fname, match, re)) {
+            try {
+                int idx = std::stoi(match[1].str());
+                if (idx > max_idx) max_idx = idx;
+            } catch (...) {}
+        }
+    }
+    return max_idx;
+}
 
 extern "C" {
 
@@ -58,9 +77,8 @@ extern "C" {
     }
 
     FA_EXPORT bool fa_capture_user(const std::string& user, const FacialAuthConfig& cfg, const std::string& device_path, std::string& log) {
-        // Validazione Detector
         if (cfg.detector != "yunet" && cfg.detector != "cascade" && cfg.detector != "none") {
-            log = "Detector '" + cfg.detector + "' non supportato. Usa: yunet, cascade, none.";
+            log = "Detector '" + cfg.detector + "' non supportato.";
             return false;
         }
 
@@ -71,17 +89,20 @@ extern "C" {
         cv::CascadeClassifier detector_cascade;
 
         if (cfg.detector == "yunet") {
-            if (cfg.detect_yunet.empty() || !fs::exists(cfg.detect_yunet)) { log = "Modello YuNet mancante."; return false; }
+            if (cfg.detect_yunet.empty() || !fs::exists(cfg.detect_yunet)) { log = "Modello YuNet non trovato."; return false; }
             detector_yn = cv::FaceDetectorYN::create(cfg.detect_yunet, "", cv::Size(320, 320));
         } else if (cfg.detector == "cascade") {
-            if (cfg.cascade_path.empty() || !detector_cascade.load(cfg.cascade_path)) { log = "File Cascade XML mancante o invalido."; return false; }
+            if (cfg.cascade_path.empty() || !detector_cascade.load(cfg.cascade_path)) { log = "File Cascade XML non trovato."; return false; }
         }
 
         std::string user_dir = cfg.basedir + "/captures/" + user;
         fs::create_directories(user_dir);
 
-        int saved = 0;
-        while (saved < cfg.frames) {
+        // Feature: numerazione continua
+        int start_idx = get_last_index(user_dir) + 1;
+        int current_saved = 0;
+
+        while (current_saved < cfg.frames) {
             cv::Mat frame; cap >> frame;
             if (frame.empty()) continue;
 
@@ -99,13 +120,13 @@ extern "C" {
 
             if (face_found) {
                 cv::Mat res; cv::resize(frame, res, cv::Size(cfg.width, cfg.height));
-                std::string img_path = user_dir + "/frame_" + std::to_string(saved) + "." + cfg.image_format;
+                std::string img_path = user_dir + "/frame_" + std::to_string(start_idx + current_saved) + "." + cfg.image_format;
                 cv::imwrite(img_path, res);
-                saved++;
+                current_saved++;
                 if (cfg.debug) std::cout << "\n[DEBUG] Salvato: " << img_path << std::flush;
             }
 
-            std::cout << "\r[*] Cattura (" << cfg.detector << "): " << saved << "/" << cfg.frames << std::flush;
+            std::cout << "\r[*] Cattura (" << cfg.detector << "): " << current_saved << "/" << cfg.frames << " (Inizio da: " << start_idx << ")" << std::flush;
             if (!cfg.nogui) {
                 cv::imshow("Cattura Volto", frame);
                 if (cv::waitKey(1) == 27) break;

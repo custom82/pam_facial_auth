@@ -16,12 +16,12 @@ void usage() {
     << "  -d, --device <path>     Webcam device\n"
     << "  -w, --width <px>        Larghezza\n"
     << "  -h, --height <px>       Altezza\n"
-    << "  -n, --num_images <n>    Immagini\n"
-    << "  -s, --sleep <sec>       Pausa\n"
+    << "  -n, --num_images <n>    Numero di immagini da acquisire in questa sessione\n"
+    << "  -s, --sleep <sec>       Pausa tra scatti\n"
     << "  --detector <name>       yunet, cascade, none\n"
-    << "  -f, --force             Pulisce prima\n"
+    << "  -f, --force             Pulisce la cartella dell'utente prima di iniziare\n"
     << "  --debug                 Output debug\n"
-    << "  --nogui                 Niente finestra video\n";
+    << "  --nogui                 Disabilita finestra video\n";
 }
 
 int main(int argc, char** argv) {
@@ -52,7 +52,12 @@ int main(int argc, char** argv) {
     }
 
     if (user.empty()) { usage(); return 1; }
-    if (force) fa_clean_captures(user, cfg, log);
+
+    // Se -f è specificato, pialliamo la directory per ricominciare da zero (indice 0)
+    if (force) {
+        if (cfg.debug) std::cout << "[INFO] Flag -f rilevato: pulizia cartella utente..." << std::endl;
+        fa_clean_captures(user, cfg, log);
+    }
 
     if (!fa_capture_user(user, cfg, cfg.device, log)) {
         std::cerr << "\n[ERRORE] " << log << std::endl;
