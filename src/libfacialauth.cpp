@@ -80,6 +80,35 @@ static std::string user_capture_dir(const FacialAuthConfig& cfg, const std::stri
     return cfg.basedir + "/images/" + user;
 }
 
+static int next_capture_index(const std::string& dir,
+                              const std::string& user,
+                              const std::string& image_format) {
+    if (!fs::exists(dir)) return 0;
+
+    int max_index = -1;
+    const std::string prefix = user + "_";
+
+    for (const auto& entry : fs::directory_iterator(dir)) {
+        if (!entry.is_regular_file()) continue;
+
+        const fs::path path = entry.path();
+        if (path.extension() != ("." + image_format)) continue;
+
+        const std::string stem = path.stem().string();
+        if (stem.rfind(prefix, 0) != 0) continue;
+
+        const std::string index_str = stem.substr(prefix.size());
+        try {
+            int index = std::stoi(index_str);
+            if (index > max_index) max_index = index;
+        } catch (...) {
+            continue;
+        }
+    }
+
+    return max_index + 1;
+}
+
 static bool ensure_secure_model_dir(std::string& err) {
     const std::string dir = model_base_dir();
     std::error_code ec;
@@ -326,7 +355,16 @@ bool fa_capture_user(const std::string& user,
     if (cfg.width > 0) cap.set(cv::CAP_PROP_FRAME_WIDTH, cfg.width);
     if (cfg.height > 0) cap.set(cv::CAP_PROP_FRAME_HEIGHT, cfg.height);
 
+    if (cfg.debug) {
+        std::cerr << "[DEBUG] Salvataggio immagini in " << dir << "\n";
+    }
+
     int saved = 0;
+    int start_index = next_capture_index(dir, user, cfg.image_format);
+    if (start_index > 0 && (cfg.verbose || cfg.debug)) {
+        std::cout << "[INFO] Immagini esistenti trovate, riparto da "
+                  << start_index << "\n";
+    }
     for (int i = 0; i < cfg.frames; ++i) {
         cv::Mat frame;
         cap >> frame;
@@ -342,13 +380,20 @@ bool fa_capture_user(const std::string& user,
             continue;
         }
 
-        std::string filename = dir + "/" + user + "_" + std::to_string(saved) + "." + cfg.image_format;
+        int index = start_index + saved;
+        std::string filename = dir + "/" + user + "_" + std::to_string(index) + "." + cfg.image_format;
         if (!cv::imwrite(filename, face)) {
             log = "Impossibile salvare " + filename;
             return false;
         }
 
         ++saved;
+        if (cfg.verbose || cfg.debug) {
+            std::cout << "[INFO] Acquisita immagine " << saved << "/" << cfg.frames << "\n";
+        }
+        if (cfg.debug) {
+            std::cerr << "[DEBUG] Salvata immagine: " << filename << "\n";
+        }
         if (cfg.sleep_ms > 0) {
             std::this_thread::sleep_for(std::chrono::milliseconds(cfg.sleep_ms));
         }
