@@ -15,24 +15,24 @@
 #define FA_EXPORT __attribute__((visibility("default")))
 
 struct FacialAuthConfig {
-    std::string basedir;
-    std::string device;
+    std::string basedir = "/var/lib/pam_facial_auth";
+    std::string device = "/dev/video0";
     std::string recognize_sface;
     std::string detect_yunet;
     std::string cascade_path;
     std::string detector;
-    std::string method;
+    std::string method = "auto";
     std::string image_format = "jpg";
 
     double threshold = 0.0;
     double sface_threshold = 0.0;
     double lbph_threshold = 0.0;
 
-    int frames = 0;
-    int width = 0;
-    int height = 0;
-    int sleep_ms = 0;
-    double capture_delay = 0.0;
+    int frames = 30;
+    int width = 640;
+    int height = 480;
+    int sleep_ms = 100;
+    double capture_delay = 0.1;
 
     bool debug = false;
     bool verbose = false;
