@@ -3,33 +3,39 @@ project(pam_facial_auth LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-# Forza l'output dei file binari nella cartella di build corrente
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
+# 1. Ricerca Obbligatoria di OpenCV
+# Se non viene trovata, CMake si ferma qui con un errore.
+find_package(OpenCV REQUIRED COMPONENTS
+    core
+    imgproc
+    imgcodecs
+    videoio
+    highgui
+    objdetect
+    face
+    dnn
+)
 
-# Cerca le dipendenze
-find_package(OpenCV REQUIRED COMPONENTS core imgproc objdetect videoio highgui face)
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(PAM REQUIRED pam)
+# 2. Directory degli header
+include_directories(include ${OpenCV_INCLUDE_DIRS})
 
-add_definitions(-DHAVE_OPENCV=1)
-
-# 1. Libreria Core
+# 3. Target: Libreria principale (include i plugin)
+# Compiliamo i plugin direttamente dentro la lib per semplicità di linkaggio
 add_library(facialauth SHARED
     src/libfacialauth.cpp
     src/plugins/plugin_classic.cpp
     src/plugins/plugin_sface.cpp
 )
-target_include_directories(facialauth PUBLIC include ${OpenCV_INCLUDE_DIRS})
-target_link_libraries(facialauth PRIVATE ${OpenCV_LIBRARIES})
+target_link_libraries(facialauth PRIVATE ${OpenCV_LIBS})
 
-# 2. Modulo PAM (Plugin)
+# 4. Target: Modulo PAM
 add_library(pam_facial_auth MODULE src/pam_facial_auth.cpp)
-target_link_libraries(pam_facial_auth PRIVATE facialauth ${PAM_LIBRARIES})
-set_target_properties(pam_facial_auth PROPERTIES PREFIX "" LIBRARY_OUTPUT_NAME "pam_facial_auth")
+target_link_libraries(pam_facial_auth PRIVATE facialauth pam)
+set_target_properties(pam_facial_auth PROPERTIES PREFIX "")
 
-# 3. Tool CLI
+# 5. Target: Tool Binary
 add_executable(facial_capture src/facial_capture.cpp)
 target_link_libraries(facial_capture PRIVATE facialauth)
 
@@ -38,3 +44,8 @@ target_link_libraries(facial_training PRIVATE facialauth)
 
 add_executable(facial_test src/facial_test.cpp)
 target_link_libraries(facial_test PRIVATE facialauth)
+
+# 6. Installazione (Standard Gentoo/Linux)
+install(TARGET_LIBRARY facialauth DESTINATION /usr/lib64)
+install(TARGETS pam_facial_auth DESTINATION /lib64/security)
+install(TARGETS facial_capture facial_training facial_test DESTINATION /usr/bin)
