@@ -4,9 +4,10 @@ facial_capture \- capture face images for training facial recognition models
 .SH SYNOPSIS
 .B facial_capture
 \-u USER
-[\-d DEVICE] [\-w WIDTH] [\-h HEIGHT] [\-n FRAMES]
-[\-s MS] [\-f] [\-\-clean] [\-\-reset]
-[\-g] [\-v] [\-c FILE] [\-\-format EXT]
+[\-d DEVICE] [\-w WIDTH] [\-h HEIGHT] [\-n NUM]
+[\-s SEC] [\-f] [\-\-clean|\-\-flush]
+[\-\-nogui] [\-v] [\-\-debug] [\-\-detector NAME] [\-H]
+[\-c FILE]
 .SH DESCRIPTION
 The
 .B facial_capture
@@ -32,35 +33,38 @@ Set capture frame width.
 .BR \-h " " HEIGHT ", " \-\-height=HEIGHT
 Set capture frame height.
 .TP
-.BR \-n " " FRAMES ", " \-\-frames=FRAMES
+.BR \-n " " NUM ", " \-\-num_images=NUM
 Number of face images to capture.
 .TP
-.BR \-s " " MS ", " \-\-sleep=MS
-Delay in milliseconds between captures.
+.BR \-s " " SEC ", " \-\-sleep=SEC
+Delay in seconds between captures.
 .TP
 .BR \-f ", " \-\-force
 Force overwrite of existing images.
 .TP
-.BR \-g ", " \-\-nogui
-Disable any graphical output.
+.BR \-\-nogui
+Disable GUI output.
 .TP
-.BR \-\-clean
-Remove all images for the specified user.
+.BR \-\-clean ", " \-\-flush
+Remove all images for the specified user and exit.
 .TP
-.BR \-\-reset
-Remove the user model and all images.
+.BR \-v ", " \-\-verbose
+Enable verbose output.
 .TP
-.BR \-v ", " \-\-debug
-Enable verbose/debug mode.
+.BR \-\-debug
+Enable debug output.
 .TP
 .BR \-c " " FILE ", " \-\-config=FILE
 Use an alternate configuration file.
 .TP
-.BR \-\-format " " EXT
-Set the output image format (jpg, png, etc.).
+.BR \-\-detector " " NAME
+Select face detector (yunet, haar).
+.TP
+.BR \-H ", " \-\-help
+Show help and exit.
 .SH FILES
 .TP
-.I /etc/security/pam_facial.conf
+.I /etc/pam_facial_auth/pam_facial.conf
 Default configuration file.
 .SH SEE ALSO
 .BR facial_training (1),
