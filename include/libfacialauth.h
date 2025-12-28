@@ -9,18 +9,20 @@
 #include <string>
 #include <vector>
 #include <memory>
-
-#ifdef HAVE_OPENCV
 #include <opencv2/opencv.hpp>
 #include <opencv2/face.hpp>
-#endif
+
+// Macro per la visibilità dei simboli su Linux
+#define FA_EXPORT __attribute__((visibility("default")))
 
 struct FacialAuthConfig {
     std::string basedir = "/var/lib/pam_facial_auth";
     std::string cascade_path = "/usr/share/opencv4/haarcascades/haarcascade_frontalface_default.xml";
-    std::string detector = "haarcascade";
-    std::string method = "lbph"; // Metodo di riconoscimento
+    std::string recognize_sface = "/usr/share/opencv4/networks/face_recognizer_fast.onnx";
+    std::string method = "lbph";
     double threshold = 80.0;
+    double sface_threshold = 0.36;
+    double lbph_threshold = 80.0;
     int frames = 20;
     int width = 200;
     int height = 200;
@@ -30,7 +32,6 @@ struct FacialAuthConfig {
     bool nogui = false;
 };
 
-// Interfaccia per i plugin di riconoscimento
 class RecognizerPlugin {
 public:
     virtual ~RecognizerPlugin() = default;
@@ -40,17 +41,15 @@ public:
     virtual std::string get_name() const = 0;
 };
 
-// Funzioni di utilità
-bool fa_check_root(const std::string& tool_name);
-bool fa_load_config(FacialAuthConfig& cfg, std::string& log, const std::string& path = "/etc/security/pam_facial_auth.conf");
-std::string fa_user_model_path(const FacialAuthConfig& cfg, const std::string& user);
+// Esportazione funzioni per i tool e il modulo PAM
+extern "C" {
+    FA_EXPORT bool fa_check_root(const std::string& tool_name);
+    FA_EXPORT bool fa_load_config(FacialAuthConfig& cfg, std::string& log, const std::string& path = "/etc/security/pam_facial_auth.conf");
+    FA_EXPORT std::string fa_user_model_path(const FacialAuthConfig& cfg, const std::string& user);
+    FA_EXPORT bool fa_clean_captures(const std::string& user, const FacialAuthConfig& cfg, std::string& log);
+    FA_EXPORT bool fa_capture_user(const std::string& user, const FacialAuthConfig& cfg, const std::string& device_path, std::string& log);
+    FA_EXPORT bool fa_train_user(const std::string& user, const FacialAuthConfig& cfg, std::string& log);
+    FA_EXPORT bool fa_test_user(const std::string& user, const FacialAuthConfig& cfg, const std::string& model_path, double& confidence, int& label, std::string& log);
+}
 
-// Gestione dati
-bool fa_clean_captures(const std::string& user, const FacialAuthConfig& cfg, std::string& log);
-bool fa_capture_user(const std::string& user, const FacialAuthConfig& cfg, const std::string& device_path, std::string& log);
-
-// Training e Test (Aggiornati per supportare i metodi/plugin)
-bool fa_train_user(const std::string& user, const FacialAuthConfig& cfg, std::string& log);
-bool fa_test_user(const std::string& user, const FacialAuthConfig& cfg, const std::string& model_path, double& confidence, int& label, std::string& log);
-
-#endif
+#endif // LIBFACIALAUTH_H
