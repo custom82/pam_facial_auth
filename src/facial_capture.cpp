@@ -7,8 +7,12 @@
 #include <iostream>
 #include <vector>
 
+namespace {
+constexpr const char* kDefaultConfigPath = "/etc/security/pam_facial_auth/pam_facial_auth.conf";
+}
+
 void usage() {
-    const std::string default_config_path = fa_get_default_config_path();
+    const std::string default_config_path = kDefaultConfigPath;
 
     std::cout << "Usage: facial_capture -u <user> [options]\n\n"
     << "Options:\n"
@@ -31,7 +35,7 @@ void usage() {
 int main(int argc, char** argv) {
     if (!fa_check_root("facial_capture")) return 1;
 
-    std::string user, config_path = fa_get_default_config_path(), log;
+    std::string user, config_path = kDefaultConfigPath, log;
     FacialAuthConfig cfg;
     bool force = false, clean_only = false;
 
