@@ -19,7 +19,7 @@ void usage() {
 int main(int argc, char** argv) {
     if (!fa_check_root("facial_training")) return 1;
 
-    std::string user, log, config_path = "/etc/security/pam_facial_auth.conf";
+    std::string user, log, config_path = "/etc/security/pam_facial_auth/pam_facial_auth.conf";
     FacialAuthConfig cfg;
     bool force = false;
 
