@@ -13,7 +13,7 @@ void usage() {
     << "Options:\n"
     << "  -u, --user <user>        User to verify (required)\n"
     << "  -m, --model <path>       XML model file (default: /etc/security/pam_facial_auth/<user>.xml)\n"
-    << "  -c, --config <file>      Configuration file (default: /etc/security/pam_facial_auth.conf)\n"
+    << "  -c, --config <file>      Configuration file (default: /etc/security/pam_facial_auth/pam_facial_auth.conf)\n"
     << "  -d, --device <device>    Webcam device (e.g., /dev/video0)\n"
     << "  --threshold <value>      Match confidence threshold (default: 80.0)\n"
     << "  -v, --verbose            Verbose mode\n"
@@ -27,7 +27,7 @@ int main(int argc, char** argv) {
     std::string user;
     std::string model_path;
     std::string device = "/dev/video0";
-    std::string config_path = "/etc/security/pam_facial_auth.conf";
+    std::string config_path = "/etc/security/pam_facial_auth/pam_facial_auth.conf";
 
     FacialAuthConfig cfg;
     std::string log;
