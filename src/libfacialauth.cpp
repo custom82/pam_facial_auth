@@ -268,8 +268,13 @@ bool fa_load_config(FacialAuthConfig& cfg, std::string& log, const std::string& 
 
     std::ifstream file(real_path);
     if (!file.is_open()) {
-        log = "Config not found in " + real_path + " (using defaults)";
-        return true;
+        if (path.empty()) {
+            log = "Config not found in " + real_path + " (using defaults)";
+            return true;
+        }
+
+        log = "Config not found in " + real_path;
+        return false;
     }
 
     std::string line;
