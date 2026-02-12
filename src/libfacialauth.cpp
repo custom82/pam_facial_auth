@@ -381,7 +381,7 @@ bool fa_capture_user(const std::string& user,
         std::cout << "[INFO] Existing images found, resuming from "
                   << start_index << "\n";
     }
-    for (int i = 0; i < cfg.frames; ++i) {
+    while (saved < cfg.frames) {
         cv::Mat frame;
         cap >> frame;
         if (frame.empty()) {
