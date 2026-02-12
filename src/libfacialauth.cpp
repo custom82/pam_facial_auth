@@ -286,7 +286,7 @@ bool fa_load_config(FacialAuthConfig& cfg, std::string& log, const std::string& 
         // Paths
         if (key == "basedir") cfg.basedir = val;
         else if (key == "cascade_path") cfg.cascade_path = val;
-        else if (key == "detect_yunet") cfg.detect_yunet = val;
+        else if (key == "detect_yunet" || key == "detector_yunet") cfg.detect_yunet = val;
         else if (key == "recognize_sface") cfg.recognize_sface = val;
 
         // Capture
