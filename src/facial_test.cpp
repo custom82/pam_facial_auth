@@ -36,15 +36,20 @@ int main(int argc, char** argv) {
     std::vector<std::string> args(argv + 1, argv + argc);
     if (args.empty()) { usage(); return 1; }
 
-    // Load base configuration
-    fa_load_config(cfg, log, config_path);
+    for (size_t i = 0; i < args.size(); ++i) {
+        if ((args[i] == "-c" || args[i] == "--config") && i + 1 < args.size()) config_path = args[++i];
+    }
+
+    if (!fa_load_config(cfg, log, config_path)) {
+        std::cerr << "ERROR: " << log << std::endl;
+        return 1;
+    }
 
     // Parse CLI parameters (override config)
     for (size_t i = 0; i < args.size(); ++i) {
         if (args[i] == "-h" || args[i] == "--help") { usage(); return 0; }
         else if ((args[i] == "-u" || args[i] == "--user") && i + 1 < args.size()) user = args[++i];
         else if ((args[i] == "-m" || args[i] == "--model") && i + 1 < args.size()) { model_path = args[++i]; model_provided = true; }
-        else if ((args[i] == "-c" || args[i] == "--config") && i + 1 < args.size()) config_path = args[++i];
         else if ((args[i] == "-d" || args[i] == "--device") && i + 1 < args.size()) device = args[++i];
         else if (args[i] == "--threshold" && i + 1 < args.size()) cfg.threshold = std::stod(args[++i]);
         else if (args[i] == "-v" || args[i] == "--verbose") cfg.verbose = true;

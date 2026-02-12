@@ -43,7 +43,10 @@ int main(int argc, char** argv) {
     for (size_t i = 0; i < args.size(); ++i) {
         if ((args[i] == "-c" || args[i] == "--config") && i + 1 < args.size()) config_path = args[++i];
     }
-    fa_load_config(cfg, log, config_path);
+    if (!fa_load_config(cfg, log, config_path)) {
+        std::cerr << "[ERROR] " << log << std::endl;
+        return 1;
+    }
 
     for (size_t i = 0; i < args.size(); ++i) {
         if (args[i] == "--help" || args[i] == "-H") {
