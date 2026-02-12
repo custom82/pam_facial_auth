@@ -8,10 +8,12 @@
 #include <vector>
 
 void usage() {
+    const std::string default_config_path = fa_get_default_config_path();
+
     std::cout << "Usage: facial_capture -u <user> [options]\n\n"
     << "Options:\n"
     << "  -u, --user <name>       User name to save images for\n"
-    << "  -c, --config <file>     Configuration file (default: /etc/security/pam_facial_auth/pam_facial_auth.conf)\n"
+    << "  -c, --config <file>     Configuration file (default: " << default_config_path << ")\n"
     << "  -d, --device <path>     Webcam device (e.g., /dev/video0)\n"
     << "  -w, --width <px>        Frame width\n"
     << "  -h, --height <px>       Frame height\n"
@@ -29,7 +31,7 @@ void usage() {
 int main(int argc, char** argv) {
     if (!fa_check_root("facial_capture")) return 1;
 
-    std::string user, config_path = "/etc/security/pam_facial_auth/pam_facial_auth.conf", log;
+    std::string user, config_path = fa_get_default_config_path(), log;
     FacialAuthConfig cfg;
     bool force = false, clean_only = false;
 
