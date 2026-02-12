@@ -40,7 +40,7 @@ struct FacialAuthConfig {
 
     // Capture parameters
     std::string image_format = "jpg";
-    int frames = 30;                // number of frames to capture / try
+    int frames = 30;                // number of valid face images to capture
     int sleep_ms = 100;             // delay between frames in ms (for capture/test)
 
     // Thresholds
